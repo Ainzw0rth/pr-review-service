@@ -2,7 +2,8 @@
 
 **Status:** agreed workflow implemented locally; real repository/model/Sheet activation is still pending. See ../README.md and implementation-status.md for setup and verified scope.
 **Last updated:** 2026-10-06.
-**Initial organization/repository:** `ganeshait/AnyOne-2.0` (confirm exact repository identifier during setup).
+**Initial GitHub repository:** `MarkAny-GaneshaIT/AnyOne-2.0`. Requested reviewer: `Ainzw0rth`.
+Dashboard organization: `ganeshait` (independent of the GitHub organization name).
 **Configured reviewer:** Louis's GitHub account; exact username must be configured before launch.
 
 This guide describes how developers and reviewers should use the service after its connections and live writes are enabled. GitHub is the home for findings, questions, replies and formal reviews. The dashboard displays review-job progress only. The Google Sheet is the task/requirements source of truth; the service may update only its configured issue-status field.
@@ -225,7 +226,7 @@ No findings, diffs, discussion system, raw model transcripts or credentials are 
 
 ## 11. Admin setup checklist before inviting the team
 
-- [ ] Verify `ganeshait/AnyOne-2.0` and configure Louis's exact GitHub username.
+- [x] Verify `MarkAny-GaneshaIT/AnyOne-2.0` and configure requested reviewer `Ainzw0rth`.
 - [ ] Configure authentication through Louis's GitHub account with the required, scoped permissions.
 - [ ] Verify actual GitHub behavior for comment-only and request-changes reviews, including requested-reviewer changes and follow-up re-requests.
 - [ ] Configure label names and mutual-exclusion behavior.

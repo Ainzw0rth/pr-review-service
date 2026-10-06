@@ -3,7 +3,9 @@
 ## Local release
 
 Implemented and running on this VPS at **127.0.0.1:8040**. Expected public hostname:
-**auto-reviewer.ainzw0rth.xyz**. Cloudflare/DNS routing has not been modified.
+**auto-reviewer.ainzw0rth.xyz**. Public health/login now return HTTP 200. User changed the
+Cloudflare origin to `http://auto-reviewer-web-1:8040`; the VPS-local Compose override connects
+the web service to the tunnel's existing Docker network.
 
 - Django accounts, administrator configuration and organization-isolated queue dashboard.
 - Private admin bootstrap, invitation/reset/revocation flows; read-only member access.
@@ -22,7 +24,7 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 
 ## Verification
 
-- Full Django suite: **171 tests passed** (before final documentation-only changes).
+- Full Django suite: **175 tests passed** (before final documentation-only changes).
 - Ruff check and formatting check passed.
 - Django deployment check passed with production settings; migrations consistent.
 - Production image built and running web service is healthy; proxied HTTPS login returns 200.
@@ -34,16 +36,30 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 No real GitHub comments, paid provider calls or Google Sheet writes were used in verification.
 Mocked external integrations are not evidence of real account/model availability.
 
+## External activation progress
+
+- Configured `MarkAny-GaneshaIT/AnyOne-2.0`, requested reviewer `Ainzw0rth`, using the user's
+  expressly authorized GitHub CLI credential (encrypted application storage).
+- Verified live GitHub identity and reads; fixed double decompression of real gzip responses.
+- Created the three workflow labels. Signed webhook registered; GitHub ping delivery HTTP 200.
+- Required check configured as `required`, the existing CI aggregate job. The sampled PR's
+  pending/missing aggregate correctly blocked clearance. No branch protection changed;
+  GitHub's protection API reported a plan restriction.
+- Read supplied Sheet; confirmed New Timeline tab/status mapping with user. Added explicit
+  header-row support with absolute-cell regression tests. Private proposal saved under `var/`.
+- Sheet writes remain disabled: service-account credential and confirmed task/PR sets missing.
+- Fresh unused administrator setup link stored privately. No password configured yet.
+
 ## Activation inputs still required
 
-1. Connect the public tunnel hostname to the appropriate application origin/network.
-2. Complete private administrator password setup.
-3. Configure exact GitHub username/repository and privately supplied authorized credentials.
-4. Register and test the signed webhook.
-5. Configure actual provider model IDs, API credentials and required tests/checks.
-6. Optionally inspect and confirm the real Sheet schema/status vocabulary/task links.
-7. Verify GitHub formal-review/reviewer-removal behavior in a dedicated test repository.
-8. Enable `LIVE_WRITES=1` and recreate services only after those checks.
+1. Complete private administrator password setup.
+2. Configure and verify actual provider model IDs and API credentials.
+3. Optionally provide the Google service-account credential and confirm task/required-PR links;
+   recheck the Sheet schema/dropdown through the authenticated API.
+4. Verify GitHub formal-review/reviewer-removal behavior in a dedicated test repository.
+5. Enable `LIVE_WRITES=1` and recreate services only after rollout checks.
+
+Detailed steps: [operator setup](operator-setup.md).
 
 **Provider subscription OAuth remains unavailable:** no supported OAuth client/refresh contract
 has been configured/verified for this service. API adapters are implemented; personal session-token

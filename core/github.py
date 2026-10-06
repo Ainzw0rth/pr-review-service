@@ -84,9 +84,13 @@ class GitHub:
                     if len(raw) > MAX_RESPONSE_BYTES:
                         raise IntegrationError("GitHub response exceeds safe context limit.")
                 # Streaming responses are reconstructed after the bounded read.
+                # iter_bytes() already decoded compression; do not decode it twice.
+                headers = dict(response.headers)
+                headers.pop("content-encoding", None)
+                headers.pop("content-length", None)
                 return httpx.Response(
                     response.status_code,
-                    headers=response.headers,
+                    headers=headers,
                     content=bytes(raw),
                     request=response.request,
                 )

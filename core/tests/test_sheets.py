@@ -8,6 +8,41 @@ from core.sheets import sync_status
 
 
 class SheetTests(TestCase):
+    def test_title_rows_preserve_absolute_status_cell_and_moved_row(self):
+        self.config["header_row"] = 3
+        prefix = [["Timeline title"], ["Subtitle"]]
+        self.github.pull.side_effect = lambda number: {"number": number, "merged": True}
+        with patch("core.sheets.Sheets") as cls:
+            sheet = cls.return_value.__enter__.return_value
+            sheet.values.side_effect = [
+                prefix + deepcopy(self.rows),
+                prefix + [self.rows[0], self.rows[2], self.rows[1]],
+            ]
+            sheet.allowed_statuses.return_value = set(self.config["statuses"].values())
+            sync_status(self.github, self.repo, 1, "merged")
+            sheet.update.assert_called_once_with("Tasks!B5", "Complete")
+
+    def test_inspection_skips_title_and_section_rows_for_dropdown_sample(self):
+        from core.sheets import inspect_mapping
+
+        self.config["header_row"] = 3
+        with patch("core.sheets.Sheets") as cls:
+            sheet = cls.return_value.__enter__.return_value
+            sheet.values.return_value = [["Title"], [], self.rows[0], ["Section"], self.rows[1]]
+            sheet.allowed_statuses.return_value = {"Review", "Changes", "Ready", "Complete"}
+            result = inspect_mapping(self.repo)
+            self.assertEqual(result["dropdown_sample_cell"], "Tasks!B5")
+            self.assertEqual(result["suggested_config"]["header_row"], 3)
+            sheet.update.assert_not_called()
+
+    def test_invalid_header_row_rejected(self):
+        from core.sheets import _connection_configuration
+
+        for value in (0, -1, True, "3", 1.5):
+            self.config["header_row"] = value
+            with self.subTest(value=value), self.assertRaises(IntegrationError):
+                _connection_configuration(self.repo)
+
     def setUp(self):
         self.config = {
             "confirmed": True,

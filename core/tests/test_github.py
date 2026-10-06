@@ -1,4 +1,5 @@
 import base64
+import gzip
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -10,6 +11,20 @@ from core.github import GitHub, IntegrationError, check_required
 
 
 class GitHubTests(TestCase):
+    def test_compressed_response_decoded_once_and_pagination_header_preserved(self):
+        link = '<https://api.github.com/repos/acme/app/issues?page=2>; rel="next"'
+        client = self.client(
+            lambda req: httpx.Response(
+                200,
+                headers={"Content-Encoding": "gzip", "Link": link},
+                stream=httpx.ByteStream(gzip.compress(b'{"login":"reviewer"}')),
+            )
+        )
+        response = client._request("GET", "/user")
+        self.assertEqual(response.json(), {"login": "reviewer"})
+        self.assertEqual(response.headers["link"], link)
+        self.assertNotIn("content-encoding", response.headers)
+
     def client(self, handler):
         repo = SimpleNamespace(
             full_name="acme/app",

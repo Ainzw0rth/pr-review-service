@@ -2,7 +2,9 @@
 
 Self-hosted, label-driven GitHub reviews with an organization-isolated queue dashboard.
 
-**Initial target:** `ganeshait/AnyOne-2.0`. **Public hostname:** `auto-reviewer.ainzw0rth.xyz`.
+**Initial target:** `MarkAny-GaneshaIT/AnyOne-2.0`. **Public hostname:** `auto-reviewer.ainzw0rth.xyz`.
+
+Operator activation steps: [.claude/operator-setup.md](.claude/operator-setup.md).
 **Host origin:** `http://127.0.0.1:8040`.
 
 GitHub holds review content. Dashboard members see job metadata only. Humans request runs;
@@ -190,7 +192,10 @@ The complete confirmed configuration looks like this (replace all examples):
 }
 ```
 
-The range begins at A1/A and includes the header. `allowed_statuses` is the complete, confirmed
+The range begins at A1/A and includes the header. For a timeline with title rows, set
+`"header_row": 3` (defaults to 1). Keep the range starting at A1; absolute row numbers are
+preserved when locating and updating status cells. Headers on that row must be unique/nonempty.
+`allowed_statuses` is the complete, confirmed
 explicit dropdown (`ONE_OF_LIST`) vocabulary, including values such as Backlog that the service
 never writes. It must contain every mapped status. If omitted, it defaults to the unique mapped
 values for backwards compatibility. Multiple nonterminal outcomes may share a real value—for

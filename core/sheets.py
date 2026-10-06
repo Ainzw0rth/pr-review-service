@@ -29,6 +29,9 @@ def _connection_configuration(repository):
         r"(?:'[^']*(?:''[^']*)*'|[A-Za-z0-9_ -]+)!A1?:[A-Z]+", config.get("range", "")
     ):
         raise IntegrationError("Sheet range must start at column A, row 1 and include the header.")
+    header_row = config.get("header_row", 1)
+    if type(header_row) is not int or header_row < 1:
+        raise IntegrationError("Sheet header_row must be a positive row number.")
     return config
 
 
@@ -105,13 +108,18 @@ def _column(index):
 
 
 def _row(config, rows, task_id):
-    if not isinstance(rows, list) or not rows or rows[0] != config["headers"]:
+    header_row = config.get("header_row", 1)
+    if (
+        not isinstance(rows, list)
+        or len(rows) < header_row
+        or rows[header_row - 1] != config["headers"]
+    ):
         raise IntegrationError("Sheet headers changed; administrator reconfirmation required.")
     id_index = config["headers"].index(config["id_column"])
     status_index = config["headers"].index(config["status_column"])
     matches = [
         (number, row)
-        for number, row in enumerate(rows[1:], 2)
+        for number, row in enumerate(rows[header_row:], header_row + 1)
         if isinstance(row, list) and len(row) > id_index and str(row[id_index]) == task_id
     ]
     if len(matches) != 1:
@@ -233,7 +241,10 @@ def inspect_mapping(repository, *, id_column=None, status_column=None):
     config = _connection_configuration(repository)
     with Sheets(repository, read_only=True) as sheet:
         rows = sheet.values()
-        headers = rows[0] if isinstance(rows, list) and rows else None
+        header_row = config.get("header_row", 1)
+        headers = (
+            rows[header_row - 1] if isinstance(rows, list) and len(rows) >= header_row else None
+        )
         if (
             not isinstance(headers, list)
             or not headers
@@ -260,11 +271,19 @@ def inspect_mapping(repository, *, id_column=None, status_column=None):
             current = sorted(
                 {
                     str(row[index])
-                    for row in rows[1:]
+                    for row in rows[header_row:]
                     if isinstance(row, list) and len(row) > index and str(row[index]).strip()
                 }
             )
-            sample_cell = config["range"].split("!")[0] + "!" + _column(index + 1) + "2"
+            sample_row = next(
+                (
+                    number
+                    for number, row in enumerate(rows[header_row:], header_row + 1)
+                    if isinstance(row, list) and len(row) > index and str(row[index]).strip()
+                ),
+                header_row + 1,
+            )
+            sample_cell = config["range"].split("!")[0] + "!" + _column(index + 1) + str(sample_row)
             try:
                 dropdown = sorted(sheet.allowed_statuses(sample_cell))
             except IntegrationError as error:
@@ -272,7 +291,7 @@ def inspect_mapping(repository, *, id_column=None, status_column=None):
         else:
             note = "Select the status column explicitly; no unambiguous status header found."
         return {
-            "rows": max(0, len(rows) - 1),
+            "rows": max(0, len(rows) - header_row),
             "current_statuses": current,
             "dropdown_sample_cell": sample_cell,
             "note": note,
@@ -280,6 +299,7 @@ def inspect_mapping(repository, *, id_column=None, status_column=None):
                 "confirmed": False,
                 "spreadsheet_id": config["spreadsheet_id"],
                 "range": config["range"],
+                "header_row": header_row,
                 "headers": headers,
                 "id_column": id_column,
                 "status_column": status_column,
