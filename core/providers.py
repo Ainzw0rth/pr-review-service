@@ -174,6 +174,19 @@ developers to retoggle feedback/on review and re-request the reviewer when neces
 Set complete false if necessary context is absent or truncated. Set blocking true for any
 blocking finding or unresolved blocking uncertainty. Nonblocking suggestions may remain.
 Do not claim tests ran unless supplied test evidence proves it. Never claim formal approval.
+Write for a busy human reviewer. Each finding covers one actionable issue, usually 35-80 words:
+name the exact symbol/condition, show the concrete incorrect behavior and impact, then request
+the smallest correction. Mention the failing input/state or contradiction that demonstrates it.
+Avoid generic best-practice advice, speculative edge cases outside the documented agreement,
+long introductions, repeated context, checklists and repeated severity labels inside the body.
+Use Markdown inline backticks around code identifiers, functions, filenames/paths, config keys,
+API routes, enum/error values and short code expressions. Use a fenced block with a language only
+when a tiny multiline example materially helps. Do not wrap prose or issue/PR references in code.
+Use native GitHub references such as #number for supplied same-repository issues/PRs, not verbose
+URL labels; briefly explain the dependency. Preserve exact comment/line links when they matter.
+Never invent reference numbers, line numbers or evidence. Keep replies direct and avoid repeating
+already-addressed findings. Keep the summary to a short outcome and any unresolved cross-PR gates,
+not a second copy of every inline finding. Separate a concrete bug from an optional improvement.
 """
 
 
@@ -318,7 +331,7 @@ def response_diagnostics(status, headers, data):
     return result
 
 
-def review(provider, context, cancelled, *, on_response=None):
+def review(provider, context, cancelled, *, on_response=None, on_activity=None):
     if cancelled():
         raise ReviewCancelled()
     if (
@@ -338,7 +351,9 @@ def review(provider, context, cancelled, *, on_response=None):
     if provider.kind in {"claude_cli", "codex_cli"}:
         from .cli import review_cli
 
-        return review_cli(provider, context, cancelled, on_response=on_response)
+        return review_cli(
+            provider, context, cancelled, on_response=on_response, on_activity=on_activity
+        )
     try:
         credential = decrypt(provider.credential.encrypted_value)
         if not credential or "\n" in credential or "\r" in credential:

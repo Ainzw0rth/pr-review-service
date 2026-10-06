@@ -187,6 +187,24 @@ class DashboardTests(TestCase):
         self.assertEqual(len(flow["models"]), 1)
         self.assertEqual(flow["models"][0]["state"], "refused")
 
+    def test_public_cli_transcript_is_scoped_and_separate_from_worker_events(self):
+        from core.activity import record
+
+        record(self.visible, "cli_output_text", detail="Checking src/cart.py.", source="Sol CLI")
+        record(self.hidden, "cli_output_text", detail="other team private progress", source="Other")
+        self.client.force_login(self.user)
+        data = self.client.get(f"/jobs/{self.visible.pk}/activity/").json()
+        event = data["events"][-1]
+        self.assertEqual(event["kind"], "cli_output_text")
+        self.assertEqual(event["source"], "Sol CLI")
+        self.assertEqual(event["message"], "Checking src/cart.py.")
+        self.assertNotIn("other team private", str(data))
+        self.assertEqual(self.client.get(f"/jobs/{self.hidden.pk}/activity/").status_code, 404)
+        with self.assertRaises(ValueError):
+            record(self.visible, "model", detail="unapproved raw output")
+        with self.assertRaises(ValueError):
+            record(self.visible, "cli_output_text", detail="x" * 1001)
+
     def test_activity_is_bounded_and_contains_only_operational_messages(self):
         from core.activity import record
         from core.models import JobActivity

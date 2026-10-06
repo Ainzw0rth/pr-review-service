@@ -18,6 +18,11 @@ class Command(BaseCommand):
         parser.add_argument("model")
         parser.add_argument("--context", type=Path)
         parser.add_argument("--result", type=Path)
+        parser.add_argument(
+            "--activity",
+            action="store_true",
+            help="Print filtered public CLI commentary and tool metadata.",
+        )
 
     def handle(self, *args, **options):
         context = {
@@ -38,12 +43,17 @@ class Command(BaseCommand):
                 self.stdout.flush()
                 previous = current
 
+        def activity(code, text):
+            self.stdout.write(json.dumps({"cli_event": code, "text": text}))
+            self.stdout.flush()
+
         try:
             result = review_cli(
                 SimpleNamespace(kind=options["kind"], model=options["model"]),
                 context,
                 lambda: False,
                 on_response=progress,
+                on_activity=activity if options["activity"] else None,
             )
         except ProviderError as exc:
             raise CommandError(f"{exc.kind}: {exc}") from None

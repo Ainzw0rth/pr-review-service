@@ -93,9 +93,20 @@ def run_job(job):
                 Job.objects.filter(pk=job.pk, status="running").update(provider_diagnostics=data)
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
 
+            def save_activity(code, text):
+                from .activity import record
+
+                record(job, code, detail=text, source=provider.name)
+
             try:
                 progress("model")
-                result = review(provider, context, progress.cancelled, on_response=save_diagnostics)
+                result = review(
+                    provider,
+                    context,
+                    progress.cancelled,
+                    on_response=save_diagnostics,
+                    on_activity=save_activity,
+                )
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(
                     status="success", finished_at=timezone.now()
                 )

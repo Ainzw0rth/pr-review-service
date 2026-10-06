@@ -69,10 +69,25 @@ class WorkerTests(WorkflowTests):
         )
         self.assertEqual(gh.writes, [])
 
+    def test_public_cli_output_is_persisted_with_its_model_source(self):
+        def effect(provider, context, cancelled, *, on_response, on_activity):
+            on_activity("cli_output_text", "Checking the changed handler.")
+            raise ProviderError("attention")
+
+        job, gh, reviewer = self.run_case(effect)
+        events = job.activity.filter(code="cli_output_text")
+        self.assertEqual(events.count(), 2)
+        self.assertTrue(
+            all(
+                event.source and event.detail == "Checking the changed handler." for event in events
+            )
+        )
+        self.assertEqual(gh.writes, [])
+
     def test_each_refusal_keeps_its_diagnostics_without_publication(self):
         metadata = {"http_status": 200, "stop_reason": "refusal", "refusal_category": "cyber"}
 
-        def effect(provider, context, cancelled, *, on_response):
+        def effect(provider, context, cancelled, *, on_response, on_activity=None):
             on_response(metadata)
             raise ProviderError("attention")
 

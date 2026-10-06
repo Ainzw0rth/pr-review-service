@@ -1,4 +1,4 @@
-"""Allowlisted operational events only; never model text, HTTP bodies or exceptions."""
+"""Operational messages and filtered public CLI output, never raw provider bodies."""
 
 import threading
 import time
@@ -69,16 +69,34 @@ def cli_progress(progress, data, state):
 
 
 def message(event):
+    from .transcript import CODES
+
+    if event.code in CODES and event.detail:
+        return event.detail
     text = MESSAGES.get(event.code, "Operational event.")
     return text if event.count is None else f"{text}: {event.count}."
 
 
-def record(job, code, *, count=None):
-    if code not in MESSAGES or (
-        count is not None and (type(count) is not int or not 0 <= count <= 1_000_000)
+def record(job, code, *, count=None, detail="", source=""):
+    from .transcript import CODES
+
+    if (detail or source) and (
+        code not in CODES
+        or not isinstance(detail, str)
+        or len(detail) > 1000
+        or not isinstance(source, str)
+        or len(source) > 100
+    ):
+        raise ValueError("Invalid public CLI event.")
+    if (
+        code not in MESSAGES
+        and code not in CODES
+        or (count is not None and (type(count) is not int or not 0 <= count <= 1_000_000))
     ):
         raise ValueError("Activity accepts only known event codes and bounded integer counts.")
-    event = JobActivity.objects.create(job=job, code=code, count=count)
+    event = JobActivity.objects.create(
+        job=job, code=code, count=count, detail=detail, source=source
+    )
     if code in {"files", "docs", "cli_evidence"}:
         # Preserve phase evidence for large PRs instead of filling history with counters.
         job.activity.filter(code=code).exclude(pk=event.pk).delete()

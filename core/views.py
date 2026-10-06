@@ -225,7 +225,13 @@ def job_activity(request, job_id):
             "retry_available": is_retry_owner(request.user) and retry_available(job),
             "flow": snapshot(job, events),
             "events": [
-                {"id": event.pk, "at": event.created_at, "message": message(event)}
+                {
+                    "id": event.pk,
+                    "at": event.created_at,
+                    "message": message(event),
+                    "kind": event.code,
+                    "source": event.source,
+                }
                 for event in events[-100:]
             ],
         }

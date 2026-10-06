@@ -9,6 +9,8 @@
   let following = true;
   const graph = panel.querySelector('.review-flow');
   let paused = false, stopped = false, busy = false, latest = 0;
+  let transcriptMode = "cli", terminalEvents = [];
+  const cliKinds = new Set(["cli_output_text","cli_output_tool","cli_output_done","cli_output_failed","cli_output_status"]);
   const labels = {pending:'Waiting', unused:'Not used', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
   const utc = value => value ? new Date(value).toISOString().replace('T',' ').replace(/\.\d+Z$/, ' UTC') : '';
   const shortTime = value => value ? new Date(value).toISOString().slice(11,19) + ' UTC' : '';
@@ -76,6 +78,21 @@
     graph.replaceChildren(fragment);
     panel.querySelector('.flow-legacy').hidden = !flow.legacy;
   }
+  function renderTranscript() {
+    const visible = terminalEvents.filter(event => transcriptMode === 'cli' ? cliKinds.has(event.kind) : !cliKinds.has(event.kind));
+    const fragment = document.createDocumentFragment();
+    for (const event of visible) {
+      const row = element('li',event.kind || '');
+      const time = element('time','',utc(event.at)); time.dateTime=event.at;
+      const content = element('div','terminal-content');
+      if(event.source) content.append(element('span','terminal-source',event.source));
+      content.append(element('span','terminal-message',event.message));
+      row.append(time,content); fragment.append(row);
+    }
+    if(!visible.length) fragment.append(element('li','activity-empty', transcriptMode === 'cli' ? 'No CLI transcript recorded for this attempt yet. New CLI reviews show public commentary and tool calls here; silent periods are normal.' : 'No worker events recorded.'));
+    log.replaceChildren(fragment);
+    if(following) log.scrollTop=log.scrollHeight;
+  }
   async function poll() {
     if (paused || stopped || busy || document.hidden) return;
     busy = true;
@@ -111,21 +128,22 @@
       const retryControl = document.querySelector("[data-job-retry-control]");
       if (retryControl) retryControl.hidden = !data.retry_available;
       renderFlow(data.flow);
-      const follow = following;
+      let changed = false;
       for (const event of data.events) {
-        if (event.id <= latest) continue;
-        log.querySelector('.activity-empty')?.remove();
-        const row = element('li','');
-        const time = element('time','',utc(event.at)); time.dateTime = event.at;
-        row.append(time,element('span','',event.message)); log.append(row); latest = event.id;
+        if(event.id<=latest) continue;
+        terminalEvents.push(event); latest=event.id; changed=true;
       }
-      while (log.children.length > 100) log.firstElementChild.remove();
-      if (!data.events.length && !latest) text(log.querySelector('.activity-empty'),'No recorded events. Older attempts may not have an activity history.');
-      if (follow) log.scrollTop = log.scrollHeight;
+      terminalEvents=terminalEvents.slice(-100);
+      if(changed || !terminalEvents.length) renderTranscript();
     } catch {
       if (!paused) text(connection,'Connection interrupted · retrying. Nodes may be stale.');
     } finally { clearTimeout(timeout); busy = false; }
   }
+  panel.querySelectorAll('[data-terminal-mode]').forEach(button => button.addEventListener('click', () => {
+    transcriptMode=button.dataset.terminalMode;
+    panel.querySelectorAll('[data-terminal-mode]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));
+    renderTranscript();
+  }));
   followButton.addEventListener('click', () => {following=!following; followButton.textContent=following?'Following ↓':'Follow latest ↓'; followButton.setAttribute('aria-pressed',String(following)); if(following)log.scrollTop=log.scrollHeight;});
   log.addEventListener('wheel', () => {if(following){following=false;followButton.textContent='Follow latest ↓';followButton.setAttribute('aria-pressed','false');}}, {passive:true});
   pause.addEventListener('click',() => { paused = !paused; text(pause,paused ? 'Resume updates' : 'Pause updates'); pause.setAttribute('aria-pressed',String(paused)); if (paused) text(connection,'Display paused · the review continues independently'); else poll(); });

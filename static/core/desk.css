@@ -158,3 +158,11 @@ footer { border-top:1px solid var(--line); padding:22px 5%; display:flex; justif
  .retry-controls:not([hidden]) { align-items:flex-start; flex-direction:column; gap:4px; }.job-heading h1 em { display:block; margin-top:8px; }.commit-chip { margin:8px 0 0; }
  .attempt-record summary span { display:block; margin-left:15px; }
 }
+
+.terminal-tabs {display:flex;gap:8px;padding:12px 18px;border-bottom:1px solid #4b4a43;}
+.terminal-tabs button {min-height:32px;padding:5px 10px;font-size:9px;background:transparent;color:#bfbbae;border-color:#676358;}
+.terminal-tabs button[aria-pressed=true] {background:#e6e1d7;color:#222220;border-color:#e6e1d7;}
+.terminal-source {display:block;font-size:8px;color:#c3b98f;margin-bottom:4px;}
+.terminal-message {white-space:pre-wrap;}
+.cli_output_text .terminal-message {color:#f6f4ee;}
+.cli_output_failed .terminal-message {color:#efb299;}

@@ -15,7 +15,10 @@ from .providers import MAX_RESPONSE_BYTES, ProviderError, ReviewCancelled, valid
 
 
 class CLIStream:
-    def __init__(self, kind):
+    def __init__(self, kind, context=None, on_activity=None):
+        from .transcript import Transcript
+
+        self.transcript = Transcript(kind, context or {}, on_activity)
         self.kind = kind
         self.diagnostics = {"transport": kind, "events_received": 0, "last_event": "starting"}
         self.output = None
@@ -106,6 +109,7 @@ class CLIStream:
     def feed(self, event):
         if not isinstance(event, dict):
             raise ProviderError("invalid", detail="cli_protocol")
+        self.transcript.feed(event)
         self.diagnostics["events_received"] += 1
         kind = event.get("type")
         if kind == "runner_coverage":
@@ -213,7 +217,7 @@ def container_arguments(kind, name, image, volume):
     ]
 
 
-def review_cli(provider, context, cancelled, *, on_response=None):
+def review_cli(provider, context, cancelled, *, on_response=None, on_activity=None):
     from .providers import SCHEMA, SYSTEM, _wire_schema
     from .runner import RunnerError, _docker
 
@@ -227,7 +231,7 @@ def review_cli(provider, context, cancelled, *, on_response=None):
     )
     name = "pr-review-cli-" + uuid.uuid4().hex
     args = container_arguments(provider.kind, name, image, volume)
-    parser = CLIStream(provider.kind)
+    parser = CLIStream(provider.kind, context, on_activity)
     process = None
     created = False
     try:

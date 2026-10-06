@@ -184,3 +184,21 @@ Deployment verified on the public hostname: fingerprinted new stylesheet, Martia
 terminal present and no desktop overflow. Shared member login passed; platform admin and retry
 POST both denied. Post-deployment Opus 5.5 worker probe passed with no publication. All three
 CLI provider records enabled in priority order; API records remain disabled.
+
+## Actual public CLI transcript and review style — 2026-10-06
+
+- Native event parser exports only explicitly public progress commentary, fixed session states and
+  allowlisted evidence-tool metadata; thinking, final JSON and raw tool-result bodies excluded.
+- JobActivity detail/source fields persist filtered excerpts. CLI/worker tabs remain organization-scoped.
+- Both Codex and Claude real subscription probes emitted public commentary and tool start/completion
+  events on a synthetic cart fixture; each returned a complete validated review with one concrete
+  finding using code backticks and native #42 references. No GitHub publication.
+- 226 Django tests + 2 Node evidence tests passed; lint/migration checks passed. Browser fixture
+  verified tab isolation and desktop/mobile transcript rendering.
+- Review style derived from read-only inspection of PR #142 review comments and PR #137 discussion/review.
+  New attempts only; no existing GitHub comments edited and no jobs retriggered.
+
+Deployed with migration 0008 and updated pinned CLI image. Public page verified as a team member:
+CLI tab defaults to a truthful empty state for historical jobs; worker history remains in its own
+tab. Health/deploy checks passed. No production job retriggered and no GitHub comments written
+during implementation verification.

@@ -189,6 +189,8 @@ class ModelAttempt(models.Model):
 
 
 class JobActivity(models.Model):
+    detail = models.TextField(blank=True, max_length=1000)
+    source = models.CharField(blank=True, max_length=100)
     job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="activity")
     code = models.CharField(max_length=30)
     count = models.PositiveIntegerField(null=True, blank=True)

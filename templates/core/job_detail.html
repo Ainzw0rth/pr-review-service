@@ -14,9 +14,10 @@
   <div class="review-flow"><p class="flow-placeholder">Loading recorded workflow…</p></div>
   <p class="flow-legacy" hidden>Historical attempt: per-model attempt records were not available. Only recorded progress is shown; this attempt has not been restarted.</p>
   <section class="terminal" aria-labelledby="terminal-title">
-    <header class="terminal-bar"><h3 id="terminal-title">Live activity</h3><div class="terminal-controls"><span>READ ONLY · UTC</span><button type="button" data-terminal-follow aria-pressed="true">Following ↓</button></div></header>
-    <ol class="activity-log" aria-label="Live operational activity" tabindex="0"><li class="activity-empty">Connecting to worker activity…</li></ol>
-    <p class="terminal-caption">Last 100 recorded events. Evidence reads, CLI output activity and model switches—not model reasoning, source contents or review findings.</p>
+    <header class="terminal-bar"><h3 id="terminal-title">Live CLI output</h3><div class="terminal-controls"><span>READ ONLY · UTC</span><button type="button" data-terminal-follow aria-pressed="true">Following ↓</button></div></header>
+    <div class="terminal-tabs" aria-label="Transcript source"><button type="button" data-terminal-mode="cli" aria-pressed="true">CLI output</button><button type="button" data-terminal-mode="worker" aria-pressed="false">Worker events</button></div>
+    <ol class="activity-log" aria-label="Live operational activity" tabindex="0"><li class="activity-empty">Connecting to CLI output…</li></ol>
+    <p class="terminal-caption">Public assistant progress and actual evidence-tool calls, refreshed every 3s. Private reasoning, raw tool results and final review content are excluded. Last 100 events; commentary may be silent.</p>
   </section>
   <p class="activity-caption">Live operations, not a reasoning transcript. The heartbeat tracks the worker, not model tokens. Reviews stay on GitHub.</p>
   <noscript><p>JavaScript is needed for live nodes. Reload this page for current job status.</p></noscript>

@@ -130,8 +130,8 @@ Each model call retains its status, timestamps and allowlisted diagnostics in th
 **Model attempts** section. The latest response also appears in **Provider diagnostics**
 field in platform admin: HTTP status, recognized stop reason/refusal category, bounded token
 counts and validated provider request/message IDs when available. Member pages/activity feeds
-do not expose this field. Raw response text, explanations, prompts and credentials are never
-stored. Each provider attempt clears stale diagnostics before calling; network failures without
+do not expose this field. Raw responses, private reasoning, final review text, prompts and credentials are never
+stored as activity. Only explicitly public CLI progress excerpts use the filtered transcript. Each provider attempt clears stale diagnostics before calling; network failures without
 a response have no response metadata. Historical attempts cannot be backfilled from discarded
 responses; any separately recorded diagnostic replay must be identified as such.
 
@@ -344,3 +344,25 @@ resource/context limits still fail visibly; no partial evidence is silently trea
 Claude subscription authentication and both configured Opus model IDs have been probed successfully.
 Explicit native refusal signals stop the runner immediately, and the worker follows the existing
 ordered route. No request rewriting, automatic GitHub approval or API-billing fallback is introduced.
+
+### Actual CLI transcript and concise GitHub reviews
+
+**CLI output** is now distinct from **Worker events**. The default terminal tab displays native
+Claude/Codex session events, explicitly public one-line assistant progress, and actual evidence-tool
+start/completion/failure events with filenames and requested ranges. The worker tab retains queue/
+collection/CI/publication milestones. Display refresh remains every three seconds; timestamps record
+when the service receives events, not token-level latency. Silent periods are not filled with fake text.
+
+Only assistant text explicitly tagged for public progress is exported. Reasoning/thinking blocks,
+final review JSON, unmarked assistant output, raw tool-result contents and arbitrary stderr are excluded.
+Common credential formats and URLs are redacted; text is bounded and rendered as plain text. This is
+not a raw terminal mirror. Public excerpts are stored as organization-scoped JobActivity records under
+the same job retention; older attempts have no retroactive transcript. The recent-event window remains
+bounded. Provider/model labels distinguish consecutive fallback sessions.
+
+Review instructions now follow the concise style of the supplied #137/#142 examples: exact code
+identifier and failing condition, concrete impact, smallest correction; one actionable issue per
+finding. Code identifiers, file paths, routes/config values and expressions use Markdown backticks.
+Same-repository references use native #number mentions when present in evidence. Summaries avoid
+repeating inline findings. Existing comments are not rewritten, and model output still needs human
+review; this changes the review instructions rather than guessing code spans with a prose regex.
