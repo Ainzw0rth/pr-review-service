@@ -1,0 +1,7 @@
+Django>=5.2,<5.3
+gunicorn>=23,<26
+httpx>=0.28,<0.29
+whitenoise>=6.9,<7
+cryptography>=44
+jsonschema>=4.23,<5
+google-auth[requests]>=2.40,<3

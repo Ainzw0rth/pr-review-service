@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+var/
+staticfiles/
+.coverage
+.ruff_cache/
+.claude/verification/

@@ -1,0 +1,53 @@
+name: auto-reviewer
+x-app: &app
+  image: auto-reviewer:local
+  env_file: .env
+  init: true
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  volumes: ["data:/app/var"]
+  tmpfs: ["/tmp:size=768m,mode=1777"]
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
+services:
+  migrate:
+    <<: *app
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    restart: "no"
+  web:
+    <<: *app
+    build: .
+    ports: ["127.0.0.1:8040:8040"]
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8040/healthz/',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  events:
+    <<: *app
+    command: ["python", "manage.py", "process_events"]
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  worker:
+    <<: *app
+    command: ["python", "manage.py", "review_worker"]
+    # Trusted orchestrator only. Disposable test containers NEVER receive this socket.
+    group_add: ["${DOCKER_GID:?Run scripts/init_local.py}"]
+    volumes: ["data:/app/var", "/var/run/docker.sock:/var/run/docker.sock"]
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  maintenance:
+    <<: *app
+    command: ["python", "manage.py", "maintenance"]
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+volumes:
+  data:
