@@ -5,7 +5,7 @@ from django.test import override_settings
 from django.utils import timezone
 
 from core import workflow
-from core.models import Credential, Provider
+from core.models import Credential, Job, Provider
 from core.providers import ProviderError
 from core.tests.test_publication import FakeGitHub
 from core.tests.test_workflow import WorkflowTests
@@ -60,13 +60,16 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(gh.writes, [])
         self.assertIn("quota", list(job.activity.values_list("code", flat=True)))
 
-    def test_policy_refusal_never_falls_back(self):
+    def test_all_refusals_try_each_provider_once_then_pause(self):
         job, gh, reviewer = self.run_case(ProviderError("attention"))
         self.assertEqual(job.status, "attention")
-        self.assertEqual(reviewer.call_count, 1)
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertEqual(
+            list(job.model_attempts.values_list("status", flat=True)), ["refused", "refused"]
+        )
         self.assertEqual(gh.writes, [])
 
-    def test_provider_diagnostics_persist_without_retry_or_publication(self):
+    def test_each_refusal_keeps_its_diagnostics_without_publication(self):
         metadata = {"http_status": 200, "stop_reason": "refusal", "refusal_category": "cyber"}
 
         def effect(provider, context, cancelled, *, on_response):
@@ -75,6 +78,73 @@ class WorkerTests(WorkflowTests):
 
         job, gh, reviewer = self.run_case(effect)
         self.assertEqual(job.provider_diagnostics, metadata)
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertEqual(
+            list(job.model_attempts.values_list("diagnostics", flat=True)), [metadata, metadata]
+        )
+        self.assertEqual(gh.writes, [])
+
+    def test_refusal_then_outage_then_third_model_success(self):
+        third = Provider.objects.create(
+            name="third",
+            kind="anthropic",
+            model="third-model",
+            credential=Credential.objects.first(),
+            order=2,
+        )
+        result = {
+            "complete": True,
+            "blocking": False,
+            "summary": "No defects.",
+            "findings": [],
+            "replies": [],
+            "related_comments": [],
+        }
+        job, gh, reviewer = self.run_case(
+            [ProviderError("attention"), ProviderError("unavailable"), result]
+        )
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.provider, third)
+        self.assertEqual(
+            list(job.model_attempts.values_list("status", flat=True)),
+            ["refused", "unavailable", "success"],
+        )
+        self.assertEqual(reviewer.call_count, 3)
+        self.assertEqual(reviewer.call_args_list[0].args[1], reviewer.call_args_list[2].args[1])
+
+    def test_cancellation_after_refusal_prevents_next_model(self):
+        def effect(*args, **kwargs):
+            Job.objects.filter(status="running").update(status="cancelled")
+            raise ProviderError("attention")
+
+        job, gh, reviewer = self.run_case(effect)
+        self.assertEqual(job.status, "cancelled")
+        self.assertEqual(reviewer.call_count, 1)
+        self.assertEqual(gh.writes, [])
+
+    def test_quota_retry_starts_at_same_provider_not_prior_refusal(self):
+        job, gh, reviewer = self.run_case([ProviderError("attention"), ProviderError("quota")])
+        self.assertEqual(job.provider, self.second)
+        Job.objects.filter(pk=job.pk).update(next_retry_at=timezone.now())
+        resumed = workflow.claim()
+        with (
+            patch("core.github.GitHub", return_value=gh),
+            patch("core.context.build_context", return_value={"complete": True}),
+            patch("core.github.check_required", return_value={"passed": True, "summary": "Passed"}),
+            patch("core.providers.review", side_effect=ProviderError("quota")) as retry,
+        ):
+            run_job(resumed)
+        self.assertEqual(retry.call_count, 1)
+        self.assertEqual(retry.call_args.args[0], self.second)
+        self.assertEqual(
+            list(job.model_attempts.values_list("status", flat=True)),
+            ["refused", "quota", "quota"],
+        )
+        self.assertEqual(gh.writes, [])
+
+    def test_authentication_error_does_not_rotate(self):
+        job, gh, reviewer = self.run_case(ProviderError("auth"))
+        self.assertEqual(job.status, "attention")
         self.assertEqual(reviewer.call_count, 1)
         self.assertEqual(gh.writes, [])
 

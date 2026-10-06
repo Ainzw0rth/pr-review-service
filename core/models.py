@@ -139,6 +139,7 @@ class Job(models.Model):
     actor = models.CharField(max_length=100)
     reason = models.CharField(max_length=250, blank=True)
     provider_diagnostics = models.JSONField(default=dict, blank=True)
+    provider_plan = models.JSONField(default=list, blank=True)
     provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True, blank=True)
     next_retry_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -149,6 +150,20 @@ class Job(models.Model):
     class Meta:
         ordering = ["created_at"]
         constraints = [models.UniqueConstraint(fields=["pr", "generation"], name="unique_attempt")]
+
+
+class ModelAttempt(models.Model):
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="model_attempts")
+    provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True)
+    provider_name = models.CharField(max_length=100)
+    model = models.CharField(max_length=120)
+    status = models.CharField(max_length=20, default="running")
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    diagnostics = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["id"]
 
 
 class JobActivity(models.Model):

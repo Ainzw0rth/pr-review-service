@@ -269,6 +269,7 @@ def build_context(github, job, progress=None):
             from .sheets import task_context
 
             result["tasks"] = task_context(repo, [task["id"] for task in result["tasks"]])
+        progress("docs_started")
         tree = github.get(f"/git/trees/{job.head_sha}?recursive=1")
         if tree.get("truncated"):
             raise IntegrationError(

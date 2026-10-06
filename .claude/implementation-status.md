@@ -10,7 +10,7 @@ the web service to the tunnel's existing Docker network.
 - Django accounts, administrator configuration and organization-isolated queue dashboard.
 - Private admin bootstrap, invitation/reset/revocation flows; read-only member access.
 - Signed GitHub ingress, durable inbox and canonical-timeline review-cycle reconciliation.
-- Serial worker, cancellation/supersession, quota waits, refusal pauses and availability fallback.
+- Serial worker, cancellation/supersession, quota waits, ordered refusal/availability fallback and exhausted-route pauses.
 - Commit-pinned context, relevant docs, linked issues/PRs, thread replies and guarded publication.
 - Required-check validation and disposable, restricted Docker test execution.
 - Optional confirmed Sheet mapping, read-only mapping inspection and status-only updates.
@@ -109,6 +109,26 @@ reuse is not. The requested model display names have not been silently replaced 
 - Sheet mapping inspection suggests an unconfirmed configuration; admin confirms actual values.
 - GitHub and Sheets offer no transaction spanning remote reads and writes. Guards/rechecks minimize
   the residual race window but cannot eliminate it; partial published comments remain visible.
-- Policy refusals never trigger bypass rotation. Quota waits keep their selected provider.
+- User-approved revision: refusals and outages advance to the next configured model with the unchanged request. Quota waits keep their selected provider. Authentication and invalid output pause.
 - No overall job deadline or spend cap; finite network operations and bounded provider traversal.
 - Test-output transcripts are discarded; only pass/fail operational evidence is kept.
+
+## Live workflow nodes and ordered fallback — 2026-10-06
+
+Supersedes the earlier pause-on-first-refusal behavior, per Louis's request.
+
+- Refusals/outages try the next enabled model in configured order with unchanged context.
+  Each model gets one call per pass. Exhausted routes pause without publishing.
+- Quota waits retain the selected provider; subsequent checks do not retry earlier declines.
+  Authentication/invalid-output failures pause. Cancellation is checked between models.
+- Persistent model-attempt rows retain name/model snapshots, timestamps, outcome and private
+  allowlisted diagnostics. Admin can inspect each attempt; member feeds expose only operational
+  state and recognized refusal categories, never provider request IDs or raw responses.
+- Job page now shows connected evidence, checks, model and publication nodes. File/docs counts
+  update in place; per-model retries remain distinct. Raw events and metadata are collapsed.
+  Historical attempts are explicitly identified and never gain invented retry history.
+- Verification: 192 Django tests passed; Ruff lint/format, JavaScript syntax and migration
+  consistency checks passed. Chromium desktop/390px mobile checks passed, including no horizontal
+  overflow, collapsed logs, counter/outcome updates, pause/resume and expanded-log persistence.
+- Browser fixtures used an isolated database. No paid model calls or GitHub writes were made
+  to test the fallback sequence. Existing paused jobs require a fresh human label request.

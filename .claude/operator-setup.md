@@ -68,7 +68,8 @@ ChatGPT subscription billing is separate from API usage:
 
 Only one provider key is necessary to begin. Both enable cross-provider availability fallback.
 This implementation uses API keys, not subscription OAuth sessions. Quota exhaustion waits;
-policy refusals pause. Neither is treated as a reason to bypass the provider through rotation.
+provider refusals and outages advance through the configured order using the unchanged request.
+Each model is tried once per pass. Exhausted routes, authentication and invalid output pause.
 
 ## 4. Select provider models
 

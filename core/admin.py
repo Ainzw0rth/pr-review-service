@@ -12,6 +12,7 @@ from .models import (
     Credential,
     Job,
     Membership,
+    ModelAttempt,
     Organization,
     Provider,
     Repository,
@@ -93,8 +94,19 @@ class RepositoryAdmin(admin.ModelAdmin):
     list_filter = ["organization", "enabled"]
 
 
+class ModelAttemptInline(admin.TabularInline):
+    model = ModelAttempt
+    extra = 0
+    can_delete = False
+    readonly_fields = [field.name for field in ModelAttempt._meta.fields]
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
+    inlines = [ModelAttemptInline]
     list_display = ["id", "pr", "status", "actor", "created_at", "finished_at"]
     list_filter = ["status", "pr__repository__organization"]
     readonly_fields = [field.name for field in Job._meta.fields]

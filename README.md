@@ -121,10 +121,11 @@ refresh flow; until then use API credentials. This limitation is explicit rather
 
 Outage errors may fall through the configured priority. Quota errors do not: dashboard shows
 Out of quota, retains the selected provider, releases the worker and shows reset/next-check time.
-Unknown reset time defaults to a check 30 minutes later. Policy refusals pause for admin inspection,
-without provider rotation. Authentication/invalid-output failures also require attention.
+Unknown reset time defaults to a check 30 minutes later. Provider refusals try the next configured model with the unchanged request, once per model
+per pass. Exhausting the route pauses for admin inspection. Authentication/invalid-output failures also require attention.
 
-Provider responses now retain allowlisted diagnostics on the Job's **Provider diagnostics**
+Each model call retains its status, timestamps and allowlisted diagnostics in the Job admin's
+**Model attempts** section. The latest response also appears in **Provider diagnostics**
 field in platform admin: HTTP status, recognized stop reason/refusal category, bounded token
 counts and validated provider request/message IDs when available. Member pages/activity feeds
 do not expose this field. Raw response text, explanations, prompts and credentials are never
@@ -300,3 +301,10 @@ validate this release. Set `LIVE_WRITES=1` and recreate services only after:
 
 Use a dedicated test repository first. Admin configuration deliberately starts empty; model IDs,
 organization secrets and example task mappings are never invented or pre-enabled.
+
+### Live review workflow
+
+The read-only job page shows connected stage nodes: file and documentation counters, discussions,
+CI, optional tests, ordered model attempts, and GitHub publication. Each model call has its own
+result and duration. Quota checks remain on the selected provider. Detailed events are collapsed
+by default. Historical jobs show only recorded evidence; deployment does not resume them.

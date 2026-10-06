@@ -177,13 +177,13 @@ Deliver:
 - API-key support and only provider-supported OAuth flows whose authorization/refresh requirements can be verified. Do not scrape or copy personal CLI session credentials.
 - Quota exhaustion pauses on the current provider, shows reset/next-check time and releases the worker; default unknown-reset check interval 30 minutes.
 - Availability errors use finite retries and authorized fallback providers.
-- Policy/security refusals pause as Needs attention; no refusal-driven rotation or prompt disguise.
+- Revised by user request: refusals advance through the configured models with the unchanged request. Exhausted routes pause as Needs attention; no prompt disguise.
 - Invalid authentication requests reconnection. No total-job timeout or configured spend cap, but finite individual network timeouts.
 
 Verification:
 
 - Simulated quota, retry headers, outage, expired authentication, refusal and malformed model output.
-- Quota does not switch models; refusal does not fall through to a backup.
+- Quota does not switch models; refusal advances once through each remaining backup.
 - Same provider is retried after quota wait only if the attempt remains eligible/current.
 
 ### Milestone 5 — isolated tests and safe GitHub publication
@@ -294,7 +294,7 @@ No public demo credentials, default weak password, real review comments or organ
 - No formal AI approval or automatic merge.
 - No autonomous issue creation, deadline edits or work-hour estimation.
 - No automatic review on push or discussion replies.
-- No quota-based provider rotation and no policy-refusal evasion.
+- No quota-based provider rotation or prompt disguise. Refusal fallback uses the unchanged review request.
 - No enforced total review deadline or monthly spending limit.
 - No full unrelated repository/documentation sweep.
 - No speculative distributed queue, Kubernetes, SPA or plugin framework.

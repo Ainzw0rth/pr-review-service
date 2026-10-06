@@ -170,7 +170,7 @@ User-requested preference order is **Opus 5.5 → Sol 6.1 → Opus 4.8**. These 
 
 ### Policy/security refusal
 
-Pause the attempt and display **Needs attention** with a sanitized reason. Require admin inspection or scope correction. Never automatically rotate providers or disguise prompts to bypass a refusal. Ordinary comments do not resume paused work; after correction, a fresh human label request is the default team retry route.
+Try the next configured model with the unchanged review request: Opus 5.5 → Sol 6.1 → Opus 4.8. Each model gets one call per pass; never rewrite or disguise the request. The dashboard records each decline and fallback separately. If all remaining models decline or are unavailable, pause as **Needs attention** without publishing. Authentication and invalid-output errors also pause. Quota exhaustion waits on the same provider. Ordinary comments do not resume paused work; a fresh human label request is the retry route.
 
 ### Technical failure or missing required checks
 
@@ -244,6 +244,6 @@ No findings, diffs, discussion system, raw model transcripts or credentials are 
 - [ ] If enabled, connect the Sheet, identify stable task IDs, confirm required-PR linking and approve its status mapping.
 - [ ] Configure authenticated dashboard hostname, organization isolation and 90-day retention.
 - [ ] Bootstrap admin privately and test invite/reset/revocation flows.
-- [ ] Exercise initial review, same-commit retoggle, new-commit supersession, quota wait, refusal pause, technical failure and multi-PR completion before rollout.
+- [ ] Exercise initial review, same-commit retoggle, new-commit supersession, quota wait, refusal fallback and exhausted-route pause, technical failure and multi-PR completion before rollout.
 
 This checklist identifies implementation/verification work still required. It is not a claim that any of these integrations, accounts or services already exist.

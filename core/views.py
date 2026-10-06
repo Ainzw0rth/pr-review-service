@@ -190,9 +190,10 @@ def job_detail(request, job_id):
 @require_GET
 def job_activity(request, job_id):
     from .activity import message
+    from .flow import snapshot
 
     job = get_object_or_404(visible_jobs(request.user), pk=job_id)
-    events = list(job.activity.order_by("-id")[:100])
+    events = list(reversed(list(job.activity.order_by("-id")[:300])))
     return JsonResponse(
         {
             "status": job.status,
@@ -203,9 +204,10 @@ def job_activity(request, job_id):
             "finished_at": job.finished_at,
             "next_retry_at": job.next_retry_at,
             "reason": job.reason,
+            "flow": snapshot(job, events),
             "events": [
                 {"id": event.pk, "at": event.created_at, "message": message(event)}
-                for event in reversed(events)
+                for event in events[-100:]
             ],
         }
     )

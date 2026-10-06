@@ -79,6 +79,69 @@ class DashboardTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertNotContains(response, "req_admin_only_identifier")
 
+    def test_flow_nodes_aggregate_counters_and_preserve_model_attempts(self):
+        from core.activity import record
+        from core.models import ModelAttempt, Provider
+
+        provider = Provider.objects.create(
+            name="Opus", kind="anthropic", model="opus-model", credential=Credential.objects.first()
+        )
+        self.visible.status = "attention"
+        self.visible.save()
+        for code, count in [
+            ("context", None),
+            ("files", 1),
+            ("files", 24),
+            ("threads", None),
+            ("related", None),
+            ("docs", 27),
+            ("context_ready", None),
+            ("checks_passed", None),
+            ("model", None),
+            ("models_exhausted", None),
+        ]:
+            record(self.visible, code, count=count)
+        ModelAttempt.objects.create(
+            job=self.visible,
+            provider=provider,
+            provider_name="Opus",
+            model="opus-model",
+            status="refused",
+            finished_at=timezone.now(),
+            diagnostics={"refusal_category": "cyber", "request_id": "req_private"},
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(f"/jobs/{self.visible.pk}/activity/")
+        flow = response.json()["flow"]
+        stages = {stage["id"]: stage for stage in flow["stages"]}
+        self.assertEqual(stages["files"]["count"], 24)
+        self.assertEqual(stages["docs"]["count"], 27)
+        self.assertEqual(stages["checks"]["state"], "done")
+        self.assertEqual(stages["publication"]["state"], "pending")
+        self.assertEqual(flow["models"][0]["attempts"][0]["state"], "refused")
+        self.assertNotContains(response, "req_private")
+
+    def test_old_activity_does_not_invent_model_retries(self):
+        from core.activity import record
+        from core.models import Provider
+
+        self.visible.provider = Provider.objects.create(
+            name="Old model",
+            kind="anthropic",
+            model="old-model",
+            credential=Credential.objects.first(),
+        )
+        self.visible.status = "attention"
+        self.visible.reason = "Provider refused the review; admin inspection required."
+        self.visible.save()
+        record(self.visible, "model")
+        record(self.visible, "model_attention")
+        self.client.force_login(self.user)
+        flow = self.client.get(f"/jobs/{self.visible.pk}/activity/").json()["flow"]
+        self.assertTrue(flow["legacy"])
+        self.assertEqual(len(flow["models"]), 1)
+        self.assertEqual(flow["models"][0]["state"], "refused")
+
     def test_activity_is_bounded_and_contains_only_operational_messages(self):
         from core.activity import record
         from core.models import JobActivity

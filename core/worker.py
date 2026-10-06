@@ -6,7 +6,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.activity import Progress
-from core.models import Job, Provider
+from core.models import Job, ModelAttempt, Provider
 from core.publication import StaleReview, fail_to_feedback, guard, once, publish
 from core.workflow import finish
 
@@ -19,6 +19,7 @@ def run_job(job):
     from core.sheets import sync_status
 
     github = None
+    model_attempt = None
     diagnostic = "Review incomplete. Check connections and required checks; request a new review."
     progress = Progress(job)
     progress.start()
@@ -62,29 +63,49 @@ def run_job(job):
         }
         providers = list(Provider.objects.filter(enabled=True))
         if job.provider_id:
-            providers = [p for p in providers if p.pk == job.provider_id]
+            # A quota retry stays on its provider, then may fall forward on refusal/outage.
+            index = next((i for i, p in enumerate(providers) if p.pk == job.provider_id), None)
+            providers = providers[index:] if index is not None else []
         if not providers:
             finish(job, "attention", "No enabled model connection. Admin configuration required.")
             return
+        if not job.provider_plan:
+            job.provider_plan = [{"id": p.pk, "name": p.name, "model": p.model} for p in providers]
+            Job.objects.filter(pk=job.pk, status="running").update(provider_plan=job.provider_plan)
         result = None
         for provider in providers:
             guard(github, job)
             Job.objects.filter(pk=job.pk, status="running").update(
                 provider=provider, provider_diagnostics={}
             )
+            model_attempt = ModelAttempt.objects.create(
+                job=job, provider=provider, provider_name=provider.name, model=provider.model
+            )
 
             def save_diagnostics(data):
                 Job.objects.filter(pk=job.pk, status="running").update(provider_diagnostics=data)
+                ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
 
             try:
                 progress("model")
                 result = review(provider, context, progress.cancelled, on_response=save_diagnostics)
+                ModelAttempt.objects.filter(pk=model_attempt.pk).update(
+                    status="success", finished_at=timezone.now()
+                )
                 progress("result")
                 progress("findings", count=len(result.get("findings", [])))
                 break
             except ProviderError as exc:
-                if exc.kind == "unavailable":
-                    progress("unavailable")
+                state = {
+                    "attention": "refused",
+                    "unavailable": "unavailable",
+                    "quota": "quota",
+                }.get(exc.kind, "attention")
+                ModelAttempt.objects.filter(pk=model_attempt.pk).update(
+                    status=state, finished_at=timezone.now()
+                )
+                if exc.kind in ("unavailable", "attention"):
+                    progress("unavailable" if exc.kind == "unavailable" else "model_refused")
                     continue
                 if exc.kind == "quota":
                     progress("quota")
@@ -99,13 +120,17 @@ def run_job(job):
                     finish(
                         job,
                         "attention",
-                        "Provider refused the review; admin inspection required."
-                        if exc.kind == "attention"
-                        else "Model connection or response needs admin attention.",
+                        "Model connection or response needs admin attention.",
                     )
                 return
         if result is None:
-            raise IntegrationError("No configured provider is available.")
+            progress("models_exhausted")
+            finish(
+                job,
+                "attention",
+                "All remaining models declined or were unavailable. Inspect model attempts before requesting another review.",
+            )
+            return
         if repo.required_checks:
             progress("recheck")
             latest = check_required(github, repo, job.head_sha)
@@ -153,6 +178,17 @@ def run_job(job):
         )
 
     finally:
+        if model_attempt is not None:
+            ModelAttempt.objects.filter(pk=model_attempt.pk, status="running").update(
+                status=(
+                    "cancelled"
+                    if Job.objects.filter(
+                        pk=job.pk, status__in=["cancelled", "superseded"]
+                    ).exists()
+                    else "attention"
+                ),
+                finished_at=timezone.now(),
+            )
         progress.close()
         if github is not None and hasattr(github, "close"):
             github.close()
@@ -164,6 +200,9 @@ def recover_interrupted():
     Job.objects.filter(status="running").update(
         status="attention",
         reason="Worker restarted during review. Inspect GitHub, then retoggle to retry.",
+    )
+    ModelAttempt.objects.filter(status="running").update(
+        status="interrupted", finished_at=timezone.now()
     )
 
 
