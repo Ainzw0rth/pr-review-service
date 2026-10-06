@@ -70,6 +70,15 @@ class DashboardTests(TestCase):
         Membership.objects.filter(user=self.user).delete()
         self.assertEqual(self.client.get(url).status_code, 404)
 
+    def test_provider_diagnostics_are_not_in_member_dashboard_or_feed(self):
+        self.visible.provider_diagnostics = {"request_id": "req_admin_only_identifier"}
+        self.visible.save()
+        self.client.force_login(self.user)
+        for suffix in ("", "activity/"):
+            response = self.client.get(f"/jobs/{self.visible.id}/" + suffix)
+            self.assertEqual(response.status_code, 200)
+            self.assertNotContains(response, "req_admin_only_identifier")
+
     def test_activity_is_bounded_and_contains_only_operational_messages(self):
         from core.activity import record
         from core.models import JobActivity

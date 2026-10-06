@@ -69,10 +69,16 @@ def run_job(job):
         result = None
         for provider in providers:
             guard(github, job)
-            Job.objects.filter(pk=job.pk, status="running").update(provider=provider)
+            Job.objects.filter(pk=job.pk, status="running").update(
+                provider=provider, provider_diagnostics={}
+            )
+
+            def save_diagnostics(data):
+                Job.objects.filter(pk=job.pk, status="running").update(provider_diagnostics=data)
+
             try:
                 progress("model")
-                result = review(provider, context, progress.cancelled)
+                result = review(provider, context, progress.cancelled, on_response=save_diagnostics)
                 progress("result")
                 progress("findings", count=len(result.get("findings", [])))
                 break

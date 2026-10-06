@@ -124,6 +124,14 @@ Out of quota, retains the selected provider, releases the worker and shows reset
 Unknown reset time defaults to a check 30 minutes later. Policy refusals pause for admin inspection,
 without provider rotation. Authentication/invalid-output failures also require attention.
 
+Provider responses now retain allowlisted diagnostics on the Job's **Provider diagnostics**
+field in platform admin: HTTP status, recognized stop reason/refusal category, bounded token
+counts and validated provider request/message IDs when available. Member pages/activity feeds
+do not expose this field. Raw response text, explanations, prompts and credentials are never
+stored. Each provider attempt clears stale diagnostics before calling; network failures without
+a response have no response metadata. Historical attempts cannot be backfilled from discarded
+responses; any separately recorded diagnostic replay must be identified as such.
+
 There is no configured monthly spend cap or whole-review timeout. Individual calls have finite
 network timeouts; failure traversal is bounded. Interrupting a job cannot undo provider charges
 already incurred. An in-flight model call may take up to its network timeout to return.

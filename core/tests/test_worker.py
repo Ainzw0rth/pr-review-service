@@ -66,6 +66,18 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(reviewer.call_count, 1)
         self.assertEqual(gh.writes, [])
 
+    def test_provider_diagnostics_persist_without_retry_or_publication(self):
+        metadata = {"http_status": 200, "stop_reason": "refusal", "refusal_category": "cyber"}
+
+        def effect(provider, context, cancelled, *, on_response):
+            on_response(metadata)
+            raise ProviderError("attention")
+
+        job, gh, reviewer = self.run_case(effect)
+        self.assertEqual(job.provider_diagnostics, metadata)
+        self.assertEqual(reviewer.call_count, 1)
+        self.assertEqual(gh.writes, [])
+
     def test_outage_uses_backup_and_publishes(self):
         result = {
             "complete": True,

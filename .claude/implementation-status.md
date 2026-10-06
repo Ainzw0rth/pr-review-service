@@ -24,7 +24,7 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 
 ## Verification
 
-- Full Django suite: **181 tests passed** (including context-scope and safe-diagnostic regressions).
+- Full Django suite: **186 tests passed** (including protocol diagnostics and member-access isolation).
 - Ruff check and formatting check passed.
 - Django deployment check passed with production settings; migrations consistent.
 - Production image built and running web service is healthy; proxied HTTPS login returns 200.
@@ -33,8 +33,23 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 - Real Docker isolation smoke: nonroot execution, writable isolated workspace, readonly root and no Docker socket inside tests.
 - Detailed browser evidence: `.claude/verification/dashboard-smoke.md` (ignored local artifacts).
 
-No real GitHub comments, paid provider calls or Google Sheet writes were used in verification.
+Initial local verification used no real GitHub comments, paid provider calls or Google Sheet
+writes. Later operator-authorized debugging included a real provider replay (below).
 Mocked external integrations are not evidence of real account/model availability.
+
+## Provider refusal diagnostics
+
+- Original refused-response payloads were discarded and cannot be reconstructed.
+- One explicitly diagnostic replay used the same configured Opus 5.5 model and normal review
+  request flow, without fallback, publication or GitHub label changes.
+- Replay returned HTTP 200, `stop_reason=refusal`, `stop_details.category=cyber`.
+  This confirms a provider refusal, not transport, credential, context-limit or parsing failure
+  for the replay; it does not identify an exact triggering source line.
+- Replay metadata saved on the original Job, explicitly marked `source=diagnostic_replay` and
+  `original_response_retained=false`; request/message IDs remain admin-only, not in this repo.
+- Future provider attempts retain allowlisted protocol diagnostics in platform admin. Tests
+  cover callback delivery, worker persistence, no fallback/publication on refusal, suppression
+  of arbitrary text/headers and exclusion from member pages/activity feeds.
 
 Read-only replay against the real PR confirmed a recursive issue-link expansion bug. Scope now
 includes direct references plus one issue-reference hop, not a recursive repository backlog.

@@ -20,7 +20,40 @@ RESULT = {
 
 
 class ProviderTests(TestCase):
-    def call(self, data, status=200, headers=None, kind="openai", cancelled=lambda: False):
+    def test_response_diagnostics_keep_protocol_metadata_not_content(self):
+        data = {
+            "id": "msg_diagnostic123",
+            "stop_reason": "refusal",
+            "stop_details": {"category": "cyber", "explanation": "secret-key private-source"},
+            "content": [{"type": "text", "text": "private-source"}],
+            "usage": {"input_tokens": 123, "output_tokens": 0},
+        }
+        diagnostics = providers.response_diagnostics(
+            200, {"request-id": "req_diagnostic123", "authorization": "secret-key"}, data
+        )
+        self.assertEqual(diagnostics["refusal_category"], "cyber")
+        self.assertEqual(diagnostics["request_id"], "req_diagnostic123")
+        self.assertEqual(diagnostics["stop_reason"], "refusal")
+        self.assertNotIn("secret-key", json.dumps(diagnostics))
+        self.assertNotIn("private-source", json.dumps(diagnostics))
+
+    def test_unknown_diagnostic_values_are_not_retained(self):
+        result = providers.response_diagnostics(
+            400,
+            {"request-id": "sk-secret-value"},
+            {"stop_reason": "secret", "stop_details": {"category": ["secret"]}},
+        )
+        self.assertNotIn("secret", json.dumps(result))
+
+    def call(
+        self,
+        data,
+        status=200,
+        headers=None,
+        kind="openai",
+        cancelled=lambda: False,
+        on_response=None,
+    ):
         provider = SimpleNamespace(
             kind=kind,
             model="configured-exact-model",
@@ -37,7 +70,9 @@ class ProviderTests(TestCase):
             patch.object(providers, "decrypt", return_value="secret-key"),
             patch.object(providers.httpx, "Client", return_value=client),
         ):
-            result = providers.review(provider, {"diff": "untrusted"}, cancelled)
+            result = providers.review(
+                provider, {"diff": "untrusted"}, cancelled, on_response=on_response
+            )
         return result, requests
 
     def output(self, result=None):
@@ -107,6 +142,18 @@ class ProviderTests(TestCase):
                 self.call(data, status, kind=kind)
             self.assertEqual(raised.exception.kind, "attention")
             self.assertNotIn("secret-key", str(raised.exception))
+
+    def test_refusal_callback_receives_diagnostics_before_exception(self):
+        captured = []
+        with self.assertRaises(providers.ProviderError):
+            self.call(
+                {"stop_reason": "refusal", "stop_details": {"category": "cyber"}},
+                headers={"request-id": "req_test123"},
+                kind="anthropic",
+                on_response=captured.append,
+            )
+        self.assertEqual(captured[0]["request_id"], "req_test123")
+        self.assertEqual(captured[0]["refusal_category"], "cyber")
 
     def test_http_error_classification_and_quota_retry(self):
         for status, kind in [

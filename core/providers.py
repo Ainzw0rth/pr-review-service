@@ -1,6 +1,7 @@
 """Official API adapters. No routing, credential discovery, or remote tools."""
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import PurePosixPath
@@ -186,7 +187,46 @@ def _refusal(data):
     )
 
 
-def review(provider, context, cancelled):
+def response_diagnostics(status, headers, data):
+    """Bounded protocol metadata only. Never persist response text or headers wholesale."""
+    result = {"http_status": status}
+    request_id = headers.get("request-id") or headers.get("x-request-id")
+    if isinstance(request_id, str) and re.fullmatch(r"req_[A-Za-z0-9_-]{1,96}", request_id):
+        result["request_id"] = request_id
+    if not isinstance(data, dict):
+        result["response_format"] = "not_json_object"
+        return result
+    message_id = data.get("id")
+    if isinstance(message_id, str) and re.fullmatch(
+        r"(?:msg|resp)_[A-Za-z0-9_-]{1,96}", message_id
+    ):
+        result["message_id"] = message_id
+    reason = data.get("stop_reason")
+    if reason in (
+        "refusal",
+        "end_turn",
+        "max_tokens",
+        "stop_sequence",
+        "tool_use",
+        "pause_turn",
+        "model_context_window_exceeded",
+    ):
+        result["stop_reason"] = reason
+    result["refusal_detected"] = _refusal(data)
+    details = data.get("stop_details")
+    category = details.get("category") if isinstance(details, dict) else None
+    if category in ("cyber", "bio", "frontier_llm", "reasoning_extraction", "general_harms"):
+        result["refusal_category"] = category
+    usage = data.get("usage")
+    if isinstance(usage, dict):
+        for key in ("input_tokens", "output_tokens"):
+            value = usage.get(key)
+            if type(value) is int and 0 <= value <= 1_000_000_000:
+                result[key] = value
+    return result
+
+
+def review(provider, context, cancelled, *, on_response=None):
     if cancelled():
         raise ReviewCancelled()
     if (
@@ -268,6 +308,8 @@ def review(provider, context, cancelled):
         data = json.loads(body)
     except (ValueError, UnicodeDecodeError, RecursionError):
         data = None
+    if on_response is not None:
+        on_response(response_diagnostics(status, response_headers, data))
     if _refusal(data):
         raise ProviderError("attention")
     if status == 429:

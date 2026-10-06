@@ -138,6 +138,7 @@ class Job(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
     actor = models.CharField(max_length=100)
     reason = models.CharField(max_length=250, blank=True)
+    provider_diagnostics = models.JSONField(default=dict, blank=True)
     provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True, blank=True)
     next_retry_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
