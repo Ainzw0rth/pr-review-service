@@ -320,3 +320,27 @@ The server rechecks the current GitHub commit, reviewer, label and canonical hum
 Stale, running, completed or already-published attempts cannot be retried this way. No label is
 added automatically. Double-clicks redirect to the same new attempt. Model errors show safe
 HTTP/classification details; insufficient Anthropic API credits are quota, including HTTP 400.
+
+### Dashboard refresh and subscription routing
+
+The dashboard and native admin share warm-paper/charcoal design tokens, self-hosted Martian Mono
+(with bundled OFL license), control sizes and responsive layouts. Queue filters apply automatically:
+repository search is debounced, status/requester selection is immediate, and pagination preserves
+all filters. Requester means the recorded GitHub trigger actor for that attempt, not necessarily
+the PR author. Options and results remain organization-scoped. Without JavaScript, a submit fallback
+is available.
+
+Job detail retains workflow nodes and adds an always-visible terminal-style operational feed with
+pause/follow controls. It shows fixed, allowlisted CLI lifecycle/evidence events, never raw stdout,
+private reasoning, credentials, source content or review findings. New events begin with new review
+activity; old attempts cannot acquire a retrospective CLI transcript.
+
+Changed-file, relevant-document and supporting-source counts no longer have hard caps. Relevance
+selection is unchanged; this is not a whole-repository audit. Collection retains an explicit 32 MiB
+JSON evidence budget; CLI transport permits 128 MiB including serialization overhead, while API
+adapters retain their smaller request budget. GitHub limits, binary/unreadable content and model
+resource/context limits still fail visibly; no partial evidence is silently treated as complete.
+
+Claude subscription authentication and both configured Opus model IDs have been probed successfully.
+Explicit native refusal signals stop the runner immediately, and the worker follows the existing
+ordered route. No request rewriting, automatic GitHub approval or API-billing fallback is introduced.

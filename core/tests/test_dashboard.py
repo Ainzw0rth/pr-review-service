@@ -121,6 +121,15 @@ class DashboardTests(TestCase):
         self.assertEqual(flow["models"][0]["attempts"][0]["state"], "refused")
         self.assertNotContains(response, "req_private")
 
+    def test_requester_filter_is_scoped_and_combines_with_status(self):
+        self.visible.actor = "alice"
+        self.visible.save()
+        self.client.force_login(self.user)
+        response = self.client.get("/", {"actor": "alice", "status": self.visible.status})
+        self.assertEqual(list(response.context["page"]), [self.visible])
+        self.assertEqual(list(self.client.get("/", {"actor": "nobody"}).context["page"]), [])
+        self.assertEqual(list(response.context["actors"]), ["alice"])
+
     def test_cli_progress_exposes_only_bounded_operational_counts(self):
         from core.models import ModelAttempt, Provider
 
@@ -147,7 +156,7 @@ class DashboardTests(TestCase):
         self.assertEqual(model["backend"], "codex_cli")
         self.assertEqual(model["attempts"][0]["evidence_read"], 3)
         self.assertNotContains(response, "private-model-text")
-        attempt.diagnostics.update(evidence_read=-1, evidence_total=10001)
+        attempt.diagnostics.update(evidence_read=-1, evidence_total=1_000_001)
         attempt.save()
         model = next(
             m

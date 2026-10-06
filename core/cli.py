@@ -110,7 +110,7 @@ class CLIStream:
         kind = event.get("type")
         if kind == "runner_coverage":
             read, total = event.get("read"), event.get("total")
-            if type(read) is int and type(total) is int and 0 <= read <= total <= 10000:
+            if type(read) is int and type(total) is int and 0 <= read <= total <= 1_000_000:
                 self.coverage = read == total
                 self.diagnostics.update(evidence_read=read, evidence_total=total)
             else:
@@ -276,6 +276,8 @@ def review_cli(provider, context, cancelled, *, on_response=None):
                             pending = bytearray(rest)
                             if line.strip():
                                 parser.line(line)
+                                if parser.error and parser.error.kind == "attention":
+                                    raise parser.error
                         if len(pending) > MAX_RESPONSE_BYTES:
                             raise ProviderError("invalid", detail="response_too_large")
                     now = time.monotonic()

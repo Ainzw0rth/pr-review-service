@@ -16,6 +16,7 @@ from core.secrets import decrypt
 
 MAX_RESPONSE_BYTES = 2_000_000
 MAX_CONTEXT_BYTES = 4_000_000
+MAX_CLI_CONTEXT_BYTES = 128 * 1024 * 1024
 
 
 class ReviewCancelled(Exception):
@@ -328,7 +329,9 @@ def review(provider, context, cancelled, *, on_response=None):
         raise ProviderError("invalid")
     try:
         encoded = json.dumps(context, allow_nan=False)
-        if len(encoded.encode()) > MAX_CONTEXT_BYTES:
+        if len(encoded.encode()) > (
+            MAX_CLI_CONTEXT_BYTES if provider.kind.endswith("_cli") else MAX_CONTEXT_BYTES
+        ):
             raise ProviderError("invalid", detail="context_limit")
     except (ValueError, TypeError, RecursionError):
         raise ProviderError("invalid") from None

@@ -5,6 +5,8 @@
   const connection = panel.querySelector('.activity-connection');
   const heartbeat = panel.querySelector('.activity-heartbeat');
   const pause = panel.querySelector('.activity-pause');
+  const followButton = panel.querySelector('[data-terminal-follow]');
+  let following = true;
   const graph = panel.querySelector('.review-flow');
   let paused = false, stopped = false, busy = false, latest = 0;
   const labels = {pending:'Waiting', unused:'Not used', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
@@ -109,7 +111,7 @@
       const retryControl = document.querySelector("[data-job-retry-control]");
       if (retryControl) retryControl.hidden = !data.retry_available;
       renderFlow(data.flow);
-      const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 50;
+      const follow = following;
       for (const event of data.events) {
         if (event.id <= latest) continue;
         log.querySelector('.activity-empty')?.remove();
@@ -124,6 +126,8 @@
       if (!paused) text(connection,'Connection interrupted · retrying. Nodes may be stale.');
     } finally { clearTimeout(timeout); busy = false; }
   }
+  followButton.addEventListener('click', () => {following=!following; followButton.textContent=following?'Following ↓':'Follow latest ↓'; followButton.setAttribute('aria-pressed',String(following)); if(following)log.scrollTop=log.scrollHeight;});
+  log.addEventListener('wheel', () => {if(following){following=false;followButton.textContent='Follow latest ↓';followButton.setAttribute('aria-pressed','false');}}, {passive:true});
   pause.addEventListener('click',() => { paused = !paused; text(pause,paused ? 'Resume updates' : 'Pause updates'); pause.setAttribute('aria-pressed',String(paused)); if (paused) text(connection,'Display paused · the review continues independently'); else poll(); });
   document.addEventListener('visibilitychange',() => { if (!document.hidden) poll(); });
   poll(); setInterval(poll,3000);

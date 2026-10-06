@@ -25,6 +25,12 @@ MESSAGES = {
     "tests": "Running configured tests in an isolated container.",
     "tests_passed": "Isolated tests passed.",
     "tests_failed": "Isolated tests did not pass.",
+    "cli_starting": "Subscription CLI session starting.",
+    "cli_reading": "CLI is requesting review evidence through the read-only tool.",
+    "cli_evidence": "Complete evidence items supplied to CLI",
+    "cli_receiving": "CLI output activity received; contents remain private.",
+    "cli_reconnecting": "CLI connection interrupted; native client reconnecting.",
+    "cli_completed": "CLI finished its response; validating review output.",
     "model": "Calling the selected model; awaiting provider response.",
     "unavailable": "Provider unavailable; checking the next configured connection.",
     "quota": "Provider quota exhausted; waiting for the next availability check.",
@@ -42,6 +48,26 @@ MESSAGES = {
 }
 
 
+def cli_progress(progress, data, state):
+    if data.get("transport") not in {"claude_cli", "codex_cli"}:
+        return
+    stages = {
+        "starting": "cli_starting",
+        "reading_evidence": "cli_reading",
+        "receiving": "cli_receiving",
+        "reconnecting": "cli_reconnecting",
+        "completed": "cli_completed",
+    }
+    stage = data.get("last_event")
+    if stage in stages and state.get("stage") != stage:
+        progress(stages[stage])
+        state["stage"] = stage
+    count = data.get("evidence_read")
+    if type(count) is int and 0 <= count <= 1_000_000 and state.get("count") != count:
+        progress("cli_evidence", count=count)
+        state["count"] = count
+
+
 def message(event):
     text = MESSAGES.get(event.code, "Operational event.")
     return text if event.count is None else f"{text}: {event.count}."
@@ -52,7 +78,18 @@ def record(job, code, *, count=None):
         count is not None and (type(count) is not int or not 0 <= count <= 1_000_000)
     ):
         raise ValueError("Activity accepts only known event codes and bounded integer counts.")
-    JobActivity.objects.create(job=job, code=code, count=count)
+    event = JobActivity.objects.create(job=job, code=code, count=count)
+    if code in {"files", "docs", "cli_evidence"}:
+        # Preserve phase evidence for large PRs instead of filling history with counters.
+        job.activity.filter(code=code).exclude(pk=event.pk).delete()
+    if code.startswith("cli_"):
+        old_cli = list(
+            job.activity.filter(code__startswith="cli_")
+            .order_by("-id")
+            .values_list("id", flat=True)[199:200]
+        )
+        if old_cli:
+            job.activity.filter(code__startswith="cli_", id__lt=old_cli[0]).delete()
     # Bound repeated quota/retry activity independently of 90-day job retention.
     cutoff = list(job.activity.order_by("-id").values_list("id", flat=True)[299:300])
     if cutoff:

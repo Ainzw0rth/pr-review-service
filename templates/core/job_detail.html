@@ -13,7 +13,11 @@
   <div class="flow-legend" aria-label="Node states"><span><i class="legend-dot done" aria-hidden="true"></i>Complete</span><span><i class="legend-dot running" aria-hidden="true"></i>In progress</span><span><i class="legend-dot attention" aria-hidden="true"></i>Needs attention</span><span><i class="legend-dot pending" aria-hidden="true"></i>Waiting</span></div>
   <div class="review-flow"><p class="flow-placeholder">Loading recorded workflow…</p></div>
   <p class="flow-legacy" hidden>Historical attempt: per-model attempt records were not available. Only recorded progress is shown; this attempt has not been restarted.</p>
-  <details class="raw-activity"><summary>Detailed event history <span>Latest 100 events · UTC</span></summary><ol class="activity-log" aria-label="Detailed review activity" tabindex="0"><li class="activity-empty">No activity loaded yet.</li></ol></details>
+  <section class="terminal" aria-labelledby="terminal-title">
+    <header class="terminal-bar"><h3 id="terminal-title">Live activity</h3><div class="terminal-controls"><span>READ ONLY · UTC</span><button type="button" data-terminal-follow aria-pressed="true">Following ↓</button></div></header>
+    <ol class="activity-log" aria-label="Live operational activity" tabindex="0"><li class="activity-empty">Connecting to worker activity…</li></ol>
+    <p class="terminal-caption">Last 100 recorded events. Evidence reads, CLI output activity and model switches—not model reasoning, source contents or review findings.</p>
+  </section>
   <p class="activity-caption">Live operations, not a reasoning transcript. The heartbeat tracks the worker, not model tokens. Reviews stay on GitHub.</p>
   <noscript><p>JavaScript is needed for live nodes. Reload this page for current job status.</p></noscript>
 </section>

@@ -158,6 +158,39 @@ class CLIStreamTests(TestCase):
         self.assertIsNotNone(child.poll())
         self.assertTrue(any(call.args[0][:2] == ["rm", "-f"] for call in docker.call_args_list))
 
+    def test_explicit_refusal_stops_cli_without_waiting_for_more_turns(self):
+        import subprocess
+        import sys
+        import time
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from django.test import override_settings
+
+        from core.cli import review_cli
+
+        child = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                'import time;print(\'{"type":"runner_error","code":"refusal"}\',flush=True);time.sleep(2)',
+            ],
+            stdout=subprocess.PIPE,
+        )
+        started = time.monotonic()
+        with (
+            override_settings(
+                CLI_RUNNER_IMAGE="sha256:" + "a" * 64, CLI_CODEX_AUTH_VOLUME="private-auth"
+            ),
+            patch("core.runner._docker", return_value='{"ExitCode":0}'),
+            patch("core.cli.subprocess.Popen", return_value=child),
+            self.assertRaises(ProviderError) as caught,
+        ):
+            review_cli(SimpleNamespace(kind="codex_cli", model="test"), {}, lambda: False)
+        self.assertEqual(caught.exception.kind, "attention")
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertIsNotNone(child.poll())
+
     def test_evidence_tool_is_allowed_but_arbitrary_mcp_is_rejected(self):
         p = self.parser()
         p.feed(
@@ -213,3 +246,29 @@ class CLIStreamTests(TestCase):
             Provider(kind="codex_cli", credential_id=1).clean()
         with self.assertRaises(ValidationError):
             Provider(kind="openai").clean()
+
+
+class CLIActivityTests(TestCase):
+    def test_progress_is_allowlisted_deduplicated_and_no_model_text(self):
+        from core.activity import cli_progress
+
+        calls = []
+        state = {}
+
+        def progress(code, **kw):
+            calls.append((code, kw.get("count")))
+
+        data = {
+            "transport": "codex_cli",
+            "last_event": "reading_evidence",
+            "evidence_read": 4,
+            "reasoning": "private thoughts",
+            "events_received": 123,
+        }
+        cli_progress(progress, data, state)
+        cli_progress(progress, data, state)
+        self.assertEqual(calls, [("cli_reading", None), ("cli_evidence", 4)])
+        cli_progress(
+            progress, {**data, "last_event": "private thoughts", "evidence_read": "secret"}, state
+        )
+        self.assertEqual(len(calls), 2)

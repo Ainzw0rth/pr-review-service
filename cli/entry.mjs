@@ -6,7 +6,7 @@ const emit = data => process.stdout.write(JSON.stringify(data)+'\n');
 let raw='';
 for await (const chunk of process.stdin) {
   raw += chunk;
-  if (Buffer.byteLength(raw)>5000000) { emit({type:'runner_error',code:'input_limit'});process.exit(1); }
+  if (Buffer.byteLength(raw)>134217728) { emit({type:'runner_error',code:'input_limit'});process.exit(1); }
 }
 let request;
 try {request=JSON.parse(raw);} catch {emit({type:'runner_error',code:'invalid_input'});process.exit(1);}

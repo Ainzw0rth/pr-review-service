@@ -142,6 +142,7 @@ def visible_jobs(user):
 @require_GET
 def dashboard(request):
     jobs = visible_jobs(request.user)
+    actors = jobs.exclude(actor="").order_by("actor").values_list("actor", flat=True).distinct()
     counts = dict(jobs.values_list("status").annotate(total=Count("id")))
     status = request.GET.get("status", "")
     if status in Job.Status.values:
@@ -151,15 +152,20 @@ def dashboard(request):
     query = request.GET.get("q", "").strip()[:100]
     if query:
         jobs = jobs.filter(pr__repository__full_name__icontains=query)
+    actor = request.GET.get("actor", "").strip()[:150]
+    if actor:
+        jobs = jobs.filter(actor=actor)
     page = Paginator(jobs.order_by("-created_at"), 30).get_page(request.GET.get("page"))
     return render(
         request,
-        "core/dashboard.html",
+        "core/queue_results.html" if request.GET.get("partial") == "1" else "core/dashboard.html",
         {
             "page": page,
             "status": status,
             "query": query,
             "statuses": Job.Status.choices,
+            "actor": actor,
+            "actors": actors,
             "running": counts.get("running", 0),
             "waiting": counts.get("queued", 0) + counts.get("quota", 0),
             "attention": counts.get("attention", 0) + counts.get("failed", 0),

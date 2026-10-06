@@ -167,3 +167,20 @@ evidence-delivery gate, cancellation, safe progress counters and unchanged publi
   passed. Desktop/mobile browser fixture shows backend/event/evidence counters.
 - No old job retriggered. Owner retry remains available subject to fresh GitHub eligibility.
 - Setup/recovery: [CLI runner operations](cli-runner-operations.md). Port remains 8040.
+
+## UI, evidence collection and Claude activation — 2026-10-06
+
+- Claude subscription login now verified; both Opus model connectivity probes passed.
+- Full-PR Claude refusal recognized immediately; no further native turns or publication after refusal.
+- No changed-file/doc/supporting-source count caps; explicit 32 MiB collection safeguard remains.
+- Shared Martian Mono/token styling, redesigned admin landing page/forms, automatic requester/status/
+  repository filters, and terminal-style allowlisted operational activity with follow/pause controls.
+- Shared `ganeshait` member account created in the monitored repository organization. No staff,
+  superuser or owner-retry rights. Password generated privately; not stored in project artifacts.
+- 220 Django tests, 2 Node tests, Ruff, migration check passed. Browser checks covered filtering/reset,
+  terminal follow control, admin landing/forms and mobile clipping. No old review automatically retriggered.
+
+Deployment verified on the public hostname: fingerprinted new stylesheet, Martian Mono loaded,
+terminal present and no desktop overflow. Shared member login passed; platform admin and retry
+POST both denied. Post-deployment Opus 5.5 worker probe passed with no publication. All three
+CLI provider records enabled in priority order; API records remain disabled.

@@ -188,6 +188,40 @@ class ContextTests(TestCase):
         github.pull.return_value["head"]["sha"] = "c" * 40
         self.assertFalse(build_context(github, job)["complete"])
 
+    def test_changed_files_are_not_capped_at_150(self):
+        github, job = self.fixture()
+        github.pull.return_value["changed_files"] = 175
+        github.pages.side_effect = lambda path, **kw: (
+            [
+                {
+                    "filename": f"file{i}.py",
+                    "status": "modified",
+                    "patch": "@@ -1 +1 @@\n-old\n+new",
+                }
+                for i in range(175)
+            ]
+            if "/files" in path
+            else []
+        )
+        result = build_context(github, job)
+        self.assertTrue(result["complete"], result["reason"])
+        self.assertEqual(len(result["files"]), 175)
+
+    def test_relevant_documents_are_not_capped_at_150(self):
+        github, job = self.fixture()
+        original = github.get.side_effect
+        github.get.side_effect = lambda path: (
+            {
+                "truncated": False,
+                "tree": [{"path": f"docs/app-{i}.md", "type": "blob"} for i in range(175)],
+            }
+            if "/git/trees/" in path
+            else original(path)
+        )
+        result = build_context(github, job)
+        self.assertTrue(result["complete"], result["reason"])
+        self.assertEqual(len(result["docs"]), 175)
+
     def test_size_limit_prevents_clearance(self):
         github, job = self.fixture()
         with patch("core.context.MAX_CONTEXT_BYTES", 20):

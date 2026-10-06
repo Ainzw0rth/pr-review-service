@@ -10,8 +10,7 @@ from urllib.parse import quote
 
 from .github import MAX_PAGES, IntegrationError
 
-MAX_CONTEXT_BYTES = 1_500_000
-MAX_SOURCE_FILES = 150
+MAX_CONTEXT_BYTES = 32 * 1024 * 1024  # Memory safeguard, not a file/document count cap.
 MAX_RELATED = 25
 SAFE_FAILURES = frozenset(
     {
@@ -189,8 +188,6 @@ def build_context(github, job, progress=None):
         files = github.pages(f"/pulls/{job.pr.number}/files")
         if len(files) != pr.get("changed_files"):
             raise IntegrationError("The pull request file list is incomplete.")
-        if len(files) > MAX_SOURCE_FILES:
-            raise IntegrationError("The change exceeds supported source context size.")
         for file in files:
             filename = _path(file["filename"])
             patch = file.get("patch")
@@ -311,8 +308,6 @@ def build_context(github, job, progress=None):
         }
         visited = set()
         while pending - visited:
-            if len(visited | pending) > MAX_SOURCE_FILES:
-                raise IntegrationError("Relevant documentation exceeds supported context size.")
             path = min(pending - visited)
             visited.add(path)
             doc = _source(github, path, job.head_sha)
@@ -402,8 +397,6 @@ def build_context(github, job, progress=None):
                     }
                     & paths
                 )
-        if len(candidates | existing) > MAX_SOURCE_FILES * 2:
-            raise IntegrationError("Referenced source exceeds supported context size.")
         for path in sorted(candidates - existing):
             result["sources"].append(_source(github, path, job.head_sha))
             bound()

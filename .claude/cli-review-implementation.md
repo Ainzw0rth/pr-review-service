@@ -15,7 +15,7 @@ The controller parses structured results, classifies failures, and stores only a
 progress counters/diagnostics. Review text is validated and remains on GitHub, not the dashboard.
 
 - [x] Verify installed CLI versions and Codex subscription authentication/model support.
-- [ ] Verify Claude subscription authentication and both requested Opus models (host still reports signed out).
+- [x] Verify Claude subscription authentication and both requested Opus models (completed after VPS login).
 - [x] Build CLI image and authenticated no-publication Codex smoke/full-PR tests.
 - [x] Add optional CLI provider kinds, nullable API credential for CLI-only providers and admin validation.
 - [x] Add bounded event parsing, schema validation, error classification and cancellable Docker execution.

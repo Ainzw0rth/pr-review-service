@@ -1,0 +1,57 @@
+@font-face {
+  font-family: 'Martian Mono';
+  src: url('fonts/MartianMono.ttf') format('truetype');
+  font-weight: 100 800;
+  font-stretch: 75% 112.5%;
+  font-display: swap;
+}
+:root {
+  color-scheme: light;
+  --font: 'Martian Mono', monospace;
+  --paper: #f6f4ee;
+  --panel: #fdfbf6;
+  --ink: #222220;
+  --muted: #68665e;
+  --line: #d2cec3;
+  --stone: #e6e1d7;
+  --accent: #333330;
+  --dark: #222220;
+  --radius: 8px;
+  --control-height: 44px;
+  --space: 8px;
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--ink);
+  background: var(--paper);
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+button, input, select, textarea { font: inherit; }
+button, .button, input[type=submit], input[type=button] {
+  min-height: var(--control-height); padding: 10px 18px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+  border: 1px solid var(--ink); border-radius: var(--radius);
+  color: var(--paper); background: var(--ink); font-weight: 500;
+  font-size: 11px; line-height: 1.6; text-decoration: none; cursor: pointer;
+}
+button:hover, .button:hover, input[type=submit]:hover { background: #44443f; color: white; }
+button:disabled { opacity: .55; cursor: wait; }
+input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]), select, textarea {
+  min-height: var(--control-height); width: 100%; padding: 10px 12px;
+  border: 1px solid #a8a397; border-radius: var(--radius);
+  color: var(--ink); background: var(--panel); font-size: 11px; line-height: 1.7;
+}
+textarea { min-height: 120px; }
+input[type=checkbox], input[type=radio] { accent-color: var(--ink); }
+:is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid #696448; outline-offset: 4px;
+}
+a { color: inherit; text-underline-offset: 4px; }
+a:hover { color: #625b43; }
+label { display: block; margin-bottom: 7px; font-size: 10px; font-weight: 500; }
+code, pre { font-family: var(--font); }
+[hidden] { display: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; scroll-behavior: auto !important; }
+}

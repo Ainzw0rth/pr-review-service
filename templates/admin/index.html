@@ -1,0 +1,14 @@
+{% extends 'admin/base_site.html' %}{% load i18n %}
+{% block bodyclass %}{{ block.super }} dashboard{% endblock %}
+{% block coltype %}colM{% endblock %}
+{% block breadcrumbs %}{% endblock %}
+{% block content_title %}<p class="admin-eyebrow">WORKSPACE / PLATFORM CONTROLS</p><h1>Administration.</h1><p class="admin-intro">Connections, permissions and review operations. One place to keep things running.</p>{% endblock %}
+{% block content %}
+<div class="admin-home-grid">
+{% for app in app_list reversed %}
+<section class="admin-card"><header><span class="admin-eyebrow">0{{ forloop.counter }} / CONFIGURATION</span><h2>{% if app.app_label == 'core' %}Review operations{% else %}People & access{% endif %}</h2></header>
+<div class="admin-models">{% for model in app.models %}<div class="admin-model"><a class="admin-model-title" href="{{ model.admin_url }}">{{ model.name }} <span aria-hidden="true">↗</span></a><div class="admin-model-actions"><a href="{{ model.admin_url }}">{% if model.view_only %}View records{% else %}Manage{% endif %}</a>{% if model.add_url %}<a href="{{ model.add_url }}">+ Add</a>{% endif %}</div></div>{% endfor %}</div>
+</section>{% empty %}<p>No configuration available for this account.</p>{% endfor %}
+</div>
+{% endblock %}
+{% block sidebar %}{% endblock %}

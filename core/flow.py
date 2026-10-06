@@ -154,7 +154,7 @@ def snapshot(job, events):
         if not (
             type(evidence_read) is int
             and type(evidence_total) is int
-            and 0 <= evidence_read <= evidence_total <= 10000
+            and 0 <= evidence_read <= evidence_total <= 1_000_000
         ):
             evidence_read = evidence_total = None
         group["attempts"].append(

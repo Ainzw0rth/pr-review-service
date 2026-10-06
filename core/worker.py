@@ -84,7 +84,12 @@ def run_job(job):
                 job=job, provider=provider, provider_name=provider.name, model=provider.model
             )
 
+            cli_state = {}
+
             def save_diagnostics(data):
+                from .activity import cli_progress
+
+                cli_progress(progress, data, cli_state)
                 Job.objects.filter(pk=job.pk, status="running").update(provider_diagnostics=data)
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
 

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from django.core.management.base import BaseCommand, CommandError
 
 from core.cli import review_cli
-from core.providers import MAX_CONTEXT_BYTES, ProviderError
+from core.providers import MAX_CLI_CONTEXT_BYTES, ProviderError
 
 
 class Command(BaseCommand):
@@ -25,7 +25,7 @@ class Command(BaseCommand):
         }
         if options["context"]:
             raw = options["context"].read_bytes()
-            if len(raw) > MAX_CONTEXT_BYTES:
+            if len(raw) > MAX_CLI_CONTEXT_BYTES:
                 raise CommandError("Context exceeds request-size limit.")
             context = json.loads(raw)
         previous = None

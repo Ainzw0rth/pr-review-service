@@ -68,8 +68,8 @@ ChatGPT subscription billing is separate from API usage:
 
 Only one provider key is necessary to begin. Both enable cross-provider availability fallback.
 API adapters use API keys; subscription CLI adapters now use isolated official CLI login.
-See [CLI runner operations](cli-runner-operations.md). Production currently enables verified
-Sol 6.1 CLI only; both Opus CLI connections await verified Claude login. API connections are disabled.
+See [CLI runner operations](cli-runner-operations.md). Production now enables verified Opus 5.5, Sol 6.1 and Opus 4.8 CLI connections in that order.
+API connections are disabled.
 Quota exhaustion waits;
 provider refusals and outages advance through the configured order using the unchanged request.
 Each model is tried once per pass. Exhausted routes, authentication and invalid output pause.

@@ -73,3 +73,10 @@ and dashboard next-check time. No credentials belong in screenshots or error rep
 Deploying or fixing credentials does not restart an old paused job. The designated owner can use
 **Retry review**, or a developer can request the reviewer and retoggle `on review`. A retry still
 requires fresh eligibility and creates a separate attempt. No formal GitHub approval is automated.
+
+## Current verified configuration (2026-10-06)
+
+Opus 5.5 → Sol 6.1 → Opus 4.8, all official subscription CLI backends. Both Opus connectivity probes
+passed after VPS login. A real-PR Opus 5.5 probe emitted an explicit refusal; the controller now
+terminates that runner immediately and reports decline to the existing fallback route. Sol previously
+completed the full PR probe. Probe results never publish. API provider records remain disabled.
