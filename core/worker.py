@@ -14,7 +14,7 @@ from core.workflow import finish
 def run_job(job):
     from core.context import build_context, failure_reason
     from core.github import GitHub, IntegrationError, check_required
-    from core.providers import ProviderError, ReviewCancelled, review
+    from core.providers import ProviderError, ReviewCancelled, failure_description, review
     from core.runner import run_tests
     from core.sheets import sync_status
 
@@ -96,6 +96,9 @@ def run_job(job):
                 progress("findings", count=len(result.get("findings", [])))
                 break
             except ProviderError as exc:
+                metadata = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
+                metadata.update(failure_kind=exc.kind, failure_detail=exc.detail)
+                save_diagnostics(metadata)
                 state = {
                     "attention": "refused",
                     "unavailable": "unavailable",
@@ -112,7 +115,7 @@ def run_job(job):
                     finish(
                         job,
                         "quota",
-                        "Provider quota exhausted. Next time is an availability check.",
+                        failure_description(metadata, state),
                         retry_at=exc.retry_at or timezone.now() + timedelta(minutes=30),
                     )
                 else:
@@ -120,7 +123,7 @@ def run_job(job):
                     finish(
                         job,
                         "attention",
-                        "Model connection or response needs admin attention.",
+                        failure_description(metadata, state),
                     )
                 return
         if result is None:

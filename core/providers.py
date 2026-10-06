@@ -31,10 +31,74 @@ class ProviderError(Exception):
         "invalid": "Provider configuration or review output is invalid or incomplete.",
     }
 
-    def __init__(self, kind, message=None, retry_at=None):
+    def __init__(self, kind, message=None, retry_at=None, *, detail=None):
         self.kind = kind
         self.retry_at = retry_at
-        super().__init__(self.MESSAGES[kind])
+        self.detail = detail if detail in ERROR_REASONS else None
+        super().__init__(ERROR_REASONS.get(self.detail, self.MESSAGES[kind]))
+
+
+ERROR_REASONS = {
+    "insufficient_credits": "Provider credit balance is too low. Add API credits; quota waits do not switch models.",
+    "context_too_large": "Request exceeds this model's context limit. Reduce the review context before retrying.",
+    "model_not_found": "Configured model is unavailable to this API account. Check the model ID and access.",
+    "request_rejected": "Provider rejected the API request. Check the provider configuration.",
+    "output_invalid": "Provider output failed review JSON/schema validation. Nothing was published.",
+    "output_incomplete": "Provider stopped before producing a complete review. Nothing was published.",
+    "response_too_large": "Provider response exceeded the service's response-size limit.",
+    "context_limit": "Review context exceeded the service's request-size limit.",
+}
+
+
+def error_reason(status, data):
+    error = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(error, dict):
+        return None
+    message = error.get("message", "")
+    message = message[:32000].lower() if isinstance(message, str) else ""
+    code = error.get("code")
+    if status in (400, 402, 429) and (
+        code == "insufficient_quota"
+        or "credit balance is too low" in message
+        or "insufficient credits" in message
+    ):
+        return "insufficient_credits"
+    if status == 400 and (
+        "prompt is too long" in message
+        or "maximum context length" in message
+        or code == "context_length_exceeded"
+    ):
+        return "context_too_large"
+    if code == "model_not_found" or (status == 404 and "model" in message):
+        return "model_not_found"
+    if status in (400, 404, 422):
+        return "request_rejected"
+    return None
+
+
+def failure_description(diagnostics, state):
+    """Public operational reason from allowlisted metadata; never raw provider prose."""
+    code = diagnostics.get("failure_detail") or diagnostics.get("error_reason")
+    reason = ERROR_REASONS.get(code) if isinstance(code, str) else None
+    if not reason:
+        kind = diagnostics.get("failure_kind")
+        reason = ProviderError.MESSAGES.get(kind) if isinstance(kind, str) else None
+    if not reason:
+        reason = {
+            "refused": "Provider declined this review; the next configured model may be tried.",
+            "unavailable": "Provider unavailable or request timed out; trying the next model.",
+            "quota": "Provider quota exhausted; waiting on this provider.",
+            "attention": "Provider connection or response needs administrator attention.",
+        }.get(state, "")
+    status = diagnostics.get("http_status")
+    if reason and type(status) is int and 100 <= status <= 599:
+        reason = f"HTTP {status}: {reason}"
+    followup = diagnostics.get("followup_check")
+    if isinstance(followup, dict):
+        code = followup.get("error_reason")
+        if isinstance(code, str) and code in ERROR_REASONS:
+            reason += " Follow-up connection check: " + ERROR_REASONS[code]
+    return reason
 
 
 def _object(properties):
@@ -196,6 +260,26 @@ def response_diagnostics(status, headers, data):
     if not isinstance(data, dict):
         result["response_format"] = "not_json_object"
         return result
+    error = data.get("error")
+    if isinstance(error, dict):
+        for key in ("type", "code"):
+            value = error.get(key)
+            if value in (
+                "invalid_request_error",
+                "insufficient_quota",
+                "rate_limit_error",
+                "authentication_error",
+                "permission_error",
+                "not_found_error",
+                "overloaded_error",
+                "server_error",
+                "model_not_found",
+                "context_length_exceeded",
+            ):
+                result["error_" + key] = value
+    reason_code = error_reason(status, data)
+    if reason_code:
+        result["error_reason"] = reason_code
     message_id = data.get("id")
     if isinstance(message_id, str) and re.fullmatch(
         r"(?:msg|resp)_[A-Za-z0-9_-]{1,96}", message_id
@@ -238,7 +322,7 @@ def review(provider, context, cancelled, *, on_response=None):
     try:
         encoded = json.dumps(context, allow_nan=False)
         if len(encoded.encode()) > MAX_CONTEXT_BYTES:
-            raise ProviderError("invalid")
+            raise ProviderError("invalid", detail="context_limit")
     except (ValueError, TypeError, RecursionError):
         raise ProviderError("invalid") from None
     try:
@@ -296,7 +380,7 @@ def review(provider, context, cancelled, *, on_response=None):
             for chunk in response.iter_bytes():
                 body.extend(chunk)
                 if len(body) > MAX_RESPONSE_BYTES:
-                    raise ProviderError("invalid")
+                    raise ProviderError("invalid", detail="response_too_large")
             status, response_headers = response.status_code, response.headers
     except httpx.RequestError:
         if cancelled():
@@ -312,18 +396,19 @@ def review(provider, context, cancelled, *, on_response=None):
         on_response(response_diagnostics(status, response_headers, data))
     if _refusal(data):
         raise ProviderError("attention")
-    if status == 429:
-        raise ProviderError("quota", retry_at=_retry_at(response_headers))
+    detail = error_reason(status, data)
+    if status == 429 or detail == "insufficient_credits":
+        raise ProviderError("quota", retry_at=_retry_at(response_headers), detail=detail)
     if status >= 500 or status in (408, 409):
         raise ProviderError("unavailable")
     if status in (401, 403):
         raise ProviderError("auth")
     if status != 200 or not isinstance(data, dict):
-        raise ProviderError("invalid")
+        raise ProviderError("invalid", detail=detail or "request_rejected")
     try:
         if provider.kind == "openai":
             if data.get("status") != "completed":
-                raise ProviderError("invalid")
+                raise ProviderError("invalid", detail="output_incomplete")
             text = "".join(
                 block["text"]
                 for item in data["output"]
@@ -333,9 +418,12 @@ def review(provider, context, cancelled, *, on_response=None):
             )
         else:
             if data.get("stop_reason") != "end_turn":
-                raise ProviderError("invalid")
+                raise ProviderError("invalid", detail="output_incomplete")
             text = "".join(block["text"] for block in data["content"] if block["type"] == "text")
         result = json.loads(text)
     except (ValueError, KeyError, TypeError, RecursionError):
-        raise ProviderError("invalid") from None
-    return validate_result(result)
+        raise ProviderError("invalid", detail="output_invalid") from None
+    try:
+        return validate_result(result)
+    except ProviderError:
+        raise ProviderError("invalid", detail="output_invalid") from None

@@ -45,6 +45,30 @@ class ProviderTests(TestCase):
         )
         self.assertNotIn("secret", json.dumps(result))
 
+    def test_anthropic_credit_balance_400_is_quota_with_safe_reason(self):
+        data = {
+            "error": {
+                "type": "invalid_request_error",
+                "message": "Your credit balance is too low to access the Anthropic API.",
+            }
+        }
+        captured = []
+        with self.assertRaises(providers.ProviderError) as caught:
+            self.call(data, status=400, kind="anthropic", on_response=captured.append)
+        self.assertEqual(caught.exception.kind, "quota")
+        self.assertEqual(captured[0]["error_reason"], "insufficient_credits")
+        self.assertIn("credit", str(caught.exception).lower())
+
+    def test_unknown_error_text_is_not_exposed(self):
+        result = providers.response_diagnostics(
+            400,
+            {},
+            {"error": {"type": "invalid_request_error", "message": "private source sk-secret"}},
+        )
+        self.assertEqual(result["error_type"], "invalid_request_error")
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("sk-secret", json.dumps(result))
+
     def call(
         self,
         data,

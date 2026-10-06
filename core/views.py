@@ -182,7 +182,18 @@ def job_detail(request, job_id):
             .count()
             + 1
         )
-    return render(request, "core/job_detail.html", {"job": job, "position": position})
+    from .retries import is_retry_owner, retry_available
+
+    return render(
+        request,
+        "core/job_detail.html",
+        {
+            "job": job,
+            "position": position,
+            "retry_owner": is_retry_owner(request.user),
+            "retry_available": is_retry_owner(request.user) and retry_available(job),
+        },
+    )
 
 
 @login_required
@@ -191,6 +202,7 @@ def job_detail(request, job_id):
 def job_activity(request, job_id):
     from .activity import message
     from .flow import snapshot
+    from .retries import is_retry_owner, retry_available
 
     job = get_object_or_404(visible_jobs(request.user), pk=job_id)
     events = list(reversed(list(job.activity.order_by("-id")[:300])))
@@ -204,6 +216,7 @@ def job_activity(request, job_id):
             "finished_at": job.finished_at,
             "next_retry_at": job.next_retry_at,
             "reason": job.reason,
+            "retry_available": is_retry_owner(request.user) and retry_available(job),
             "flow": snapshot(job, events),
             "events": [
                 {"id": event.pk, "at": event.created_at, "message": message(event)}
@@ -211,6 +224,31 @@ def job_activity(request, job_id):
             ],
         }
     )
+
+
+@login_required
+@never_cache
+@require_POST
+def job_retry(request, job_id):
+    from .github import IntegrationError
+    from .retries import RetryRejected, is_retry_owner, retry_job
+
+    if not is_retry_owner(request.user):
+        return HttpResponseForbidden("Only the configured owner can retry reviews.")
+    job = get_object_or_404(visible_jobs(request.user), pk=job_id)
+    try:
+        fresh = retry_job(job, request.user.username)
+    except RetryRejected as exc:
+        messages.error(request, str(exc))
+    except (IntegrationError, KeyError, TypeError, ValueError):
+        messages.error(request, "Could not verify the current PR with GitHub. No retry queued.")
+    else:
+        messages.success(
+            request,
+            "Fresh review queued from the first configured model. PR eligibility will be checked again by the worker.",
+        )
+        return redirect("job_detail", job_id=fresh.pk)
+    return redirect("job_detail", job_id=job.pk)
 
 
 def admin_login(request, extra_context=None):

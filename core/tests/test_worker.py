@@ -77,10 +77,11 @@ class WorkerTests(WorkflowTests):
             raise ProviderError("attention")
 
         job, gh, reviewer = self.run_case(effect)
-        self.assertEqual(job.provider_diagnostics, metadata)
+        expected = {**metadata, "failure_kind": "attention", "failure_detail": None}
+        self.assertEqual(job.provider_diagnostics, expected)
         self.assertEqual(reviewer.call_count, 2)
         self.assertEqual(
-            list(job.model_attempts.values_list("diagnostics", flat=True)), [metadata, metadata]
+            list(job.model_attempts.values_list("diagnostics", flat=True)), [expected, expected]
         )
         self.assertEqual(gh.writes, [])
 

@@ -247,3 +247,12 @@ No findings, diffs, discussion system, raw model transcripts or credentials are 
 - [ ] Exercise initial review, same-commit retoggle, new-commit supersession, quota wait, refusal fallback and exhausted-route pause, technical failure and multi-PR completion before rollout.
 
 This checklist identifies implementation/verification work still required. It is not a claim that any of these integrations, accounts or services already exist.
+
+## Owner-only retry button
+
+Louis may use **Retry review** on the job page without retoggling labels when the same commit
+is still eligible (`on review`, requested reviewer, same human review cycle). This creates a
+new, audited attempt from the first configured model; other members and admins remain read-only.
+Published/running/completed attempts are excluded. Changed commits or review cycles still require
+the normal GitHub request flow. Insufficient API credits display **Out of quota** and wait on
+the selected provider, including Anthropic's HTTP 400 credit-balance response.

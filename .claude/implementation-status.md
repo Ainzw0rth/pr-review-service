@@ -132,3 +132,22 @@ Supersedes the earlier pause-on-first-refusal behavior, per Louis's request.
   overflow, collapsed logs, counter/outcome updates, pause/resume and expanded-log persistence.
 - Browser fixtures used an isolated database. No paid model calls or GitHub writes were made
   to test the fallback sequence. Existing paused jobs require a fresh human label request.
+
+## Owner retry and actionable failures — 2026-10-06
+
+- `DASHBOARD_RETRY_USER_ID` binds dashboard retry to Louis's existing user ID; active superuser
+  status is additionally required. Other administrators do not inherit this permission.
+- CSRF-protected POST creates a fresh linked attempt only after GitHub commit/cycle/label/reviewer
+  validation. Duplicate requests resolve to the same retry. Running, completed, stale and
+  published attempts are excluded; the worker retains all existing publication guards.
+- Model nodes show allowlisted HTTP/error reasons. Anthropic HTTP 400 insufficient credits now
+  enters quota wait rather than generic attention. Original job cce74feb's lost error body was
+  not reconstructed: a separately identified minimal connection probe confirmed insufficient
+  API credits, and that follow-up finding is attached without changing the historical status.
+- Fingerprinted static assets prevent stale browser/CDN JavaScript after deployments.
+- Verification: 199 tests passed, Ruff lint/format, JS syntax, migration consistency and deployed
+  Django checks passed. Browser smoke confirmed owner button, credit explanation and 390px layout.
+  Production page/JSON checks confirmed the owner binding, reason and hashed CSS/JS; health OK.
+- CLI-backed reviewing is under discussion, not implemented. Both installed CLIs provide official
+  non-interactive structured output. Keep CLI credentials/execution isolated from the web app
+  and retain deterministic GitHub publication if this option is implemented.

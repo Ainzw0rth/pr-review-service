@@ -31,6 +31,7 @@
         const row = element('li',`model-try try-${attempt.state}`);
         const line = element('div','try-heading');
         line.append(element('span','try-index',String(number + 1).padStart(2,'0')),element('strong','try-outcome',labels[attempt.state] || 'Needs attention'),element('span','try-duration',duration(attempt.started_at,attempt.finished_at,attempt.state)));
+        if (attempt.failure_reason) row.append(element('p','try-reason',attempt.failure_reason));
         row.append(line,element('p','try-time',`${shortTime(attempt.started_at)}${attempt.category ? ' · ' + attempt.category.replaceAll('_',' ') : ''}`));
         tries.append(row);
       }
@@ -101,6 +102,8 @@
         const states = {queued:'Waiting for the serial worker',attention:'Paused · see the model nodes and operational note',failed:'Stopped · see the operational note',completed:'Processing finished · open GitHub for the review',cancelled:'Cancelled · no further review work',superseded:'Superseded by a newer review state'};
         text(heartbeat,states[data.status] || 'Review is not running');
       }
+      const retryControl = document.querySelector("[data-job-retry-control]");
+      if (retryControl) retryControl.hidden = !data.retry_available;
       renderFlow(data.flow);
       const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 50;
       for (const event of data.events) {

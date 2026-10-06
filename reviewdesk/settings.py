@@ -93,3 +93,18 @@ CREDENTIAL_KEY = os.environ.get("CREDENTIAL_KEY", "")
 LIVE_WRITES = os.environ.get("LIVE_WRITES", "0") == "1"
 
 SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
+
+# Explicit account binding; superuser status alone does not grant dashboard retry.
+DASHBOARD_RETRY_USER_ID = int(os.environ.get("DASHBOARD_RETRY_USER_ID", "0"))
+
+# Fingerprinted URLs prevent old dashboard assets surviving a deployment in browser/CDN caches.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": (
+            "django.contrib.staticfiles.storage.StaticFilesStorage"
+            if DEBUG or "test" in __import__("sys").argv
+            else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+        )
+    },
+}

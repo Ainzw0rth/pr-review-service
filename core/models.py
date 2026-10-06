@@ -140,6 +140,9 @@ class Job(models.Model):
     reason = models.CharField(max_length=250, blank=True)
     provider_diagnostics = models.JSONField(default=dict, blank=True)
     provider_plan = models.JSONField(default=list, blank=True)
+    retry_of = models.OneToOneField(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="dashboard_retry"
+    )
     provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True, blank=True)
     next_retry_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

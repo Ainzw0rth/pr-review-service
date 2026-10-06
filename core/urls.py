@@ -9,5 +9,6 @@ urlpatterns = [
     path("logout/", views.sign_out, name="logout"),
     path("access/<str:token>/", views.access, name="access"),
     path("jobs/<uuid:job_id>/", views.job_detail, name="job_detail"),
+    path("jobs/<uuid:job_id>/retry/", views.job_retry, name="job_retry"),
     path("jobs/<uuid:job_id>/activity/", views.job_activity, name="job_activity"),
 ]

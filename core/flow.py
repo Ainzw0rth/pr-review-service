@@ -1,6 +1,7 @@
 """Read-only progress projection. Never turn planned work into claimed work."""
 
 from .models import Provider
+from .providers import failure_description
 
 
 def snapshot(job, events):
@@ -148,6 +149,7 @@ def snapshot(job, events):
                 "started_at": attempt.started_at,
                 "finished_at": attempt.finished_at,
                 "category": category,
+                "failure_reason": failure_description(attempt.diagnostics, state),
             }
         )
         group["state"] = state

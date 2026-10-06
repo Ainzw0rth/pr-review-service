@@ -308,3 +308,13 @@ The read-only job page shows connected stage nodes: file and documentation count
 CI, optional tests, ordered model attempts, and GitHub publication. Each model call has its own
 result and duration. Quota checks remain on the selected provider. Detailed events are collapsed
 by default. Historical jobs show only recorded evidence; deployment does not resume them.
+
+### Owner-only dashboard retries
+
+Set `DASHBOARD_RETRY_USER_ID` to the existing owner's Django user ID (default `0` disables).
+The account must also be active and a superuser. Other admins and members cannot use this action.
+On an eligible job detail page, **Retry review** creates a fresh attempt from the first model.
+The server rechecks the current GitHub commit, reviewer, label and canonical human review cycle.
+Stale, running, completed or already-published attempts cannot be retried this way. No label is
+added automatically. Double-clicks redirect to the same new attempt. Model errors show safe
+HTTP/classification details; insufficient Anthropic API credits are quota, including HTTP 400.
