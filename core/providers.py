@@ -39,9 +39,16 @@ class ProviderError(Exception):
 
 
 ERROR_REASONS = {
+    "cli_coverage": "CLI did not inspect all required review evidence. Nothing was published.",
+    "cli_auth": "CLI subscription login is missing or expired. Reconnect this CLI account.",
+    "cli_quota": "Subscription usage limit reached. Waiting for the next availability check; no API billing fallback.",
+    "cli_protocol": "CLI did not return a complete structured review. Check the CLI connection and version.",
+    "cli_setup": "Isolated CLI runner is not configured or unavailable. Check its pinned image and auth volume.",
+    "cli_tools": "CLI attempted a tool outside the review evidence boundary. Nothing was published.",
+    "cli_memory": "CLI exceeded the runner memory limit. Nothing was published.",
     "insufficient_credits": "Provider credit balance is too low. Add API credits; quota waits do not switch models.",
     "context_too_large": "Request exceeds this model's context limit. Reduce the review context before retrying.",
-    "model_not_found": "Configured model is unavailable to this API account. Check the model ID and access.",
+    "model_not_found": "Configured model is unavailable to this provider account. Check the model ID and access.",
     "request_rejected": "Provider rejected the API request. Check the provider configuration.",
     "output_invalid": "Provider output failed review JSON/schema validation. Nothing was published.",
     "output_incomplete": "Provider stopped before producing a complete review. Nothing was published.",
@@ -314,7 +321,7 @@ def review(provider, context, cancelled, *, on_response=None):
     if cancelled():
         raise ReviewCancelled()
     if (
-        provider.kind not in {"openai", "anthropic"}
+        provider.kind not in {"openai", "anthropic", "claude_cli", "codex_cli"}
         or not provider.model
         or not isinstance(context, dict)
     ):
@@ -325,6 +332,10 @@ def review(provider, context, cancelled, *, on_response=None):
             raise ProviderError("invalid", detail="context_limit")
     except (ValueError, TypeError, RecursionError):
         raise ProviderError("invalid") from None
+    if provider.kind in {"claude_cli", "codex_cli"}:
+        from .cli import review_cli
+
+        return review_cli(provider, context, cancelled, on_response=on_response)
     try:
         credential = decrypt(provider.credential.encrypted_value)
         if not credential or "\n" in credential or "\r" in credential:

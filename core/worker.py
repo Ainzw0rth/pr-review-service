@@ -70,7 +70,9 @@ def run_job(job):
             finish(job, "attention", "No enabled model connection. Admin configuration required.")
             return
         if not job.provider_plan:
-            job.provider_plan = [{"id": p.pk, "name": p.name, "model": p.model} for p in providers]
+            job.provider_plan = [
+                {"id": p.pk, "name": p.name, "model": p.model, "kind": p.kind} for p in providers
+            ]
             Job.objects.filter(pk=job.pk, status="running").update(provider_plan=job.provider_plan)
         result = None
         for provider in providers:

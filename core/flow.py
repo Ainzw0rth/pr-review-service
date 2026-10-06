@@ -100,7 +100,7 @@ def snapshot(job, events):
     legacy = not attempts and "model" in {e.code for e in all_events}
     plan = job.provider_plan
     if not plan and not legacy:
-        plan = list(Provider.objects.filter(enabled=True).values("id", "name", "model"))
+        plan = list(Provider.objects.filter(enabled=True).values("id", "name", "model", "kind"))
     groups = []
     for provider in plan:
         groups.append(
@@ -109,6 +109,7 @@ def snapshot(job, events):
                 "title": provider["name"],
                 "model": provider["model"],
                 "state": "pending",
+                "backend": provider.get("kind", ""),
                 "attempts": [],
             }
         )
@@ -142,6 +143,20 @@ def snapshot(job, events):
             "general_harms",
         ):
             category = None
+        transport = attempt.diagnostics.get("transport", "")
+        if transport in {"claude_cli", "codex_cli"}:
+            group["backend"] = transport
+        event_count = attempt.diagnostics.get("events_received")
+        if type(event_count) is not int or not 0 <= event_count <= 1000000:
+            event_count = None
+        evidence_read = attempt.diagnostics.get("evidence_read")
+        evidence_total = attempt.diagnostics.get("evidence_total")
+        if not (
+            type(evidence_read) is int
+            and type(evidence_total) is int
+            and 0 <= evidence_read <= evidence_total <= 10000
+        ):
+            evidence_read = evidence_total = None
         group["attempts"].append(
             {
                 "id": attempt.pk,
@@ -149,6 +164,9 @@ def snapshot(job, events):
                 "started_at": attempt.started_at,
                 "finished_at": attempt.finished_at,
                 "category": category,
+                "events_received": event_count,
+                "evidence_read": evidence_read,
+                "evidence_total": evidence_total,
                 "failure_reason": failure_description(attempt.diagnostics, state),
             }
         )

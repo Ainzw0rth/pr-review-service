@@ -109,15 +109,17 @@ review request, so developers may need to request Louis again before retoggling.
 
 ### Models and authentication
 
-Current adapters: **Anthropic Messages API** and **OpenAI Responses API**, with API keys.
-Use provider-console model IDs, not display labels. The requested Opus 5.5 → Sol 6.1 → Opus 4.8
-preference is not silently translated to invented IDs. Availability and account access need
-connection verification with your actual providers before live operation.
+Supported adapters: **Anthropic Messages API**, **OpenAI Responses API**, **Claude Code CLI**,
+and **Codex CLI**. API adapters use API keys; CLI adapters use the official CLI's subscription
+login in a dedicated private Docker volume. Never paste subscription tokens into API-key fields.
+Use exact model IDs verified with your account; display names do not establish availability.
+See [CLI runner setup](.claude/cli-runner-operations.md) for image building, login, probes and recovery.
 
-**Subscription OAuth is not implemented:** there is no verified third-party OAuth client/refresh
-contract configured for this service. Do not paste subscription/CLI session tokens into the API-key
-field. Adding a supported OAuth connection requires the provider's supported registration and
-refresh flow; until then use API credentials. This limitation is explicit rather than a token-reuse workaround.
+CLI runners have no GitHub credentials, shell tools, arbitrary file access or external write tools.
+They receive collected commit-pinned evidence through one read-only MCP tool. Results require
+successful CLI exit, structured schema validation and complete evidence delivery. Delivery counters
+prove tool activity, not model reasoning or review correctness. The trusted worker remains solely
+responsible for eligibility, CI and publication. No silent fallback from subscription to paid API.
 
 Outage errors may fall through the configured priority. Quota errors do not: dashboard shows
 Out of quota, retains the selected provider, releases the worker and shows reset/next-check time.
@@ -133,9 +135,9 @@ stored. Each provider attempt clears stale diagnostics before calling; network f
 a response have no response metadata. Historical attempts cannot be backfilled from discarded
 responses; any separately recorded diagnostic replay must be identified as such.
 
-There is no configured monthly spend cap or whole-review timeout. Individual calls have finite
-network timeouts; failure traversal is bounded. Interrupting a job cannot undo provider charges
-already incurred. An in-flight model call may take up to its network timeout to return.
+There is no configured monthly spend cap or whole-review timeout. API calls have finite
+network timeouts; CLI reviews have no service-imposed wall-clock timeout. Failure traversal is bounded. Interrupting a job cannot undo provider charges
+already incurred. API cancellation may wait for a network timeout; CLI cancellation removes its runner container.
 
 ### Required checks and isolated tests
 

@@ -26,11 +26,15 @@
     node.append(top);
     if (model) {
       node.append(element('h4','model-name',data.title),element('p','model-id',data.model));
+      const backend = {claude_cli:'Claude Code · subscription',codex_cli:'Codex · subscription',anthropic:'Anthropic API',openai:'OpenAI API'}[data.backend];
+      if (backend) node.append(element('p','model-backend',backend));
       const tries = element('ol','model-tries');
       for (const [number, attempt] of data.attempts.entries()) {
         const row = element('li',`model-try try-${attempt.state}`);
         const line = element('div','try-heading');
         line.append(element('span','try-index',String(number + 1).padStart(2,'0')),element('strong','try-outcome',labels[attempt.state] || 'Needs attention'),element('span','try-duration',duration(attempt.started_at,attempt.finished_at,attempt.state)));
+        if (attempt.events_received !== null && attempt.events_received !== undefined) row.append(element('p','try-progress',`${attempt.events_received} CLI events received`));
+        if (attempt.evidence_total !== null && attempt.evidence_total !== undefined) row.append(element('p','try-progress',`${attempt.evidence_read} / ${attempt.evidence_total} evidence items supplied`));
         if (attempt.failure_reason) row.append(element('p','try-reason',attempt.failure_reason));
         row.append(line,element('p','try-time',`${shortTime(attempt.started_at)}${attempt.category ? ' · ' + attempt.category.replaceAll('_',' ') : ''}`));
         tries.append(row);

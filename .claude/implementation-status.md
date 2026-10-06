@@ -151,3 +151,19 @@ Supersedes the earlier pause-on-first-refusal behavior, per Louis's request.
 - CLI-backed reviewing is under discussion, not implemented. Both installed CLIs provide official
   non-interactive structured output. Keep CLI credentials/execution isolated from the web app
   and retain deterministic GitHub publication if this option is implemented.
+
+## Subscription CLI deployment — 2026-10-06
+
+Supersedes earlier notes that CLI reviewing is unimplemented. Isolated Claude Code/Codex
+provider adapters are deployed with structured output, fixed read-only evidence tool, complete
+evidence-delivery gate, cancellation, safe progress counters and unchanged publication guards.
+
+- Codex ChatGPT login verified: `gpt-6.1-sol` full PR157 probe returned a complete validated review,
+  138/138 evidence items, 4 findings; no publication. Deployed-worker synthetic probe also passed.
+- Sol CLI enabled. Paid API adapters disabled; historical provider records retained.
+- Claude host authentication still reports signed out after user reported login completion.
+  Both Opus CLI entries remain disabled pending login-location clarification and model probes.
+- 215 Django tests, 2 Node tests, Ruff, JS syntax, migration check, deploy check and public health
+  passed. Desktop/mobile browser fixture shows backend/event/evidence counters.
+- No old job retriggered. Owner retry remains available subject to fresh GitHub eligibility.
+- Setup/recovery: [CLI runner operations](cli-runner-operations.md). Port remains 8040.

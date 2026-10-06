@@ -121,6 +121,42 @@ class DashboardTests(TestCase):
         self.assertEqual(flow["models"][0]["attempts"][0]["state"], "refused")
         self.assertNotContains(response, "req_private")
 
+    def test_cli_progress_exposes_only_bounded_operational_counts(self):
+        from core.models import ModelAttempt, Provider
+
+        provider = Provider.objects.create(name="Sol CLI", kind="codex_cli", model="gpt-6.1-sol")
+        attempt = ModelAttempt.objects.create(
+            job=self.visible,
+            provider=provider,
+            provider_name=provider.name,
+            model=provider.model,
+            diagnostics={
+                "transport": "codex_cli",
+                "events_received": 12,
+                "evidence_read": 3,
+                "evidence_total": 8,
+                "reasoning": "private-model-text",
+            },
+        )
+        self.client.force_login(self.user)
+        url = f"/jobs/{self.visible.pk}/activity/"
+        response = self.client.get(url)
+        model = next(
+            m for m in response.json()["flow"]["models"] if m["provider_id"] == provider.pk
+        )
+        self.assertEqual(model["backend"], "codex_cli")
+        self.assertEqual(model["attempts"][0]["evidence_read"], 3)
+        self.assertNotContains(response, "private-model-text")
+        attempt.diagnostics.update(evidence_read=-1, evidence_total=10001)
+        attempt.save()
+        model = next(
+            m
+            for m in self.client.get(url).json()["flow"]["models"]
+            if m["provider_id"] == provider.pk
+        )
+        self.assertIsNone(model["attempts"][0]["evidence_total"])
+        self.assertIsNone(model["attempts"][0]["evidence_read"])
+
     def test_old_activity_does_not_invent_model_retries(self):
         from core.activity import record
         from core.models import Provider

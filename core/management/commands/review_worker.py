@@ -24,6 +24,10 @@ class Command(BaseCommand):
                 for command in Repository.objects.values_list("test_command", flat=True)
             ):
                 cleanup_orphans()
+            if settings.CLI_RUNNER_IMAGE:
+                from core.cli import cleanup_cli_orphans
+
+                cleanup_cli_orphans()
             recover_interrupted()
             while True:
                 job = claim()

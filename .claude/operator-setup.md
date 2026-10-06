@@ -67,7 +67,10 @@ ChatGPT subscription billing is separate from API usage:
 [billing explanation](https://help.openai.com/en/articles/9039756-managing-billing-settings-on-the-chatgpt-web-and-api-platform).
 
 Only one provider key is necessary to begin. Both enable cross-provider availability fallback.
-This implementation uses API keys, not subscription OAuth sessions. Quota exhaustion waits;
+API adapters use API keys; subscription CLI adapters now use isolated official CLI login.
+See [CLI runner operations](cli-runner-operations.md). Production currently enables verified
+Sol 6.1 CLI only; both Opus CLI connections await verified Claude login. API connections are disabled.
+Quota exhaustion waits;
 provider refusals and outages advance through the configured order using the unchanged request.
 Each model is tried once per pass. Exhausted routes, authentication and invalid output pause.
 

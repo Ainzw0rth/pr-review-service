@@ -108,3 +108,7 @@ STORAGES = {
         )
     },
 }
+
+CLI_RUNNER_IMAGE = os.environ.get("CLI_RUNNER_IMAGE", "")
+CLI_CODEX_AUTH_VOLUME = os.environ.get("CLI_CODEX_AUTH_VOLUME", "auto-reviewer_codex-auth")
+CLI_CLAUDE_AUTH_VOLUME = os.environ.get("CLI_CLAUDE_AUTH_VOLUME", "auto-reviewer_claude-auth")

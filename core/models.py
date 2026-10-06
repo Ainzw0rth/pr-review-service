@@ -46,12 +46,31 @@ class Credential(models.Model):
 class Provider(models.Model):
     name = models.CharField(max_length=100)
     kind = models.CharField(
-        max_length=20, choices=[("anthropic", "Anthropic Messages"), ("openai", "OpenAI Responses")]
+        max_length=20,
+        choices=[
+            ("anthropic", "Anthropic Messages API"),
+            ("openai", "OpenAI Responses API"),
+            ("claude_cli", "Claude Code subscription CLI"),
+            ("codex_cli", "Codex subscription CLI"),
+        ],
     )
     model = models.CharField(max_length=120)
-    credential = models.ForeignKey(Credential, on_delete=models.PROTECT)
+    credential = models.ForeignKey(Credential, on_delete=models.PROTECT, null=True, blank=True)
     order = models.PositiveIntegerField(default=0)
     enabled = models.BooleanField(default=True)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if self.kind in {"claude_cli", "codex_cli"}:
+            if self.credential_id:
+                raise ValidationError(
+                    {
+                        "credential": "CLI backends use private subscription login volumes, not API keys."
+                    }
+                )
+        elif not self.credential_id:
+            raise ValidationError({"credential": "API backends require an API credential."})
 
     class Meta:
         ordering = ["order", "id"]
