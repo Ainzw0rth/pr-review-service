@@ -18,6 +18,114 @@ recognized context failures show their specific safe cause in the job's operatio
 Read [the team workflow](.claude/team-auto-review-workflow.md) and
 [the implementation plan](.claude/implementation-plan.md) before enabling live writes.
 
+## Architecture and review flow
+
+These Mermaid diagrams render directly in GitHub's README view. Solid arrows show the main
+review path; dotted arrows show optional integrations or background activity.
+
+### Components
+
+```mermaid
+flowchart TB
+    github["GitHub<br/>PRs, issues, source, docs and CI"]
+    browser["Team browser<br/>Queue, stage nodes and filtered CLI activity"]
+    tunnel["Cloudflare Tunnel<br/>HTTPS public hostname"]
+
+    subgraph vps["VPS · Docker Compose"]
+        web["Web service · port 8040<br/>Django dashboard, admin and webhook ingress"]
+        db[("Shared SQLite database<br/>Event inbox, job queue, attempts and activity")]
+        events["Event processor<br/>Reconcile GitHub timeline and review eligibility"]
+        worker["Single review worker<br/>Collect evidence, check CI, run review and publish"]
+        models["Provider adapters<br/>Configured priority and failure handling"]
+        cli["Disposable CLI container<br/>Claude Code or Codex + read-only evidence tool"]
+        tests["Optional isolated test container<br/>No network or publishing credentials"]
+        maintenance["Maintenance service<br/>Hourly retention cleanup"]
+    end
+
+    provider["Model providers<br/>Official subscription CLI or configured API"]
+    sheet["Optional Google Sheet<br/>Confirmed task map and status cells only"]
+
+    github -->|Signed PR webhooks| tunnel
+    browser <-->|Authenticated dashboard access| tunnel
+    tunnel <--> web
+    web <-->|Store events; read jobs and activity| db
+    db -->|Pending webhook events| events
+    events <-->|Read current PR and canonical timeline| github
+    events -->|Enqueue or invalidate review attempts| db
+    db -->|Claim one eligible job| worker
+    worker <-->|Read evidence and CI; publish review actions| github
+    worker --> models
+    models -->|Commit-pinned evidence| cli
+    cli <-->|Subscription session| provider
+    models -.->|Optional direct API adapter| provider
+    cli -->|Structured result and filtered public progress| worker
+    worker -.->|Run configured tests| tests
+    tests -.->|Pass or fail evidence| worker
+    worker -->|Status, attempts and sanitized activity| db
+    worker -.->|Review outcome status sync| sheet
+    events -.->|Review and merge lifecycle status sync| sheet
+    maintenance -.->|Expire eligible records after retention period| db
+```
+
+- **GitHub is the collaboration surface:** findings, replies, request-changes reviews and thread
+  resolutions live there. The dashboard shows progress, not review results.
+- **The worker owns review publication.** Models return structured assessments; CLI containers do not
+  receive GitHub credentials. The event processor also performs narrowly scoped lifecycle label
+  cleanup and optional Sheet sync.
+- **SQLite is the durable queue:** no Redis or separate message broker. Web, events, worker and
+  maintenance are separate processes sharing the persistent data volume.
+- **Access is organization-scoped:** members have read-only dashboard access; the configured owner
+  can retry eligible attempts, and administrators manage connections and interrupt jobs.
+- **Startup:** the one-shot `migrate` service applies schema migrations before the long-running
+  services start. Cloudflare Tunnel is managed outside this project's Compose stack.
+
+### One review cycle
+
+```mermaid
+flowchart TB
+    human["Human requests the configured reviewer<br/>and sets on review"]
+    ingress["Verify webhook signature and delivery ID<br/>Reconcile against GitHub's current timeline"]
+    eligible{"Enabled repository, open PR,<br/>requested reviewer and on review?"}
+    ignore["No new review job"]
+    queue["Persist review attempt<br/>Pin commit SHA and human review cycle"]
+    context["Worker collects changed code, docs,<br/>open threads, linked issues and related PRs"]
+    ci["Read current-commit CI<br/>Wait while checks run; run optional local tests"]
+    model["Call configured model<br/>Validate structured output and thread assessments"]
+    guard{"Same commit, eligible cycle<br/>and unchanged discussion?"}
+    stale["Stop stale attempt<br/>Human requests a fresh review"]
+    publish["Publish concise findings and replies on GitHub<br/>Resolve verified fixes; keep remaining gaps open"]
+    outcome{"Complete review, no blocking findings<br/>and required test evidence passed?"}
+    feedback["feedback label<br/>Request changes when blocked"]
+    ready["approved label<br/>AI clearance only"]
+    fix["Developer pushes fixes<br/>Re-request reviewer if needed and retoggle"]
+    merge["Human formally approves and merges"]
+    sync["Optional Sheet status sync<br/>Completed only when all mapped PRs are merged"]
+
+    human --> ingress --> eligible
+    eligible -->|No| ignore
+    eligible -->|Yes| queue --> context --> ci --> model --> guard
+    guard -->|No| stale
+    guard -->|Yes| publish --> outcome
+    outcome -->|No| feedback --> fix --> human
+    outcome -->|Yes| ready --> merge
+    feedback -.-> sync
+    ready -.-> sync
+    merge -.-> sync
+```
+
+**Exceptions and retries:** incomplete context stops the model review and blocks clearance.
+A provider refusal or outage tries the next configured model; exhausted routes, authentication
+errors and invalid output need attention. Quota exhaustion releases the worker and schedules a
+retry on the same provider. Fresh CI and eligibility checks remain mandatory before clearance.
+New commits or loss of eligibility invalidate active attempts; pushes and discussion replies alone
+do not start another review. GitHub read/write operations are revalidated, but are not one atomic
+transaction across GitHub and the local database.
+
+For the detailed developer steps, see [the team workflow](.claude/team-auto-review-workflow.md).
+Implementation entry points: [webhook ingress](core/webhooks.py), [event processing](core/events.py),
+[review worker](core/worker.py), [publication guards](core/publication.py),
+[CLI runner](core/cli.py), and [Sheet synchronization](core/sheets.py).
+
 ## Run locally on this VPS
 
 Python 3.12+, Docker Engine/Compose and the project virtual environment are used. Versions
