@@ -281,6 +281,30 @@ class ContextTests(TestCase):
         self.assertTrue(result["complete"], result["reason"])
         self.assertEqual([pr["number"] for pr in result["related_prs"]], [3])
 
+    def test_related_issue_does_not_recursively_expand_repository_backlog(self):
+        github, job = self.fixture()
+        original = github.get.side_effect
+
+        def get(path):
+            if path == "/issues/2":
+                return {"number": 2, "body": "Depends on #3; backend PR #4", "title": "Task"}
+            if path == "/issues/3":
+                return {"number": 3, "body": "Backlog " + " ".join(f"#{n}" for n in range(5, 80))}
+            if path == "/issues/4":
+                return {"number": 4, "pull_request": {}}
+            return original(path)
+
+        github.get.side_effect = get
+        current = github.pull.return_value
+        github.pull.side_effect = lambda number: (
+            current if number == 1 else {"number": number, "head": {"sha": "c" * 40}}
+        )
+        result = build_context(github, job)
+        self.assertTrue(result["complete"], result["reason"])
+        self.assertEqual([issue["number"] for issue in result["issues"]], [2, 3])
+        self.assertEqual([pr["number"] for pr in result["related_prs"]], [4])
+        self.assertNotIn("/issues/5", [call.args[0] for call in github.get.call_args_list])
+
     def test_truncated_diff_blocks_clearance(self):
         github, job = self.fixture()
         github.pages.side_effect = lambda path, **kw: (

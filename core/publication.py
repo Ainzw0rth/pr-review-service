@@ -245,6 +245,16 @@ def publish(github, job, result, context, checks):
     if blocked and Receipt.objects.filter(job=job, key="review").exists():
         Receipt.objects.get_or_create(job=job, key="request_changes")
 
+    return terminal_transition(github, job, blocked=blocked, baseline_timeline=baseline_timeline)
+
+
+def fail_to_feedback(github, job):
+    _, baseline_timeline = _guard_state(github, job)
+    return terminal_transition(github, job, blocked=True, baseline_timeline=baseline_timeline)
+
+
+def terminal_transition(github, job, *, blocked, baseline_timeline):
+    number = job.pr.number
     # Pin terminal label normalization to the checked timeline. Only this call's
     # exact label writes may be excluded from later eligibility checks.
     own_transitions = []

@@ -7,18 +7,19 @@ from django.utils import timezone
 
 from core.activity import Progress
 from core.models import Job, Provider
-from core.publication import StaleReview, guard, once, publish, transition
+from core.publication import StaleReview, fail_to_feedback, guard, once, publish
 from core.workflow import finish
 
 
 def run_job(job):
-    from core.context import build_context
+    from core.context import build_context, failure_reason
     from core.github import GitHub, IntegrationError, check_required
     from core.providers import ProviderError, ReviewCancelled, review
     from core.runner import run_tests
     from core.sheets import sync_status
 
     github = None
+    diagnostic = "Review incomplete. Check connections and required checks; request a new review."
     progress = Progress(job)
     progress.start()
     try:
@@ -35,7 +36,9 @@ def run_job(job):
         progress("context")
         context = build_context(github, job, progress=progress)
         if not context.get("complete", False):
-            raise ProviderError("invalid", "Review context is incomplete.")
+            diagnostic = failure_reason(context)
+            progress("context_failed")
+            raise IntegrationError("Context collection incomplete")
         progress("context_ready")
         progress("checks")
         checks = check_required(github, job.pr.repository, job.head_sha)
@@ -130,23 +133,17 @@ def run_job(job):
                 github,
                 job,
                 "failure",
-                f"Review could not complete due to unavailable context, checks or a connection failure. No approval was granted. After resolving the problem, request @{job.pr.repository.reviewer} and toggle `{job.pr.repository.feedback_label}` → `{job.pr.repository.review_label}`.",
+                f"Review could not complete. {diagnostic} No approval was granted. After resolving the problem, request @{job.pr.repository.reviewer} and toggle `{job.pr.repository.feedback_label}` → `{job.pr.repository.review_label}`.",
                 f"/issues/{job.pr.number}/comments",
                 f"/issues/{job.pr.number}/comments",
             )
-            transition(
-                github,
-                job.pr.repository,
-                job.pr.number,
-                job.pr.repository.feedback_label,
-                lambda: guard(github, job),
-            )
+            fail_to_feedback(github, job)
         except Exception:
             pass
         finish(
             job,
             "failed",
-            "Review incomplete. Check connections and required checks; request a new review.",
+            diagnostic,
         )
 
     finally:

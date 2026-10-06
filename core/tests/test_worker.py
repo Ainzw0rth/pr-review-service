@@ -95,3 +95,28 @@ class WorkerTests(WorkflowTests):
             run_job(job)
         job.refresh_from_db()
         self.assertEqual(job.status, "failed")
+
+    def test_context_failure_exposes_safe_cause_without_calling_model(self):
+        self.reconcile(self.event("labeled"), self.snapshot())
+        job = workflow.claim()
+        reason = "Too many linked issues or pull requests for complete review."
+        github = FakeGitHub(self.snapshot())
+        with (
+            patch("core.github.GitHub", return_value=github),
+            patch("core.context.build_context", return_value={"complete": False, "reason": reason}),
+            patch("core.providers.review") as model,
+        ):
+            run_job(job)
+        job.refresh_from_db()
+        self.assertEqual(job.reason, reason)
+        self.assertIn("context_failed", job.activity.values_list("code", flat=True))
+        model.assert_not_called()
+        self.assertEqual([label["name"] for label in github.snapshot["labels"]], ["feedback"])
+
+    def test_context_diagnostic_never_persists_arbitrary_external_text(self):
+        from core.context import failure_reason
+
+        self.assertEqual(
+            failure_reason({"reason": "secret-token or untrusted GitHub response"}),
+            "Review context is incomplete or unavailable; no model review was started.",
+        )

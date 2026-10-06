@@ -17,6 +17,7 @@ MESSAGES = {
     "related": "Loading linked issues and related pull requests.",
     "docs": "Relevant documentation loaded",
     "context_ready": "Review context collected.",
+    "context_failed": "Context collection stopped; see the operational note for the cause.",
     "checks": "Checking required CI for the reviewed commit.",
     "checks_passed": "Required CI evidence passed.",
     "checks_blocked": "Required CI is missing, pending or unsuccessful; clearance blocked.",

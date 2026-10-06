@@ -13,6 +13,35 @@ from .github import MAX_PAGES, IntegrationError
 MAX_CONTEXT_BYTES = 1_500_000
 MAX_SOURCE_FILES = 150
 MAX_RELATED = 25
+SAFE_FAILURES = frozenset(
+    {
+        "Too many linked issues or pull requests for complete review.",
+        "Review context exceeds supported size; split the PR or narrow its scope.",
+        "The change exceeds supported source context size.",
+        "The pull request file list is incomplete.",
+        "A changed file has no reviewable diff; approval requires complete evidence.",
+        "A changed file diff is truncated; complete evidence is required.",
+        "A required source file is unavailable or too large.",
+        "A required source file is not reviewable text.",
+        "The pull request head changed; request a fresh review.",
+        "The pull request changed while gathering evidence.",
+        "Relevant documentation exceeds supported context size.",
+        "Referenced source exceeds supported context size.",
+        "Source tree is incomplete; relevant documentation cannot be verified.",
+        "GitHub discussion pagination is incomplete.",
+        "Discussion context exceeds supported size.",
+        "GitHub discussion exceeds supported context limit.",
+    }
+)
+
+
+def failure_reason(context):
+    reason = context.get("reason")
+    if isinstance(reason, str) and reason in SAFE_FAILURES:
+        return reason
+    return "Review context is incomplete or unavailable; no model review was started."
+
+
 THREAD_FIELDS = """id isResolved path line comments(first:100) {
  nodes { id databaseId body author { login } } pageInfo { hasNextPage endCursor }
 }"""
@@ -207,6 +236,9 @@ def build_context(github, job, progress=None):
         if len(references) > MAX_RELATED:
             raise IntegrationError("Too many linked issues or pull requests for complete review.")
         processed = {job.pr.number}
+        # Expand only issues directly linked by the PR/confirmed task map. Reading a
+        # dependency issue must not recursively enroll its entire parent backlog.
+        direct_references = frozenset(references)
         progress("related")
         while references - processed:
             if len(processed | references) > MAX_RELATED + 1:
@@ -230,7 +262,8 @@ def build_context(github, job, progress=None):
                     + "\n"
                     + "\n".join(comment.get("body") or "" for comment in issue["comments"])
                 )
-                references.update(_references(linked_text, repo.full_name))
+                if number in direct_references:
+                    references.update(_references(linked_text, repo.full_name))
             bound()
         if result["tasks"] and repo.sheet_credential:
             from .sheets import task_context

@@ -10,6 +10,11 @@ Operator activation steps: [.claude/operator-setup.md](.claude/operator-setup.md
 GitHub holds review content. Dashboard members see job metadata only. Humans request runs;
 pushes and replies never automatically start a review. One reviewer worker runs globally.
 
+Context follows issues/PRs directly linked from the PR and confirmed task map, plus one hop
+from those directly linked issues. Dependency issues are included as evidence but are not
+recursively expanded into parent backlogs. Scope/size limits still block incomplete reviews;
+recognized context failures show their specific safe cause in the job's operational note.
+
 Read [the team workflow](.claude/team-auto-review-workflow.md) and
 [the implementation plan](.claude/implementation-plan.md) before enabling live writes.
 

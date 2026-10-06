@@ -24,7 +24,7 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 
 ## Verification
 
-- Full Django suite: **178 tests passed** (including live activity access/control coverage).
+- Full Django suite: **181 tests passed** (including context-scope and safe-diagnostic regressions).
 - Ruff check and formatting check passed.
 - Django deployment check passed with production settings; migrations consistent.
 - Production image built and running web service is healthy; proxied HTTPS login returns 200.
@@ -35,6 +35,14 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 
 No real GitHub comments, paid provider calls or Google Sheet writes were used in verification.
 Mocked external integrations are not evidence of real account/model availability.
+
+Read-only replay against the real PR confirmed a recursive issue-link expansion bug. Scope now
+includes direct references plus one issue-reference hop, not a recursive repository backlog.
+The previously failing PR's context now completes: 24 changed files, 2 issues, 1 related PR,
+27 relevant documents and 76 source entries. No provider calls or publication in this replay.
+Recognized context failures now retain a safe specific operational reason and activity event.
+Failure cleanup now reuses the guarded terminal label transition, avoiding the duplicate
+`on review` + `feedback` labels exposed by this real-world context failure. Regression verified.
 
 ## Live activity visibility
 
