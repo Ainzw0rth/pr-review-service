@@ -126,7 +126,8 @@ def _references(text, full_name):
     return {int(number) for number in explicit if int(number) > 0}
 
 
-def build_context(github, job):
+def build_context(github, job, progress=None):
+    progress = progress or (lambda *args, **kwargs: None)
     repo = job.pr.repository
     result = {
         "complete": False,
@@ -188,6 +189,8 @@ def build_context(github, job):
                 result["sources"].append(source)
             result["files"].append(entry)
             bound()
+            progress("files", count=len(result["files"]))
+        progress("threads")
         result["threads"] = threads(github, repo.full_name, job.pr.number)
         result["comments"] = github.pages(f"/issues/{job.pr.number}/comments")
         text = (pr.get("body") or "") + "\n" + pr.get("title", "")
@@ -204,6 +207,7 @@ def build_context(github, job):
         if len(references) > MAX_RELATED:
             raise IntegrationError("Too many linked issues or pull requests for complete review.")
         processed = {job.pr.number}
+        progress("related")
         while references - processed:
             if len(processed | references) > MAX_RELATED + 1:
                 raise IntegrationError(
@@ -280,6 +284,7 @@ def build_context(github, job):
             doc = _source(github, path, job.head_sha)
             result["docs"].append(doc)
             bound()
+            progress("docs", count=len(result["docs"]))
             # Resolve explicit Markdown links against the referring document.
             for target in re.findall(r"\]\(([^)\s]+)", doc["content"]):
                 if "://" in target or target.startswith("#"):

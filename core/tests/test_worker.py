@@ -58,6 +58,7 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(job.next_retry_at, retry)
         self.assertEqual(reviewer.call_count, 1)
         self.assertEqual(gh.writes, [])
+        self.assertIn("quota", list(job.activity.values_list("code", flat=True)))
 
     def test_policy_refusal_never_falls_back(self):
         job, gh, reviewer = self.run_case(ProviderError("attention"))
@@ -79,6 +80,11 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(reviewer.call_count, 2)
         self.assertEqual(job.provider, self.second)
         self.assertEqual([x["name"] for x in gh.snapshot["labels"]], ["approved"])
+        codes = list(job.activity.values_list("code", flat=True))
+        self.assertEqual(codes.count("model"), 2)
+        self.assertLess(codes.index("unavailable"), codes.index("result"))
+        self.assertLess(codes.index("result"), codes.index("publishing"))
+        self.assertEqual(codes[-1], "ended")
 
     def test_bad_credential_marks_job_failed_not_stuck_running(self):
         from core.github import IntegrationError

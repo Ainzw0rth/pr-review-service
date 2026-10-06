@@ -24,7 +24,7 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 
 ## Verification
 
-- Full Django suite: **175 tests passed** (before final documentation-only changes).
+- Full Django suite: **178 tests passed** (including live activity access/control coverage).
 - Ruff check and formatting check passed.
 - Django deployment check passed with production settings; migrations consistent.
 - Production image built and running web service is healthy; proxied HTTPS login returns 200.
@@ -35,6 +35,19 @@ if unused and expired. Once configured, use `access_link --user louis` for recov
 
 No real GitHub comments, paid provider calls or Google Sheet writes were used in verification.
 Mocked external integrations are not evidence of real account/model availability.
+
+## Live activity visibility
+
+- Attempt-detail terminal-style activity panel polls every three seconds; pause/resume and
+  hidden-tab suspension affect only the display.
+- Actual context/CI/test/provider/publication stages, counts and timestamps; no private model
+  reasoning, prompts, source content, raw API responses or credentials.
+- Worker-process heartbeat every ten seconds, including blocking provider waits; explicitly
+  not presented as remote model token progress. Stale feed/heartbeat states visible separately.
+- Organization-scoped GET-only activity endpoint; last 100 events displayed, 300 retained per
+  job; cascade retention with the parent job.
+- Chromium verified pause, newly recorded event catch-up after resume, live status rendering,
+  and mobile 390px document width. Screenshots in ignored `.claude/verification/activity-*.png`.
 
 ## External activation progress
 

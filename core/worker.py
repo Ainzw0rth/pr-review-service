@@ -5,9 +5,10 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 
+from core.activity import Progress
 from core.models import Job, Provider
 from core.publication import StaleReview, guard, once, publish, transition
-from core.workflow import current, finish
+from core.workflow import finish
 
 
 def run_job(job):
@@ -18,7 +19,10 @@ def run_job(job):
     from core.sheets import sync_status
 
     github = None
+    progress = Progress(job)
+    progress.start()
     try:
+        progress("starting")
         github = GitHub(job.pr.repository)
         guard(github, job)
         if not settings.LIVE_WRITES:
@@ -28,14 +32,20 @@ def run_job(job):
                 "Publishing disabled. Admin must enable LIVE_WRITES before a new request.",
             )
             return
-        context = build_context(github, job)
+        progress("context")
+        context = build_context(github, job, progress=progress)
         if not context.get("complete", False):
             raise ProviderError("invalid", "Review context is incomplete.")
+        progress("context_ready")
+        progress("checks")
         checks = check_required(github, job.pr.repository, job.head_sha)
+        progress("checks_passed" if checks["passed"] else "checks_blocked")
         repo = job.pr.repository
         if repo.test_command:
             guard(github, job)
-            tests = run_tests(repo, github.archive(job.head_sha), lambda: not current(job))
+            progress("tests")
+            tests = run_tests(repo, github.archive(job.head_sha), progress.cancelled)
+            progress("tests_passed" if tests["passed"] else "tests_failed")
             checks = {
                 "passed": tests["passed"] and (checks["passed"] if repo.required_checks else True),
                 "summary": checks["summary"] + " " + tests["summary"],
@@ -58,12 +68,17 @@ def run_job(job):
             guard(github, job)
             Job.objects.filter(pk=job.pk, status="running").update(provider=provider)
             try:
-                result = review(provider, context, lambda: not current(job))
+                progress("model")
+                result = review(provider, context, progress.cancelled)
+                progress("result")
+                progress("findings", count=len(result.get("findings", [])))
                 break
             except ProviderError as exc:
                 if exc.kind == "unavailable":
+                    progress("unavailable")
                     continue
                 if exc.kind == "quota":
+                    progress("quota")
                     finish(
                         job,
                         "quota",
@@ -71,6 +86,7 @@ def run_job(job):
                         retry_at=exc.retry_at or timezone.now() + timedelta(minutes=30),
                     )
                 else:
+                    progress("model_attention")
                     finish(
                         job,
                         "attention",
@@ -82,11 +98,16 @@ def run_job(job):
         if result is None:
             raise IntegrationError("No configured provider is available.")
         if repo.required_checks:
+            progress("recheck")
             latest = check_required(github, repo, job.head_sha)
             checks = {"passed": checks["passed"] and latest["passed"], "summary": latest["summary"]}
+        progress("publishing")
         outcome = publish(github, job, result, context, checks)
+        progress("published")
         finish(job, "completed")
         try:
+            if repo.sheet_config:
+                progress("sheet")
             sync_status(
                 github,
                 repo,
@@ -95,6 +116,7 @@ def run_job(job):
                 before_write=lambda: completed_guard(github, job, outcome),
             )
         except Exception:
+            progress("sheet_attention")
             Job.objects.filter(pk=job.pk, status="completed").update(
                 reason="Review published; Sheet update needs admin attention."
             )
@@ -128,8 +150,10 @@ def run_job(job):
         )
 
     finally:
+        progress.close()
         if github is not None and hasattr(github, "close"):
             github.close()
+        progress("ended")
 
 
 def recover_interrupted():

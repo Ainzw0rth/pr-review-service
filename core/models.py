@@ -142,11 +142,22 @@ class Job(models.Model):
     next_retry_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["created_at"]
         constraints = [models.UniqueConstraint(fields=["pr", "generation"], name="unique_attempt")]
+
+
+class JobActivity(models.Model):
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="activity")
+    code = models.CharField(max_length=30)
+    count = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["id"]
 
 
 class Webhook(models.Model):

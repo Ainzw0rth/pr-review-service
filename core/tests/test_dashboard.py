@@ -58,6 +58,59 @@ class DashboardTests(TestCase):
         self.assertNotContains(response, "private/secret-project")
         self.assertEqual(self.client.get(f"/jobs/{self.hidden.id}/").status_code, 404)
 
+    def test_activity_requires_membership_and_is_read_only(self):
+        url = f"/jobs/{self.visible.id}/activity/"
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.client.force_login(self.user)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertEqual(self.client.get(f"/jobs/{self.hidden.id}/activity/").status_code, 404)
+        self.assertEqual(self.client.post(url).status_code, 405)
+        Membership.objects.filter(user=self.user).delete()
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_activity_is_bounded_and_contains_only_operational_messages(self):
+        from core.activity import record
+        from core.models import JobActivity
+
+        with self.assertRaises(ValueError):
+            record(self.visible, "secret-token-or-model-reasoning")
+        with self.assertRaises(ValueError):
+            record(self.visible, "files", count="private-source-code")
+        record(self.visible, "files", count=7)
+        JobActivity.objects.bulk_create(
+            [JobActivity(job=self.visible, code="checks") for _ in range(130)]
+        )
+        self.client.force_login(self.user)
+        response = self.client.get(f"/jobs/{self.visible.id}/activity/")
+        data = response.json()
+        self.assertEqual(len(data["events"]), 100)
+        self.assertIn("Checking required CI", data["events"][-1]["message"])
+        self.assertNotIn("secret-token", response.content.decode())
+        self.assertNotIn("private-source", response.content.decode())
+        self.visible.delete()
+        self.assertEqual(JobActivity.objects.count(), 0)
+
+    def test_worker_heartbeat_throttles_and_preserves_cancellation(self):
+        from unittest.mock import patch
+
+        from core.activity import Progress
+
+        self.visible.status = "running"
+        self.visible.save()
+        progress = Progress(self.visible)
+        with patch("core.activity.current", return_value=True):
+            self.assertFalse(progress.cancelled())
+            self.visible.refresh_from_db()
+            first = self.visible.heartbeat_at
+            self.assertIsNotNone(first)
+            self.assertFalse(progress.cancelled())
+            self.visible.refresh_from_db()
+            self.assertEqual(first, self.visible.heartbeat_at)
+        with patch("core.activity.current", return_value=False):
+            self.assertTrue(progress.cancelled())
+
     def test_member_cannot_change_or_cancel_job_or_enter_admin(self):
         self.client.force_login(self.user)
         self.assertEqual(

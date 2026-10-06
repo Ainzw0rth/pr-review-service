@@ -10,7 +10,7 @@ from django.contrib.auth.forms import AuthenticationForm, SetPasswordForm
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q
-from django.http import HttpResponseForbidden
+from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -183,6 +183,32 @@ def job_detail(request, job_id):
             + 1
         )
     return render(request, "core/job_detail.html", {"job": job, "position": position})
+
+
+@login_required
+@never_cache
+@require_GET
+def job_activity(request, job_id):
+    from .activity import message
+
+    job = get_object_or_404(visible_jobs(request.user), pk=job_id)
+    events = list(job.activity.order_by("-id")[:100])
+    return JsonResponse(
+        {
+            "status": job.status,
+            "status_label": job.get_status_display(),
+            "provider": job.provider.name if job.provider_id else None,
+            "heartbeat_at": job.heartbeat_at,
+            "started_at": job.started_at,
+            "finished_at": job.finished_at,
+            "next_retry_at": job.next_retry_at,
+            "reason": job.reason,
+            "events": [
+                {"id": event.pk, "at": event.created_at, "message": message(event)}
+                for event in reversed(events)
+            ],
+        }
+    )
 
 
 def admin_login(request, extra_context=None):

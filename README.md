@@ -216,6 +216,22 @@ write. Do not give the service ownership of requirements, target dates or other 
 
 ## Dashboard and invitations
 
+Each attempt page includes a read-only **Review activity** panel. It polls every three seconds
+while visible, showing timestamped real operations: context-file/document counts, CI and local
+test checks, provider calls/fallback/quota, validated-response/findings counts, publication and
+optional Sheet synchronization. Pause/resume affects only the display, never the worker.
+
+A separate worker-process heartbeat updates every ten seconds during a running attempt,
+including while waiting on a blocking API call. It is **not** a model token stream or proof of
+remote inference progress. The UI flags heartbeat delays and feed disconnections separately.
+No chain-of-thought, prompts, raw model output, source text, credentials or terminal commands
+are stored in this feed. Review explanations/findings still appear only on GitHub.
+
+Activity uses the same organization access checks as job details. Up to 300 predefined events
+are retained per job (latest 100 displayed); they cascade-delete with 90-day terminal-job cleanup.
+Attempts predating this feature have no historical activity log. Current status, provider,
+start/finish times, operational note and quota retry time update without a page reload.
+
 Members see only their organizations' PR links, commits, trigger actor, status, timestamps and
 sanitized operational messages. Job details link back to GitHub; there is no review-results view.
 Queue positions are organization-visible positions, not a leak of another organization's work.

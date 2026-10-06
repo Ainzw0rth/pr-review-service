@@ -4,6 +4,13 @@
 **Last updated:** 2026-10-06.
 **Initial GitHub repository:** `MarkAny-GaneshaIT/AnyOne-2.0`. Requested reviewer: `Ainzw0rth`.
 Dashboard organization: `ganeshait` (independent of the GitHub organization name).
+
+**Live progress:** open an attempt from the queue to see its Review activity panel. This is a
+read-only operations log, not a shell or model reasoning transcript. It refreshes every three
+seconds; pause/resume freezes only your display. A separate worker heartbeat indicates process
+responsiveness while a provider call is pending, not model token progress. Findings remain on
+GitHub. Delayed heartbeats and lost dashboard connections are explicitly indicated; neither
+should be mistaken for a completed review. Older attempts may have no recorded activity.
 **Configured reviewer:** Louis's GitHub account; exact username must be configured before launch.
 
 This guide describes how developers and reviewers should use the service after its connections and live writes are enabled. GitHub is the home for findings, questions, replies and formal reviews. The dashboard displays review-job progress only. The Google Sheet is the task/requirements source of truth; the service may update only its configured issue-status field.
