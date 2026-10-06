@@ -340,6 +340,11 @@ write. Do not give the service ownership of requirements, target dates or other 
 
 ## Dashboard and invitations
 
+Displayed timestamps use **Asia/Jakarta — WIB (UTC+7)** across the queue, job timeline,
+live activity, invitation expiry and administrator pages, regardless of the browser's timezone.
+Stored timestamps and machine-readable API timestamps remain timezone-aware UTC; retry scheduling
+and elapsed durations are unchanged.
+
 Each attempt page includes a read-only **Review activity** panel. It polls every three seconds
 while visible, showing timestamped real operations: context-file/document counts, CI and local
 test checks, provider calls/fallback/quota, validated-response/findings counts, publication and

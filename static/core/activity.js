@@ -12,8 +12,16 @@
   let transcriptMode = "cli", terminalEvents = [];
   const cliKinds = new Set(["cli_output_text","cli_output_tool","cli_output_done","cli_output_failed","cli_output_status"]);
   const labels = {pending:'Waiting', unused:'Not used', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
-  const utc = value => value ? new Date(value).toISOString().replace('T',' ').replace(/\.\d+Z$/, ' UTC') : '';
-  const shortTime = value => value ? new Date(value).toISOString().slice(11,19) + ' UTC' : '';
+  const jakartaFormat = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  });
+  const jakarta = value => {
+    if (!value) return '';
+    const parts = Object.fromEntries(jakartaFormat.formatToParts(new Date(value)).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} WIB`;
+  };
+  const shortTime = value => value ? jakarta(value).slice(11) : '';
   const text = (element, value) => { if (element.textContent !== value) element.textContent = value; };
   const set = (selector, value) => document.querySelectorAll(selector).forEach(element => text(element, value));
   const element = (tag, className, value) => { const el = document.createElement(tag); el.className = className; if (value !== undefined) el.textContent = value; return el; };
@@ -83,7 +91,7 @@
     const fragment = document.createDocumentFragment();
     for (const event of visible) {
       const row = element('li',event.kind || '');
-      const time = element('time','',utc(event.at)); time.dateTime=event.at;
+      const time = element('time','',jakarta(event.at)); time.dateTime=event.at;
       const content = element('div','terminal-content');
       if(event.source) content.append(element('span','terminal-source',event.source));
       content.append(element('span','terminal-message',event.message));
@@ -109,9 +117,9 @@
       set('[data-job-status]',`${data.status_label}.`);
       document.querySelectorAll('[data-job-badge]').forEach(badge => { text(badge,data.status_label); badge.className = `status status-${data.status}`; });
       set('[data-job-provider]',data.provider || 'Not assigned');
-      set('[data-job-started]',utc(data.started_at) || 'Not started');
-      set('[data-job-finished]',utc(data.finished_at) || 'Not finished');
-      set('[data-job-retry]',utc(data.next_retry_at) || 'Not scheduled');
+      set('[data-job-started]',jakarta(data.started_at) || 'Not started');
+      set('[data-job-finished]',jakarta(data.finished_at) || 'Not finished');
+      set('[data-job-retry]',jakarta(data.next_retry_at) || 'Not scheduled');
       const note = document.querySelector('[data-job-note]');
       note.hidden = !data.reason; text(note.querySelector('p'),data.reason || '');
       text(connection,`${data.status_label}${data.provider ? ' · ' + data.provider : ''}`);
@@ -120,7 +128,7 @@
         const age = data.heartbeat_at ? Math.max(0,Math.floor((Date.now() - Date.parse(data.heartbeat_at)) / 1000)) : null;
         text(heartbeat,age === null ? 'Waiting for worker heartbeat' : `Worker heartbeat ${age}s ago${age > 30 ? ' · delayed; worker may be unavailable' : ' · updating every 3s'}`);
       } else if (data.next_retry_at && data.status === 'quota') {
-        text(heartbeat,`Next availability check ${utc(data.next_retry_at)} · not a guaranteed reset`);
+        text(heartbeat,`Next availability check ${jakarta(data.next_retry_at)} · not a guaranteed reset`);
       } else {
         const states = {queued:'Waiting for the serial worker',attention:'Paused · see the model nodes and operational note',failed:'Stopped · see the operational note',completed:'Processing finished · open GitHub for the review',cancelled:'Cancelled · no further review work',superseded:'Superseded by a newer review state'};
         text(heartbeat,states[data.status] || 'Review is not running');
