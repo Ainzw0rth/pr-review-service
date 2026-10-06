@@ -226,21 +226,34 @@ def check_required(github, repository, sha):
     checks = github.pages(f"/commits/{sha}/check-runs?filter=latest", key="check_runs")
     statuses = github.pages(f"/commits/{sha}/statuses")
     evidence = {}
+    pending_names = set()
     # Commit statuses arrive newest first. Only the latest status is meaningful.
     for status in statuses:
         name = status.get("context")
         if name not in evidence:
             evidence[name] = status.get("state") == "success"
+            if status.get("state") == "pending":
+                pending_names.add(name)
     check_evidence = {}
     for check in checks:
         name = check.get("name")
         passed = check.get("status") == "completed" and check.get("conclusion") == "success"
+        if check.get("status") != "completed":
+            pending_names.add(name)
         check_evidence[name] = check_evidence.get(name, True) and passed
     for name, passed in check_evidence.items():
         evidence[name] = evidence.get(name, True) and passed
     missing = [name for name in required if not evidence.get(name, False)]
+    # Aggregate jobs often do not exist until their dependencies finish.
+    active = bool(pending_names)
+    pending = (
+        bool(missing)
+        and active
+        and all(name not in evidence or name in pending_names for name in missing)
+    )
     return {
         "passed": not missing,
+        "pending": pending,
         "summary": "Required checks passed."
         if not missing
         else "Required checks missing, pending or failed: " + ", ".join(missing),

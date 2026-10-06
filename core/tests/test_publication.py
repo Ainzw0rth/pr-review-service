@@ -178,9 +178,15 @@ class PublicationTests(WorkflowTests):
     def test_thread_reply_targets_root_not_developer_reply(self):
         job, gh = self.prepare()
         result = self.result()
-        result["replies"] = [{"comment_id": 22, "body": "Addressed by the new guard."}]
-        context = {"threads": [{"comments": [{"databaseId": 11}, {"databaseId": 22}]}]}
-        publish(gh, job, result, context, {"passed": True, "summary": "Pass"})
+        result["replies"] = [{"comment_id": 22, "body": "Needs another guard.", "resolve": False}]
+        context = {
+            "threads": [{"id": "thread-1", "comments": [{"databaseId": 11}, {"databaseId": 22}]}]
+        }
+        from unittest.mock import patch
+
+        fresh = {**context["threads"][0], "isResolved": False}
+        with patch("core.publication._fresh_thread", return_value=fresh):
+            publish(gh, job, result, context, {"passed": True, "summary": "Pass"})
         self.assertIn("/pulls/1/comments/11/replies", [path for path, _ in gh.writes])
 
     def test_admin_cancel_during_remote_guard_read_prevents_write(self):

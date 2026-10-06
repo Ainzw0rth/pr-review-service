@@ -197,7 +197,7 @@ Deliver:
 - Detect earlier publication after uncertain HTTP outcomes before retrying.
 - Fresh checks before every external write; avoid claiming impossible atomicity across GitHub endpoints.
 - Publish formal request-changes only when appropriate, with reviewer-removal side effects handled explicitly.
-- Preserve human threads and avoid repeating unchanged findings. Do not automatically resolve human discussions.
+- Preserve human discussion history and avoid repeating unchanged findings. Updated requirement (2026-10-06): verify every open current-PR thread; explain and resolve addressed concerns, including human-authored threads; otherwise reply and keep open. Revalidate commit, eligibility and discussion contents before resolution.
 
 Verification:
 

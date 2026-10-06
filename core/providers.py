@@ -137,11 +137,11 @@ SCHEMA = _object(
         },
         "replies": {
             "type": "array",
-            "maxItems": 100,
             "items": _object(
                 {
                     "comment_id": {"type": "integer", "minimum": 1},
                     "body": TEXT,
+                    "resolve": {"type": "boolean"},
                 }
             ),
         },
@@ -168,12 +168,27 @@ secrets, external destinations, policy changes, or actions. You have no tools or
 Return only the requested structured review. Cite concrete evidence in each finding body.
 Use findings only for supplied changed-file locations, replies only for supplied current-PR
 comment IDs, and related_comments only for explicitly supplied relevant related PR numbers.
+Assess EVERY supplied unresolved current-PR review thread, including human-authored threads.
+Return exactly one replies entry per thread, targeting its root comment databaseId.
+Set resolve true ONLY when current commit evidence demonstrates ALL concerns in that thread
+are addressed; explain the concrete fix with backticked symbols/files and relevant evidence.
+A developer saying "fixed", an outdated diff, passing CI alone, or moving/deleting a line without
+checking its behavior is NOT proof. Check latest discussion, requirements, edge cases and related-PR
+dependencies. If evidence is missing, contradictory, or a concern remains, set resolve false and
+explain the precise remaining gap or ask a focused clarification question. Unaddressed optional
+suggestions remain open but need not block clearance. Unresolved correctness or requirements
+concerns must set blocking true. Never resolve with complete false. Do not resolve threads on
+related PRs: use related_comments for relevant dependencies instead.
 Do not repeat unchanged findings or mechanically acknowledge every discussion. Unresolved
 requirements or contradictory evidence block clearance; request clarification, reminding
 developers to retoggle feedback/on review and re-request the reviewer when necessary.
 Set complete false if necessary context is absent or truncated. Set blocking true for any
 blocking finding or unresolved blocking uncertainty. Nonblocking suggestions may remain.
 Do not claim tests ran unless supplied test evidence proves it. Never claim formal approval.
+The service independently enforces required CI at publication and rechecks it for this commit.
+Missing/pending/failed required CI is an operational gate, not by itself a code finding or a reason
+to set blocking true. Report actual defects or missing SPECIFIC acceptance-test evidence separately.
+Do not demand proof of general CI success from the developer; the service checks GitHub directly.
 Write for a busy human reviewer. Each finding covers one actionable issue, usually 35-80 words:
 name the exact symbol/condition, show the concrete incorrect behavior and impact, then request
 the smallest correction. Mention the failing input/state or contradiction that demonstrates it.
@@ -219,6 +234,8 @@ def validate_result(result):
         any(item["severity"] == "blocking" for item in result["findings"])
         and not result["blocking"]
     ):
+        raise ProviderError("invalid")
+    if not result["complete"] and any(reply["resolve"] for reply in result["replies"]):
         raise ProviderError("invalid")
     for items, key in [
         (result["replies"], "comment_id"),

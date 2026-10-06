@@ -366,3 +366,14 @@ finding. Code identifiers, file paths, routes/config values and expressions use 
 Same-repository references use native #number mentions when present in evidence. Summaries avoid
 repeating inline findings. Existing comments are not rewritten, and model output still needs human
 review; this changes the review instructions rather than guessing code spans with a prose regex.
+
+### Follow-up discussion resolution
+
+Each triggered review assesses every open current-PR review thread. Verified fixes receive a concise
+commit-linked explanation and GitHub thread resolution; remaining gaps receive a reply and stay
+open. Human-authored threads are included, but related-PR threads and ordinary PR comments are not
+resolved. Fresh commit/eligibility/comment checks prevent stale publication. Push fixes, then
+re-request the reviewer if needed and retoggle `feedback` → `on review`.
+
+The worker waits for running CI before calling the model, then refreshes required CI before
+publication. The dashboard uses the latest observed CI result, not an earlier pending snapshot.

@@ -65,9 +65,23 @@ def snapshot(job, events):
             detail="Evidence for this commit",
         ),
     ]
-    if "checks_blocked" in codes:
+    latest_ci = next(
+        (
+            event
+            for event in reversed(events)
+            if event.code in {"checks_waiting", "checks_passed", "checks_blocked"}
+        ),
+        None,
+    )
+    if latest_ci:
+        stages[-1]["finished_at"] = (
+            latest_ci.created_at if latest_ci.code != "checks_waiting" else None
+        )
+    if latest_ci and latest_ci.code == "checks_blocked":
         stages[-1]["state"] = "blocked"
         stages[-1]["detail"] = "Missing, pending or unsuccessful"
+    elif latest_ci and latest_ci.code == "checks_waiting":
+        stages[-1]["detail"] = "Waiting for CI before AI review"
     if job.pr.repository.test_command or "tests" in codes:
         tests = node(
             "tests",

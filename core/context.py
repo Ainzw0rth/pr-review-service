@@ -41,8 +41,8 @@ def failure_reason(context):
     return "Review context is incomplete or unavailable; no model review was started."
 
 
-THREAD_FIELDS = """id isResolved path line comments(first:100) {
- nodes { id databaseId body author { login } } pageInfo { hasNextPage endCursor }
+THREAD_FIELDS = """id isResolved viewerCanResolve isOutdated path line comments(first:100) {
+ nodes { id databaseId body updatedAt author { login } } pageInfo { hasNextPage endCursor }
 }"""
 THREAD_QUERY = """query($owner:String!,$name:String!,$number:Int!,$cursor:String) {
  repository(owner:$owner,name:$name) { pullRequest(number:$number) {
@@ -50,7 +50,7 @@ THREAD_QUERY = """query($owner:String!,$name:String!,$number:Int!,$cursor:String
  } } }""".replace("THREAD_FIELDS", THREAD_FIELDS)
 COMMENT_QUERY = """query($id:ID!,$cursor:String) { node(id:$id) {
  ... on PullRequestReviewThread { comments(first:100,after:$cursor) {
- nodes { id databaseId body author { login } } pageInfo { hasNextPage endCursor }
+ nodes { id databaseId body updatedAt author { login } } pageInfo { hasNextPage endCursor }
  } } } }"""
 
 
@@ -77,29 +77,47 @@ def threads(github, full_name, number):
         for thread in connection["nodes"]:
             if thread["isResolved"]:
                 continue
-            comments = thread["comments"]
-            nodes = list(comments["nodes"])
-            comment_seen = set()
-            comment_cursor = _next(comments, comment_seen)
-            for _ in range(MAX_PAGES):
-                if not comment_cursor:
-                    break
-                more = github.graphql(
-                    COMMENT_QUERY, {"id": thread["id"], "cursor": comment_cursor}
-                )["node"]["comments"]
-                nodes.extend(more["nodes"])
-                if len(json.dumps(nodes).encode()) > MAX_CONTEXT_BYTES:
-                    raise IntegrationError("Discussion context exceeds supported size.")
-                comment_cursor = _next(more, comment_seen)
-            if comment_cursor:
-                raise IntegrationError("GitHub discussion exceeds supported context limit.")
-            result.append({**thread, "comments": nodes})
+            result.append(expand_thread(github, thread))
             if len(json.dumps(result).encode()) > MAX_CONTEXT_BYTES:
                 raise IntegrationError("Discussion context exceeds supported size.")
         cursor = _next(connection, seen)
         if not cursor:
             return result
     raise IntegrationError("GitHub discussion exceeds supported context limit.")
+
+
+THREAD_STATE_QUERY = """query($id:ID!) { node(id:$id) {
+ ... on PullRequestReviewThread {
+ THREAD_FIELDS
+ pullRequest { number headRefOid repository { nameWithOwner } }
+ } } }""".replace("THREAD_FIELDS", THREAD_FIELDS)
+
+
+def expand_thread(github, thread):
+    comments = thread["comments"]
+    nodes = list(comments["nodes"])
+    seen = set()
+    cursor = _next(comments, seen)
+    for _ in range(MAX_PAGES):
+        if not cursor:
+            break
+        more = github.graphql(COMMENT_QUERY, {"id": thread["id"], "cursor": cursor})["node"][
+            "comments"
+        ]
+        nodes.extend(more["nodes"])
+        if len(json.dumps(nodes).encode()) > MAX_CONTEXT_BYTES:
+            raise IntegrationError("Discussion context exceeds supported size.")
+        cursor = _next(more, seen)
+    if cursor:
+        raise IntegrationError("GitHub discussion exceeds supported context limit.")
+    return {**thread, "comments": nodes}
+
+
+def review_thread(github, thread_id):
+    value = github.graphql(THREAD_STATE_QUERY, {"id": thread_id}).get("node")
+    if not value or "pullRequest" not in value:
+        raise IntegrationError("Review thread is unavailable.")
+    return expand_thread(github, value)
 
 
 def valid_lines(patch):

@@ -202,3 +202,27 @@ Deployed with migration 0008 and updated pinned CLI image. Public page verified 
 CLI tab defaults to a truthful empty state for historical jobs; worker history remains in its own
 tab. Health/deploy checks passed. No production job retriggered and no GitHub comments written
 during implementation verification.
+
+## Verified discussion resolution and CI freshness (2026-10-06)
+
+- Every open current-PR review thread now requires one explicit resolve/keep-open assessment.
+  Both human- and service-authored threads are eligible. Verified fixes get a commit-linked
+  explanation and `resolveReviewThread`; incomplete fixes retain a precise follow-up reply.
+- Publication validates the target PR/repository, current head, active human review cycle,
+  full paginated comment snapshot and resolution permission. Changed/edited comments stop stale
+  resolution; already-resolved threads are skipped, and reopening during publication is respected.
+  Replies and confirmed resolutions have publication receipts. No related-PR thread resolution.
+- Required CI now distinguishes running checks (including missing aggregate jobs whose dependencies
+  are running) from missing/failed checks. The worker waits cancellably before model review.
+  Final CI evidence replaces earlier observations without erasing local-test failures. The CI node
+  uses the latest recorded result, and prompts separate CI gating from actual code findings.
+- Diagnosed job `2f136ad6-be9e-45c7-9662-361935292d57`: initial CI observation 13:52:56 UTC;
+  GitHub `required` success 13:54:15 UTC; previous worker retained the early false value, while
+  the final summary said checks passed. The model also reported an independent PowerShell fallback
+  defect; fixing CI observation is not equivalent to clearing that finding.
+- Verification: 247 Django tests passed; Ruff, whitespace, migration-drift and Django deployment
+  checks passed. Both official CLI backends passed a no-publication synthetic review with one
+  fixed thread (resolve) and one unfixed thread (keep open/block). Live read-only GitHub queries
+  confirmed seven open PR #157 threads, all resolvable by the configured account, and identical
+  freshly paginated comment snapshots. No test reviews/comments/resolutions were published.
+- Workflow docs updated. Existing reviews are not rewritten and old attempts are not retriggered.

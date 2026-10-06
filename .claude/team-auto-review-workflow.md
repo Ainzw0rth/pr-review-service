@@ -59,7 +59,7 @@ These labels summarize the shared review workflow, not GitHub's formal review st
 | `feedback` | Changes, clarification, a fresh review request or recovery from failure are needed. Read GitHub for details. | Human or service |
 | `approved` | Current commit passed the configured AI checks, or an authorized human explicitly overrode the label state. | Human or service |
 
-The service can set `approved` only after a complete review of the current commit with no unresolved blocking findings. Nonblocking suggestions may remain. Required tests must pass; missing required evidence, ambiguous requirements or incomplete analysis cannot result in AI approval.
+The service can set `approved` only after a complete review of the current commit with no unresolved blocking findings. Nonblocking suggestions may remain. Required tests must pass; missing required evidence, ambiguous requirements or incomplete analysis cannot result in AI approval. If current-commit CI is still running, the worker waits before starting the model (admin cancellation remains available). Missing checks with no active CI or failed required checks remain blocking gates. Required CI is rechecked before publication; the dashboard shows the latest observed result. An earlier pending result cannot override a later success, and CI success cannot override failed local tests or actual code findings.
 
 `approved` is not a formal GitHub approval, does not bypass branch protection and never authorizes automatic merging. Humans decide whether to merge only once this label is present; normal repository requirements still apply.
 
@@ -123,7 +123,11 @@ If requirements or documents conflict, flag the contradiction and ask developers
 5. Ensure Louis is requested as reviewer; re-request him if necessary.
 6. Set `on review` to request a fresh run on the latest commit.
 
-Follow-up reviews check prior findings and new changes. Moving a line or resolving a thread does not prove a defect is fixed. The service distinguishes its assessment from a human resolving the conversation, and does not automatically resolve human threads.
+Follow-up reviews check prior findings and new changes. Moving a line or resolving a thread does not prove a defect is fixed. On each explicitly triggered review, the service assesses every open review thread on the current PR, including human-authored threads. When the current commit demonstrably addresses every concern, it posts a concise explanation citing the reviewed commit and resolves the thread. If the fix is incomplete or evidence is uncertain, it leaves the thread open and replies with the remaining gap or a focused question. Optional suggestions can stay open without blocking clearance.
+
+Thread resolution is not formal PR approval. Outdated lines, passing CI alone and a developer saying “fixed” are not proof. New or edited comments, a changed commit, or a cancelled review stop stale resolution. A human reopening a thread during publication is not overridden. Already-resolved threads are left alone. Related-PR threads are read for context but never automatically resolved by this PR's review. If GitHub denies resolution permission, the explanation asks a human to resolve it manually. Ordinary PR comments have no resolvable state.
+
+After pushing fixes, re-request the designated reviewer if necessary and toggle `feedback` → `on review`. A push alone does not start a new review or close discussions.
 
 Comments alone do not start work. The service does not continuously participate in discussion between runs. It replies during explicitly triggered reviews when there is new evidence or an unanswered point.
 

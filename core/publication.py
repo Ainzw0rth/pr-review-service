@@ -123,23 +123,142 @@ def once(github, job, key, body, endpoint, listing, extra=None):
     Receipt.objects.get_or_create(job=job, key=key, defaults={"remote_id": str(posted["id"])})
 
 
+RESOLVE_THREAD = """mutation($id:ID!) {
+ resolveReviewThread(input:{threadId:$id}) { thread { id isResolved } }
+}"""
+
+
+def thread_replies(result, context):
+    """Require exactly one explicit assessment per captured current-PR thread."""
+    expected = context.get("threads", [])
+    roots = {}
+    for thread in expected:
+        if not thread.get("id") or not thread.get("comments") or thread.get("isResolved"):
+            raise ValueError("Invalid discussion context")
+        for comment in thread["comments"]:
+            roots[comment["databaseId"]] = thread
+    assessed, replies = set(), []
+    for reply in result["replies"]:
+        thread = roots.get(reply["comment_id"])
+        if not thread or thread["id"] in assessed or type(reply.get("resolve")) is not bool:
+            raise ValueError("Unknown or duplicate discussion assessment")
+        if reply["resolve"] and (not result["complete"] or not context.get("complete")):
+            raise ValueError("Incomplete evidence cannot resolve a discussion")
+        assessed.add(thread["id"])
+        replies.append((thread, reply))
+    if len(assessed) != len(expected):
+        raise ValueError("Every open discussion requires an assessment")
+    return replies
+
+
+def _reply_body(job, reply, can_resolve):
+    body = reply["body"]
+    if reply["resolve"]:
+        body = f"Verified against `{job.head_sha}`. {body}"
+        if not can_resolve:
+            body += "\n\nThe service lacks permission to resolve this thread; please resolve this thread manually."
+    return body
+
+
+def _fresh_thread(github, job, original, reply):
+    from core.context import review_thread
+
+    guard(github, job)
+    fresh = review_thread(github, original["id"])
+    pr = fresh["pullRequest"]
+    if (
+        fresh["id"] != original["id"]
+        or pr["number"] != job.pr.number
+        or pr["repository"]["nameWithOwner"].casefold() != job.pr.repository.full_name.casefold()
+        or pr["headRefOid"] != job.head_sha
+    ):
+        raise StaleReview("Discussion target changed")
+    if fresh["isResolved"]:
+        return fresh
+    if Receipt.objects.filter(job=job, key=f"resolve:{original['id']}").exists():
+        raise StaleReview("Discussion reopened after resolution")
+    root = original["comments"][0]["databaseId"]
+    receipt = Receipt.objects.filter(job=job, key=f"reply:{root}").first()
+
+    def snapshot(comments):
+        return [
+            (c.get("databaseId"), c.get("body"), c.get("updatedAt"), c.get("author"))
+            for c in comments
+        ]
+
+    comments = fresh["comments"]
+    if receipt:
+        body = _reply_body(job, reply, fresh.get("viewerCanResolve"))
+        own_body = (
+            f"**Automated review · Auto Reviewer**\n\n{body}\n\n{marker(job, f'reply:{root}')}"
+        )
+        # Ignore only this attempt's own persisted reply, never another participant's activity.
+        comments = [
+            c
+            for c in comments
+            if not (
+                str(c.get("databaseId")) == receipt.remote_id
+                and c.get("body") == own_body
+                and (c.get("author") or {}).get("login", "").casefold()
+                == github.identity().casefold()
+            )
+        ]
+    if snapshot(comments) != snapshot(original["comments"]):
+        raise StaleReview("Discussion changed since evidence collection")
+    guard(github, job)
+    return fresh
+
+
+def publish_threads(github, job, replies):
+    # Preflight all discussions before publication, then check each again at write time.
+    for thread, reply in replies:
+        _fresh_thread(github, job, thread, reply)
+    for thread, reply in replies:
+        fresh = _fresh_thread(github, job, thread, reply)
+        if fresh["isResolved"]:
+            continue
+        root = thread["comments"][0]["databaseId"]
+        body = _reply_body(job, reply, fresh.get("viewerCanResolve"))
+        last = fresh["comments"][-1]
+        same_reply = (
+            not reply["resolve"]
+            and (last.get("author") or {}).get("login", "").casefold()
+            == github.identity().casefold()
+            and last.get("body", "").startswith(
+                f"**Automated review · Auto Reviewer**\n\n{body}\n\n<!-- review-desk:"
+            )
+        )
+        if not same_reply:
+            once(
+                github,
+                job,
+                f"reply:{root}",
+                body,
+                f"/pulls/{job.pr.number}/comments/{root}/replies",
+                f"/pulls/{job.pr.number}/comments",
+            )
+        if not reply["resolve"]:
+            continue
+        fresh = _fresh_thread(github, job, thread, reply)
+        if fresh["isResolved"] or not fresh.get("viewerCanResolve"):
+            continue
+        guard(github, job)
+        data = github.graphql(RESOLVE_THREAD, {"id": thread["id"]})
+        resolved = (data.get("resolveReviewThread") or {}).get("thread") or {}
+        if resolved.get("id") != thread["id"] or resolved.get("isResolved") is not True:
+            raise ValueError("GitHub did not confirm discussion resolution")
+        Receipt.objects.get_or_create(
+            job=job, key=f"resolve:{thread['id']}", defaults={"remote_id": thread["id"]}
+        )
+
+
 def publish(github, job, result, context, checks):
     if not settings.LIVE_WRITES:
         raise RuntimeError("Live publishing is disabled")
     number = job.pr.number
     # Allowed targets are established by trusted context retrieval, not the model.
     related = {p["number"] for p in context.get("related_prs", [])}
-    reply_roots = {
-        c["databaseId"]: thread["comments"][0]["databaseId"]
-        for thread in context.get("threads", [])
-        if thread.get("comments")
-        for c in thread["comments"]
-        if isinstance(c.get("databaseId"), int)
-    }
-    allowed_comments = set(reply_roots)
-    for reply in result["replies"]:
-        if reply["comment_id"] not in allowed_comments:
-            raise ValueError("Unknown discussion target")
+    replies = thread_replies(result, context)
     for comment in result["related_comments"]:
         if comment["number"] not in related or comment["number"] == number:
             raise ValueError("Unknown related PR target")
@@ -149,17 +268,7 @@ def publish(github, job, result, context, checks):
             "valid_lines", []
         ):
             raise ValueError("Finding is not on a changed line")
-    for i, reply in enumerate(result["replies"]):
-        if reply["comment_id"] not in allowed_comments:
-            raise ValueError("Unknown discussion target")
-        once(
-            github,
-            job,
-            f"reply:{reply['comment_id']}",
-            reply["body"],
-            f"/pulls/{number}/comments/{reply_roots[reply['comment_id']]}/replies",
-            f"/pulls/{number}/comments",
-        )
+    publish_threads(github, job, replies)
     for comment in result["related_comments"]:
         target = comment["number"]
         if target not in related or target == number:

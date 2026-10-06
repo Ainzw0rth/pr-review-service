@@ -1,5 +1,6 @@
 """Single reviewer; event reconciler runs separately so cancellation stays responsive."""
 
+import time
 from datetime import timedelta
 
 from django.conf import settings
@@ -7,7 +8,7 @@ from django.utils import timezone
 
 from core.activity import Progress
 from core.models import Job, ModelAttempt, Provider
-from core.publication import StaleReview, fail_to_feedback, guard, once, publish
+from core.publication import StaleReview, fail_to_feedback, guard, once, publish, thread_replies
 from core.workflow import finish
 
 
@@ -43,8 +44,19 @@ def run_job(job):
         progress("context_ready")
         progress("checks")
         checks = check_required(github, job.pr.repository, job.head_sha)
+        if checks.get("pending"):
+            progress("checks_waiting")
+        while checks.get("pending"):
+            # No whole-review timeout; keep admin/commit cancellation responsive.
+            for _ in range(15):
+                if progress.cancelled():
+                    raise ReviewCancelled()
+                time.sleep(1)
+            guard(github, job)
+            checks = check_required(github, job.pr.repository, job.head_sha)
         progress("checks_passed" if checks["passed"] else "checks_blocked")
         repo = job.pr.repository
+        tests = None
         if repo.test_command:
             guard(github, job)
             progress("tests")
@@ -107,6 +119,10 @@ def run_job(job):
                     on_response=save_diagnostics,
                     on_activity=save_activity,
                 )
+                try:
+                    thread_replies(result, context)
+                except (ValueError, KeyError, TypeError):
+                    raise ProviderError("invalid", detail="output_invalid") from None
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(
                     status="success", finished_at=timezone.now()
                 )
@@ -155,7 +171,11 @@ def run_job(job):
         if repo.required_checks:
             progress("recheck")
             latest = check_required(github, repo, job.head_sha)
-            checks = {"passed": checks["passed"] and latest["passed"], "summary": latest["summary"]}
+            progress("checks_passed" if latest["passed"] else "checks_blocked")
+            checks = {
+                "passed": latest["passed"] and (tests is None or tests["passed"]),
+                "summary": latest["summary"] + (" " + tests["summary"] if tests else ""),
+            }
         progress("publishing")
         outcome = publish(github, job, result, context, checks)
         progress("published")
@@ -176,7 +196,11 @@ def run_job(job):
                 reason="Review published; Sheet update needs admin attention."
             )
     except (StaleReview, ReviewCancelled):
-        finish(job, "superseded", "Attempt cancelled or commit changed; request a new review.")
+        finish(
+            job,
+            "superseded",
+            "Attempt cancelled, commit or discussion changed; request a new review.",
+        )
     except Exception:
         # Exception messages can contain HTTP response content or credentials: never persist them.
         try:

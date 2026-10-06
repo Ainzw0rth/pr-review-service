@@ -20,6 +20,7 @@ MESSAGES = {
     "context_ready": "Review context collected.",
     "context_failed": "Context collection stopped; see the operational note for the cause.",
     "checks": "Checking required CI for the reviewed commit.",
+    "checks_waiting": "CI is still running; waiting for current-commit results before calling the model.",
     "checks_passed": "Required CI evidence passed.",
     "checks_blocked": "Required CI is missing, pending or unsuccessful; clearance blocked.",
     "tests": "Running configured tests in an isolated container.",
