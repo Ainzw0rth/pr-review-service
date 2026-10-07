@@ -18,6 +18,17 @@ from core.models import (
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class DashboardTests(TestCase):
+    def test_quota_panel_requires_membership_and_is_read_only(self):
+        url = "/subscriptions/"
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.client.force_login(self.user)
+        self.assertContains(self.client.get("/"), "Review capacity.")
+        self.assertContains(self.client.get(url), "Anthropic")
+        self.assertEqual(self.client.post(url).status_code, 405)
+        Membership.objects.filter(user=self.user).delete()
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertNotContains(self.client.get("/"), "Review capacity.")
+
     def test_model_failure_explains_actual_fallback_and_exhaustion(self):
         from core.models import ModelAttempt, Provider
 
@@ -86,7 +97,7 @@ class DashboardTests(TestCase):
         url = f"/jobs/{self.visible.pk}/activity/"
         data = self.client.get(url).json()["flow"]["models"][0]["attempts"][0]
         self.assertIn("Subscription usage limit", data["failure_reason"])
-        self.assertIn("quota does not switch", data["next_action"])
+        self.assertIn("No usable account remains", data["next_action"])
         self.assertIsNotNone(data["retry_at"])
         attempt.status = "attention"
         attempt.diagnostics = {"failure_kind": "auth", "failure_detail": "cli_auth"}

@@ -30,7 +30,21 @@ class Command(BaseCommand):
                 cleanup_cli_orphans()
             recover_interrupted()
             while True:
-                job = claim()
+                if (settings.DATA_DIR / "worker.drain").exists():
+                    if options["once"]:
+                        return
+                    time.sleep(2)
+                    continue
+                from core.quota import refresh_due
+
+                refresh_due()
+                if (settings.DATA_DIR / "worker.drain").exists():
+                    continue
+                # Serialize the final drain check and claim with worker_control.
+                # Once drain returns, no job can slip through a check/claim race.
+                with open(settings.DATA_DIR / "worker.intake.lock", "a") as intake:
+                    fcntl.flock(intake, fcntl.LOCK_EX)
+                    job = None if (settings.DATA_DIR / "worker.drain").exists() else claim()
                 if job:
                     run_job(job)
                 if options["once"]:

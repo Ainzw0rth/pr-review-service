@@ -3,6 +3,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN npm install --global @openai/codex@0.160.0 @anthropic-ai/claude-code@2.1.284 && npm cache clean --force
 COPY cli/entry.mjs /opt/review-entry.mjs
 COPY cli/evidence.mjs /opt/evidence.mjs
+COPY cli/quota.mjs /opt/quota.mjs
 USER 1000:1000
 WORKDIR /tmp
 ENTRYPOINT ["node", "/opt/review-entry.mjs"]

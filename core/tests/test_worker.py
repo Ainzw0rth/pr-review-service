@@ -60,6 +60,43 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(gh.writes, [])
         self.assertIn("quota", list(job.activity.values_list("code", flat=True)))
 
+    def test_subscription_quota_falls_forward_and_skips_shared_account(self):
+        from core.tests.test_providers import RESULT
+
+        self.first.kind = "claude_cli"
+        self.first.save()
+        self.second.kind = "codex_cli"
+        self.second.save()
+        job, gh, reviewer = self.run_case([ProviderError("quota", detail="cli_quota"), RESULT])
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertEqual(job.provider, self.second)
+
+    def test_known_exhausted_subscription_is_skipped_without_a_model_call(self):
+        from core.quota import record_exhausted
+        from core.tests.test_providers import RESULT
+
+        self.first.kind = "claude_cli"
+        self.first.save()
+        record_exhausted(self.first)
+        job, gh, reviewer = self.run_case([RESULT])
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(reviewer.call_count, 1)
+        self.assertEqual(job.provider, self.second)
+        self.assertEqual(
+            list(job.model_attempts.values_list("status", flat=True)), ["skipped", "success"]
+        )
+
+    def test_all_subscription_quotas_wait_without_calling_other_opus(self):
+        self.first.kind = self.second.kind = "claude_cli"
+        self.first.save()
+        self.second.save()
+        job, gh, reviewer = self.run_case(ProviderError("quota", detail="cli_quota"))
+        self.assertEqual(job.status, "quota")
+        self.assertEqual(reviewer.call_count, 1)
+        self.assertIsNotNone(job.next_retry_at)
+        self.assertEqual(gh.writes, [])
+
     def test_all_refusals_try_each_provider_once_then_pause(self):
         job, gh, reviewer = self.run_case(ProviderError("attention"))
         self.assertEqual(job.status, "attention")

@@ -141,6 +141,8 @@ def visible_jobs(user):
 @never_cache
 @require_GET
 def dashboard(request):
+    from .quota import cards
+
     jobs = visible_jobs(request.user)
     actors = jobs.exclude(actor="").order_by("actor").values_list("actor", flat=True).distinct()
     counts = dict(jobs.values_list("status").annotate(total=Count("id")))
@@ -160,6 +162,9 @@ def dashboard(request):
         request,
         "core/queue_results.html" if request.GET.get("partial") == "1" else "core/dashboard.html",
         {
+            "quota_cards": cards()
+            if request.user.is_superuser or Membership.objects.filter(user=request.user).exists()
+            else [],
             "page": page,
             "status": status,
             "query": query,
@@ -172,6 +177,17 @@ def dashboard(request):
             "completed": counts.get("completed", 0),
         },
     )
+
+
+@login_required
+@never_cache
+@require_GET
+def subscription_quota(request):
+    from .quota import cards
+
+    if not (request.user.is_superuser or Membership.objects.filter(user=request.user).exists()):
+        return HttpResponseForbidden()
+    return render(request, "core/quota_cards.html", {"quota_cards": cards()})
 
 
 @login_required

@@ -79,6 +79,16 @@ class Provider(models.Model):
         return self.name
 
 
+class SubscriptionQuota(models.Model):
+    # There is one private CLI login volume per backend in this deployment.
+    kind = models.CharField(max_length=20, primary_key=True)
+    windows = models.JSONField(default=list)
+    checked_at = models.DateTimeField(null=True)
+    observed_at = models.DateTimeField(null=True)
+    blocked_until = models.DateTimeField(null=True)
+    error = models.CharField(max_length=30, blank=True)
+
+
 class Repository(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
     full_name = models.CharField(

@@ -42,7 +42,7 @@ class ProviderError(Exception):
 ERROR_REASONS = {
     "cli_coverage": "CLI did not inspect all required review evidence. Nothing was published.",
     "cli_auth": "CLI subscription login is missing or expired. Reconnect this CLI account.",
-    "cli_quota": "Subscription usage limit reached. Waiting for the next availability check; no API billing fallback.",
+    "cli_quota": "Subscription usage limit reached. This account cannot review until quota is available; no API billing fallback.",
     "cli_protocol": "CLI did not return a complete structured review. Check the CLI connection and version.",
     "cli_setup": "Isolated CLI runner is not configured or unavailable. Check its pinned image and auth volume.",
     "cli_tools": "CLI attempted a tool outside the review evidence boundary. Nothing was published.",

@@ -6,6 +6,23 @@ from core.tests.test_providers import RESULT
 
 
 class CLIStreamTests(TestCase):
+    def test_claude_assistant_rate_limit_survives_generic_final_error(self):
+        p = self.parser("claude_cli")
+        p.feed({"type": "assistant", "error": "rate_limit", "message": {"content": []}})
+        p.feed(
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "result": "Limit reached; resets later",
+            }
+        )
+        p.feed({"type": "runner_error", "code": "cli_failed", "message": ""})
+        with self.assertRaises(ProviderError) as caught:
+            p.result(1)
+        self.assertEqual(caught.exception.kind, "quota")
+        self.assertEqual(caught.exception.detail, "cli_quota")
+
     def test_policy_signal_and_category_survive_without_raw_error_text(self):
         p = self.parser()
         p.feed(

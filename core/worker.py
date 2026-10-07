@@ -16,6 +16,7 @@ def run_job(job):
     from core.context import build_context, failure_reason
     from core.github import GitHub, IntegrationError, check_required
     from core.providers import ProviderError, ReviewCancelled, failure_description, review
+    from core.quota import blocked_until, record_exhausted
     from core.runner import run_tests
     from core.sheets import sync_status
 
@@ -76,7 +77,7 @@ def run_job(job):
             "approved_label": repo.approved_label,
         }
         providers = list(Provider.objects.filter(enabled=True))
-        if job.provider_id:
+        if job.provider_id and not job.provider.kind.endswith("_cli"):
             # A quota retry stays on its provider, then may fall forward on refusal/outage.
             index = next((i for i, p in enumerate(providers) if p.pk == job.provider_id), None)
             providers = providers[index:] if index is not None else []
@@ -89,8 +90,27 @@ def run_job(job):
             ]
             Job.objects.filter(pk=job.pk, status="running").update(provider_plan=job.provider_plan)
         result = None
+        quota_waits = []
         for provider in providers:
             guard(github, job)
+            exhausted_until = blocked_until(provider)
+            if exhausted_until:
+                quota_waits.append(exhausted_until)
+                ModelAttempt.objects.create(
+                    job=job,
+                    provider=provider,
+                    provider_name=provider.name,
+                    model=provider.model,
+                    status="skipped",
+                    finished_at=timezone.now(),
+                    diagnostics={
+                        "failure_kind": "quota",
+                        "failure_detail": "cli_quota",
+                        "retry_at": exhausted_until.isoformat(),
+                    },
+                )
+                progress("model_skipped")
+                continue
             Job.objects.filter(pk=job.pk, status="running").update(
                 provider=provider, provider_diagnostics={}
             )
@@ -175,6 +195,10 @@ def run_job(job):
                     continue
                 if exc.kind == "quota":
                     progress("quota")
+                    if provider.kind.endswith("_cli"):
+                        quota_waits.append(record_exhausted(provider, exc.retry_at))
+                        progress("quota_fallback")
+                        continue
                     finish(
                         job,
                         "quota",
@@ -190,6 +214,14 @@ def run_job(job):
                     )
                 return
         if result is None:
+            if quota_waits:
+                finish(
+                    job,
+                    "quota",
+                    "No usable model remains. Exhausted subscription accounts were skipped; waiting for the next availability check.",
+                    retry_at=min(quota_waits),
+                )
+                return
             progress("models_exhausted")
             finish(
                 job,

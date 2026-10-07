@@ -10,6 +10,11 @@ for await (const chunk of process.stdin) {
 }
 let request;
 try {request=JSON.parse(raw);} catch {emit({type:'runner_error',code:'invalid_input'});process.exit(1);}
+if(request.action==='quota') {
+  const {quotaSnapshot}=await import('./quota.mjs');
+  emit(await quotaSnapshot(request.kind));
+  process.exit(0);
+}
 if (!['claude_cli','codex_cli'].includes(request.kind) || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(request.model)) {
   emit({type:'runner_error',code:'invalid_input'});process.exit(1);
 }

@@ -8,18 +8,26 @@ def next_action(job, attempt, attempts, plan):
     """Describe recorded routing first; never promise a fallback after a stopped job."""
     if attempt.status in ("running", "success"):
         return ""
-    later = next((item for item in attempts if item.pk > attempt.pk), None)
+    later = next(
+        (item for item in attempts if item.pk > attempt.pk and item.status != "skipped"), None
+    )
     if later:
         return f"Continued with {later.provider_name}. See its attempt below."
     if job.status in ("cancelled", "superseded"):
         return "Run cancelled or superseded. No further model calls for this attempt."
     if job.status == "quota" and attempt.status == "quota":
-        return "Waiting to retry this provider; quota does not switch models."
+        if attempt.provider and attempt.provider.kind.endswith("_cli"):
+            return "No usable account remains. Waiting for the next availability check."
+        return "Waiting to retry this provider; API quota does not switch models."
+    if attempt.status == "skipped" and job.status == "quota":
+        return "Account skipped without a model call. Waiting for quota availability."
     if job.status == "running" and attempt.status in (
         "refused",
         "unavailable",
         "incomplete",
         "failed",
+        "quota",
+        "skipped",
     ):
         index = next(
             (

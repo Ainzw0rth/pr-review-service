@@ -120,8 +120,10 @@ A provider refusal or outage tries the next configured model. Incomplete CLI evi
 fresh recovery pass prioritizing missing items, then falls forward if still incomplete. Exhausted
 routes and authentication errors need attention. Protocol failures, malformed/incomplete review
 output, oversized responses, runner memory exhaustion, model-specific context limits and
-unavailable model IDs also try the next configured model. Quota exhaustion releases the worker and schedules a
-retry on the same provider. Fresh CI and eligibility checks remain mandatory before clearance.
+unavailable model IDs also try the next configured model. Exhausted subscription accounts are
+skipped in favor of the next available account; if none remains, the worker is released until
+the next availability check. API-key quota retains its same-provider wait. Fresh CI and eligibility
+checks remain mandatory before clearance.
 New commits or loss of eligibility invalidate active attempts; pushes and discussion replies alone
 do not start another review. GitHub read/write operations are revalidated, but are not one atomic
 transaction across GitHub and the local database.
@@ -234,7 +236,8 @@ successful CLI exit, structured schema validation and complete evidence delivery
 prove tool activity, not model reasoning or review correctness. The trusted worker remains solely
 responsible for eligibility, CI and publication. No silent fallback from subscription to paid API.
 
-Outage errors may fall through the configured priority. Quota errors do not: dashboard shows
+Outage errors may fall through the configured priority. Subscription quota errors also fall through,
+skipping all models sharing the exhausted CLI login. API-key quota errors do not: dashboard shows
 Out of quota, retains the selected provider, releases the worker and shows reset/next-check time.
 Unknown reset time defaults to a check 30 minutes later. Provider refusals try the next configured model with the unchanged request, once per model
 per pass. Incomplete CLI evidence gets one additional fresh-session recovery pass on that model, with missing
@@ -244,7 +247,7 @@ attempts label this **Incomplete evidence** and identify the recovery pass. Fail
 invalid review output instead labels the attempt **Review failed** and immediately tries the next
 configured model with the same context. Each model is tried once for these failures; no partial
 result is published. Authentication errors, forbidden tool use, invalid shared runner configuration
-and service-wide context limits still require attention. Quota remains a same-provider wait.
+and service-wide context limits still require attention. API-key quota remains a same-provider wait.
 Cancellation or stale eligibility stops fallback. Exhausting the route pauses for admin inspection.
 
 Each model call retains its status, timestamps and allowlisted diagnostics in the Job admin's
@@ -382,7 +385,50 @@ raw provider prose. Recorded fallback names the subsequent model; an unstarted f
 labeled as such. Quota waits show the next availability check in WIB, not a promised reset.
 Failures before a model call are identified as evidence-gathering failures, not AI refusals.
 Safe GitHub HTTP errors are retained for future context failures; discarded historical
-errors cannot be recovered retroactively. This changes visibility, not review/fallback policy.
+errors cannot be recovered retroactively.
+
+### Subscription capacity and safe worker deployment
+
+All dashboard members can see the shared subscription capacity cards: provider-reported remaining
+percentage per window, reset times in WIB, last attempted check and last successful observation.
+No account identity, token or billing details are exposed. Unknown readings remain unknown; old
+readings are marked last-known. Percentages are not estimated from review token counts.
+
+The serial worker checks usage between jobs, at most once per five minutes. It uses the pinned
+CLI image and existing private auth volumes, without starting model inference. Codex uses the
+documented `account/rateLimits/read` app-server method. Claude uses the installed CLI's internal
+`https://api.anthropic.com/api/oauth/usage` endpoint: it is not a stable public API, and failure
+leaves the reading unknown/stale rather than blocking otherwise eligible reviews indefinitely.
+During long reviews the display can become stale until the worker reaches its next check.
+
+One subscription state is stored per CLI backend, matching the current one-login-volume-per-backend
+configuration. Both configured Opus models share Claude's cooldown; Sol uses Codex's state. Adding
+multiple accounts requires extending this key. On changing an auth volume/account, clear that
+backend's `SubscriptionQuota` row before resuming to avoid stale quota from the old login.
+An explicit CLI quota error creates a cooldown even when a percentage cannot be read. Unknown
+reset defaults to a 30-minute availability check, not a promised reset. Known exhausted windows
+block until the latest exhausted window resets. A fresh successful reading can clear a cooldown.
+If every usable route is exhausted, the job waits for the earliest account check and rechecks the
+subscription route from the beginning. Skipped entries are recorded without a model call.
+
+**Do not restart a worker during a review.** A hard restart marks running attempts interrupted/
+Needs attention; it does not resume the model session or blindly replay GitHub publication.
+For a worker version that supports draining:
+
+```sh
+docker compose exec web python manage.py worker_control drain
+docker compose exec web python manage.py worker_control status
+# Wait for Active jobs: 0; keep the drain flag in place throughout deployment.
+# Build, migrate and recreate the services only after the active job finishes.
+docker compose exec web python manage.py worker_control resume
+```
+
+Draining stops intake, not the active review. Queue entries and webhooks remain stored; the drain
+flag persists in the shared data volume across restarts. Do not use a short forced-stop timeout as
+a substitute for draining. **First rollout caveat:** the currently deployed older worker does not
+understand the flag. Its active review must finish before that worker is replaced. This release
+also requires migration `0010` and a rebuilt/pinned CLI image containing `quota.mjs`; do not deploy
+only the web image or point the quota collector at the old CLI image.
 
 Members see only their organizations' PR links, commits, trigger actor, status, timestamps and
 sanitized operational messages. Job details link back to GitHub; there is no review-results view.

@@ -57,7 +57,9 @@ class CLIStream:
         code = data.get("code") or data.get("type")
         message = data.get("message", "")
         message = message.lower()[:64000] if isinstance(message, str) else ""
-        if code == "auth_missing":
+        if code in ("rate_limit", "rate_limit_error", "usage_limit_reached"):
+            error = ProviderError("quota", detail="cli_quota")
+        elif code == "auth_missing":
             error = ProviderError("auth", detail="cli_auth")
         elif code in ("content_policy_violation", "content_filter", "refusal"):
             error = ProviderError("attention")
@@ -156,6 +158,8 @@ class CLIStream:
             self.diagnostics["last_event"] = "reconnecting"
         elif kind in ("error", "runner_error", "turn.failed"):
             self.fail(event.get("error", event))
+        elif kind == "assistant" and event.get("error") in ("rate_limit", "rate_limit_error"):
+            self.fail({"code": event["error"]})
         elif kind == "stream_event":
             body = event.get("event", {})
             delta = body.get("delta", {}) if isinstance(body, dict) else {}

@@ -35,6 +35,8 @@ MESSAGES = {
     "model": "Calling the selected model; awaiting provider response.",
     "unavailable": "Provider unavailable; checking the next configured connection.",
     "quota": "Provider quota exhausted; waiting for the next availability check.",
+    "quota_fallback": "Subscription quota exhausted; checking the next available account.",
+    "model_skipped": "Skipped model: its subscription account is waiting for quota availability.",
     "model_attention": "Provider response needs administrator attention.",
     "model_failed": "Model review failed validation or execution; trying the next configured model.",
     "model_incomplete": "Evidence coverage remained incomplete after recovery; trying the next configured model.",
