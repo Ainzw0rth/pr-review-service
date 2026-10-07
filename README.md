@@ -118,7 +118,9 @@ flowchart TB
 **Exceptions and retries:** incomplete context stops the model review and blocks clearance.
 A provider refusal or outage tries the next configured model. Incomplete CLI evidence gets one
 fresh recovery pass prioritizing missing items, then falls forward if still incomplete. Exhausted
-routes, authentication errors and other invalid output need attention. Quota exhaustion releases the worker and schedules a
+routes and authentication errors need attention. Protocol failures, malformed/incomplete review
+output, oversized responses, runner memory exhaustion, model-specific context limits and
+unavailable model IDs also try the next configured model. Quota exhaustion releases the worker and schedules a
 retry on the same provider. Fresh CI and eligibility checks remain mandatory before clearance.
 New commits or loss of eligibility invalidate active attempts; pushes and discussion replies alone
 do not start another review. GitHub read/write operations are revalidated, but are not one atomic
@@ -238,9 +240,12 @@ Unknown reset time defaults to a check 30 minutes later. Provider refusals try t
 per pass. Incomplete CLI evidence gets one additional fresh-session recovery pass on that model, with missing
 artifact IDs prioritized. Every pass must independently deliver the full evidence; prior coverage is
 never reused. If coverage remains incomplete, the next configured model is tried. Dashboard model
-attempts label this **Incomplete evidence** and identify the recovery pass. This exception does not
-rotate on malformed output, authentication errors or quota exhaustion. Exhausting the route pauses
-for admin inspection. Authentication/other invalid-output failures also require attention.
+attempts label this **Incomplete evidence** and identify the recovery pass. Failed execution or
+invalid review output instead labels the attempt **Review failed** and immediately tries the next
+configured model with the same context. Each model is tried once for these failures; no partial
+result is published. Authentication errors, forbidden tool use, invalid shared runner configuration
+and service-wide context limits still require attention. Quota remains a same-provider wait.
+Cancellation or stale eligibility stops fallback. Exhausting the route pauses for admin inspection.
 
 Each model call retains its status, timestamps and allowlisted diagnostics in the Job admin's
 **Model attempts** section. The latest response also appears in **Provider diagnostics**

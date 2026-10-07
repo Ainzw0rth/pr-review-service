@@ -132,13 +132,27 @@ def run_job(job):
                 progress("findings", count=len(result.get("findings", [])))
                 break
             except ProviderError as exc:
+                # A parsed result can still fail thread validation. Never retain it
+                # across fallback or publish it when every provider has failed.
+                result = None
                 metadata = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
                 metadata.update(failure_kind=exc.kind, failure_detail=exc.detail)
                 save_diagnostics(metadata)
                 incomplete = exc.detail == "cli_coverage"
+                review_failed = exc.kind == "invalid" and exc.detail in {
+                    "cli_protocol",
+                    "output_invalid",
+                    "output_incomplete",
+                    "response_too_large",
+                    "cli_memory",
+                    "context_too_large",
+                    "model_not_found",
+                }
                 state = (
                     "incomplete"
                     if incomplete
+                    else "failed"
+                    if review_failed
                     else {
                         "attention": "refused",
                         "unavailable": "unavailable",
@@ -148,10 +162,12 @@ def run_job(job):
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(
                     status=state, finished_at=timezone.now()
                 )
-                if incomplete or exc.kind in ("unavailable", "attention"):
+                if incomplete or review_failed or exc.kind in ("unavailable", "attention"):
                     progress(
                         "model_incomplete"
                         if incomplete
+                        else "model_failed"
+                        if review_failed
                         else "unavailable"
                         if exc.kind == "unavailable"
                         else "model_refused"
@@ -178,7 +194,7 @@ def run_job(job):
             finish(
                 job,
                 "attention",
-                "All remaining models declined, were unavailable, or returned incomplete evidence. Inspect model attempts before requesting another review.",
+                "All remaining models declined, were unavailable, failed to return a valid review, or returned incomplete evidence. Inspect model attempts before requesting another review.",
             )
             return
         if repo.required_checks:

@@ -112,7 +112,7 @@ footer { border-top:1px solid var(--line); padding:22px 5%; display:flex; justif
 .node-done .node-state::before,.node-success .node-state::before { content:'✓'; }
 .node-running,.node-cancelling { border-color:#928366; background:#eae4d5; box-shadow:0 0 0 2px #d9cfb680; }
 .node-running .node-state::before { content:'●'; animation:pulse 2s infinite; }
-.node-refused,.node-attention,.node-blocked { background:#eee2d9; border-color:#ba9d87; }
+.node-refused,.node-attention,.node-blocked,.node-failed { background:#eee2d9; border-color:#ba9d87; }
 .node-refused .node-state::before,.node-attention .node-state::before,.node-blocked .node-state::before { content:'!'; }
 .node-unavailable,.node-quota,.node-incomplete { background:#eee8d8; border-color:#b6a780; }
 .node-pending,.node-unused { background:transparent; border-style:dashed; }

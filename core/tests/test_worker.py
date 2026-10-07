@@ -243,8 +243,42 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(gh.writes, [])
         self.assertIn("incomplete evidence", job.reason)
 
-    def test_invalid_schema_still_pauses_without_rotating(self):
+    def test_invalid_schema_exhausts_route_without_publishing(self):
         job, gh, reviewer = self.run_case(ProviderError("invalid", detail="output_invalid"))
+        self.assertEqual(job.status, "attention")
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertEqual(gh.writes, [])
+
+    def test_cli_protocol_then_invalid_output_uses_third_model(self):
+        from core.tests.test_providers import RESULT
+
+        third = Provider.objects.create(name="third", kind="claude_cli", model="backup", order=2)
+        job, gh, reviewer = self.run_case(
+            [
+                ProviderError("invalid", detail="cli_protocol"),
+                ProviderError("invalid", detail="output_invalid"),
+                RESULT,
+            ]
+        )
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.provider, third)
+        self.assertEqual(
+            list(job.model_attempts.values_list("status", flat=True)),
+            ["failed", "failed", "success"],
+        )
+        self.assertEqual(reviewer.call_args_list[0].args[1], reviewer.call_args_list[2].args[1])
+
+    def test_invalid_thread_assessments_cannot_survive_exhausted_fallback(self):
+        from core.tests.test_providers import RESULT
+
+        with patch("core.worker.thread_replies", side_effect=ValueError("invalid")):
+            job, gh, reviewer = self.run_case([RESULT, RESULT])
+        self.assertEqual(job.status, "attention")
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertEqual(gh.writes, [])
+
+    def test_tool_boundary_failure_does_not_rotate(self):
+        job, gh, reviewer = self.run_case(ProviderError("invalid", detail="cli_tools"))
         self.assertEqual(job.status, "attention")
         self.assertEqual(reviewer.call_count, 1)
         self.assertEqual(gh.writes, [])

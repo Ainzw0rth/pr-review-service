@@ -15,7 +15,12 @@ def next_action(job, attempt, attempts, plan):
         return "Run cancelled or superseded. No further model calls for this attempt."
     if job.status == "quota" and attempt.status == "quota":
         return "Waiting to retry this provider; quota does not switch models."
-    if job.status == "running" and attempt.status in ("refused", "unavailable", "incomplete"):
+    if job.status == "running" and attempt.status in (
+        "refused",
+        "unavailable",
+        "incomplete",
+        "failed",
+    ):
         index = next(
             (
                 i
@@ -27,7 +32,7 @@ def next_action(job, attempt, attempts, plan):
         if index is not None and index + 1 < len(plan):
             return f"Next configured model: {plan[index + 1]['name']} (not started yet)."
         return "No remaining model in this route; administrator attention required."
-    if attempt.status in ("refused", "unavailable", "incomplete"):
+    if attempt.status in ("refused", "unavailable", "incomplete", "failed"):
         return "Run stopped. No further model call recorded; inspect the operational note before retrying."
     return "Automatic retry paused. Resolve the cause, then the owner can request a fresh review."
 
