@@ -47,6 +47,7 @@ MESSAGES = {
     "recheck": "Rechecking CI and review eligibility before publication.",
     "publishing": "Publishing review comments and workflow labels on GitHub.",
     "published": "GitHub publication finished.",
+    "labels_attention": "Review published; workflow-label cleanup needs administrator attention.",
     "sheet": "Synchronizing the configured timeline status.",
     "sheet_attention": "Timeline synchronization needs administrator attention.",
     "journal_queued": "Final run summary queued for the private journal.",

@@ -1,7 +1,7 @@
 {% extends 'core/base.html' %}{% load static %}{% block title %}Review queue{% endblock %}{% block content %}
 <section class="page-heading"><div><p class="eyebrow">WORKSPACE / REVIEW OPERATIONS</p><h1>The review <em>queue.</em></h1><p class="lede">Progress here. Findings on GitHub.</p></div><div class="edition"><span class="live-dot" aria-hidden="true"></span> ONE JOB AT A TIME<br><span class="muted">90-day operational history</span></div></section>
-<section class="metrics" aria-label="Review statistics"><div><span class="metric-label">01 / REVIEWING</span><strong>{{ running|stringformat:'02d' }}</strong></div><div><span class="metric-label">02 / WAITING</span><strong>{{ waiting|stringformat:'02d' }}</strong></div><div><span class="metric-label">03 / NEEDS ATTENTION</span><strong>{{ attention|stringformat:'02d' }}</strong></div><div><span class="metric-label">04 / COMPLETED</span><strong>{{ completed|stringformat:'02d' }}</strong></div></section>
-{% if quota_cards %}<section class="quota-section" aria-labelledby="quota-title"><div class="activity-heading"><div><p class="section-number">SHARED / SUBSCRIPTION ACCOUNTS</p><h2 id="quota-title">Review capacity.</h2></div></div><div data-quota-url="{% url 'subscription_quota' %}">{% include 'core/quota_cards.html' %}</div><p class="note">Provider-reported usage, not a token estimate. Checked between reviews, at most every 5 minutes. Exhausted accounts are skipped. Both Opus models share the Claude login.</p></section><script src="{% static 'core/quota.js' %}" defer></script>{% endif %}
+<section class="metrics" aria-label="Review statistics"><div><span class="metric-label">01 / REVIEWING</span><strong data-queue-metric="running">{{ running|stringformat:'02d' }}</strong></div><div><span class="metric-label">02 / WAITING</span><strong data-queue-metric="waiting">{{ waiting|stringformat:'02d' }}</strong></div><div><span class="metric-label">03 / NEEDS ATTENTION</span><strong data-queue-metric="attention">{{ attention|stringformat:'02d' }}</strong></div><div><span class="metric-label">04 / COMPLETED</span><strong data-queue-metric="completed">{{ completed|stringformat:'02d' }}</strong></div></section>
+{% if quota_cards %}<section class="quota-section" aria-labelledby="quota-title"><div class="activity-heading"><div><p class="section-number">SHARED / SUBSCRIPTION ACCOUNTS</p><h2 id="quota-title">Review capacity.</h2></div></div><div data-quota-url="{% url 'subscription_quota' %}">{% include 'core/quota_cards.html' %}</div><p class="note">Display refreshes every 15s. Provider-reported usage, not a token estimate. Checked between reviews, at most every 5 minutes. Exhausted accounts are skipped. Both Opus models share the Claude login.</p></section><script src="{% static 'core/quota.js' %}" defer></script>{% endif %}
 <section class="queue-section">
 <form method="get" class="filters" data-queue-filters>
   <div><label for="q">Repository</label><input type="search" name="q" id="q" placeholder="Find a repository…" value="{{ query }}" autocomplete="off"></div>
@@ -10,7 +10,7 @@
   <a class="filter-clear" href="{% url 'dashboard' %}" data-clear-filters>Reset ↺</a>
   <noscript><button type="submit">Apply selection</button></noscript>
 </form>
-<p class="filter-state" role="status" data-filter-state>Filters update automatically.</p>
+<p class="filter-state" role="status" data-filter-state>Live queue · refreshes every 5s. Filters update automatically.</p>
 <div data-queue-results>{% include 'core/queue_results.html' %}</div>
 <p class="note">Completed means processing finished, not that the PR passed. Open GitHub for the outcome.</p>
 </section>

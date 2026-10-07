@@ -50,6 +50,23 @@ class WorkerTests(WorkflowTests):
         job.refresh_from_db()
         return job, gh, reviewer
 
+    def test_label_failure_after_publication_does_not_report_review_failure(self):
+        from core.github import IntegrationError
+        from core.models import Receipt
+        from core.tests.test_providers import RESULT
+
+        with patch(
+            "core.publication.terminal_transition",
+            side_effect=IntegrationError("GitHub request failed (HTTP 404)."),
+        ):
+            job, gh, reviewer = self.run_case([{**RESULT, "blocking": True}])
+        self.assertEqual(job.status, "attention")
+        self.assertIn("Review published", job.reason)
+        self.assertIn("label", job.reason)
+        self.assertTrue(Receipt.objects.filter(job=job, key="review").exists())
+        self.assertFalse(Receipt.objects.filter(job=job, key="failure").exists())
+        self.assertEqual(reviewer.call_count, 1)
+
     def test_quota_keeps_provider_and_releases_worker_without_backup(self):
         retry = timezone.now() + timezone.timedelta(hours=1)
         job, gh, reviewer = self.run_case(ProviderError("quota", retry_at=retry))

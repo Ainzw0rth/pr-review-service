@@ -68,6 +68,42 @@ class GitHubTests(TestCase):
             client.get("/issues")
         self.assertNotIn("private-token", str(error.exception))
 
+    def test_numeric_repository_pagination_keeps_canonical_endpoint(self):
+        def handler(req):
+            self.assertEqual(req.url.path, "/repos/acme/app/issues/157/timeline")
+            if req.url.params.get("page") == "2":
+                return httpx.Response(200, json=[{"id": 101}])
+            return httpx.Response(
+                200,
+                json=[{"id": 100}],
+                headers={
+                    "Link": '<https://api.github.com/repositories/123/issues/157/timeline?page=2>; rel="next"'
+                },
+            )
+
+        self.assertEqual(
+            self.client(handler).pages("/issues/157/timeline"), [{"id": 100}, {"id": 101}]
+        )
+
+    def test_pagination_rejects_changed_resource_or_host(self):
+        for destination in [
+            "https://api.github.com/repos/other/repo/issues/157/timeline?page=2",
+            "https://api.github.com/repositories/123/issues/158/timeline?page=2",
+            "https://evil.example/repositories/123/issues/157/timeline?page=2",
+        ]:
+            with self.subTest(destination=destination):
+                requests = []
+
+                def handler(req):
+                    requests.append(req.url)
+                    return httpx.Response(
+                        200, json=[], headers={"Link": f'<{destination}>; rel="next"'}
+                    )
+
+                with self.assertRaises(IntegrationError):
+                    self.client(handler).pages("/issues/157/timeline")
+                self.assertEqual(len(requests), 1)
+
     def test_pagination_loop_fails_closed(self):
         client = self.client(
             lambda req: httpx.Response(

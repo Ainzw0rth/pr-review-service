@@ -118,7 +118,7 @@ class GitHub:
         return self._json(self._request("DELETE", path))
 
     def pages(self, path, key=None):
-        self._url(path)
+        canonical_path = urlsplit(self._url(path)).path
         parsed = urlsplit(path)
         query = dict(parse_qsl(parsed.query))
         query["per_page"] = "100"
@@ -152,7 +152,16 @@ class GitHub:
                 or next_parts.fragment
             ):
                 raise IntegrationError("GitHub pagination destination rejected.")
-            current = next_parts.path + ("?" + next_parts.query if next_parts.query else "")
+            # GitHub Link headers may use /repositories/<id> aliases. Never
+            # follow that destination: pin requests to the original repository
+            # and resource, taking only the pagination query from the link.
+            suffix = canonical_path.removeprefix(self.prefix)
+            numeric_alias = canonical_path.startswith(self.prefix + "/") and re.fullmatch(
+                r"/repositories/[0-9]+" + re.escape(suffix), next_parts.path
+            )
+            if next_parts.path != canonical_path and not numeric_alias:
+                raise IntegrationError("GitHub pagination destination rejected.")
+            current = canonical_path + ("?" + next_parts.query if next_parts.query else "")
         raise IntegrationError("GitHub pagination exceeds supported context limit.")
 
     def pull(self, number):

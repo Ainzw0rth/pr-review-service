@@ -8,7 +8,15 @@ from django.utils import timezone
 
 from core.activity import Progress
 from core.models import Job, ModelAttempt, Provider
-from core.publication import StaleReview, fail_to_feedback, guard, once, publish, thread_replies
+from core.publication import (
+    LabelCleanupError,
+    StaleReview,
+    fail_to_feedback,
+    guard,
+    once,
+    publish,
+    thread_replies,
+)
 from core.workflow import finish
 
 
@@ -256,6 +264,14 @@ def run_job(job):
             Job.objects.filter(pk=job.pk, status="completed").update(
                 reason="Review published; Sheet update needs admin attention."
             )
+    except LabelCleanupError:
+        progress("labels_attention")
+        finish(
+            job,
+            "attention",
+            "Review published on GitHub; workflow-label cleanup failed. "
+            "Admin should reconcile labels; do not rerun the AI review just to repair labels.",
+        )
     except (StaleReview, ReviewCancelled):
         finish(
             job,

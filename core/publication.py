@@ -12,6 +12,10 @@ from core.models import ExpectedLabel, Job, Receipt
 from core.workflow import canonical_cycle, current
 
 
+class LabelCleanupError(Exception):
+    """Review delivered, but final workflow labels could not be normalized."""
+
+
 class StaleReview(Exception):
     pass
 
@@ -354,7 +358,14 @@ def publish(github, job, result, context, checks):
     if blocked and Receipt.objects.filter(job=job, key="review").exists():
         Receipt.objects.get_or_create(job=job, key="request_changes")
 
-    return terminal_transition(github, job, blocked=blocked, baseline_timeline=baseline_timeline)
+    try:
+        return terminal_transition(
+            github, job, blocked=blocked, baseline_timeline=baseline_timeline
+        )
+    except StaleReview:
+        raise
+    except Exception:
+        raise LabelCleanupError() from None
 
 
 def fail_to_feedback(github, job):

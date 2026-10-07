@@ -144,6 +144,7 @@ footer { border-top:1px solid var(--line); padding:22px 5%; display:flex; justif
 .attempt-record .detail-grid { margin-top:18px; }
 /* Operational console: model text and credentials never enter this surface. */
 .terminal { background:#252522; color:#ece8dc; border:1px solid #44443e; border-radius:9px; overflow:hidden; margin-top:32px; }
+.terminal { --scroll-track:#252522; --scroll-thumb:#aaa496; --scroll-thumb-hover:#d2cec3; }
 .terminal-bar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:14px 18px; border-bottom:1px solid #4b4a43; }
 .terminal-bar h3 { margin:0; font-size:11px; font-weight:400; }
 .terminal-bar h3::before { content:'>_'; color:#aaa696; margin-right:12px; }

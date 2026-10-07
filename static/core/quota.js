@@ -14,6 +14,6 @@
     } catch { /* Keep last observed timestamps visible. */ }
     finally { clearTimeout(timeout); busy = false; }
   }
-  setInterval(refresh, 60000);
+  setInterval(refresh, 15000);
   document.addEventListener('visibilitychange', refresh);
 })();

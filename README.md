@@ -391,6 +391,10 @@ errors cannot be recovered retroactively.
 
 All dashboard members can see the shared subscription capacity cards: provider-reported remaining
 percentage per window, reset times in WIB, last attempted check and last successful observation.
+The visible queue refreshes its rows and summary counts every five seconds without resetting
+filters, pagination or horizontal scroll. Quota cards refresh from stored readings every 15 seconds.
+Polling pauses in hidden tabs and refreshes on return; queue replacement also waits while a result
+link has focus. Display polling does not increase the frequency of upstream account-usage checks.
 No account identity, token or billing details are exposed. Unknown readings remain unknown; old
 readings are marked last-known. Percentages are not estimated from review token counts.
 

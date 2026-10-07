@@ -18,6 +18,24 @@ from core.models import (
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class DashboardTests(TestCase):
+    def test_live_queue_fragment_updates_scoped_summary_with_filters(self):
+        self.client.force_login(self.user)
+        self.visible.status = "running"
+        self.visible.save()
+        self.hidden.status = "running"
+        self.hidden.save()
+        response = self.client.get("/", {"partial": "1", "actor": "developer"})
+        self.assertContains(response, 'data-running="1"')
+        self.assertContains(response, 'data-completed="0"')
+        self.assertNotContains(response, "private/secret-project")
+        self.visible.status = "completed"
+        self.visible.save()
+        response = self.client.get("/", {"partial": "1", "status": "running"})
+        self.assertContains(response, 'data-running="0"')
+        self.assertContains(response, 'data-completed="1"')
+        self.assertNotContains(response, "visible/project")
+        self.assertIn("no-store", response.headers["Cache-Control"])
+
     def test_quota_panel_requires_membership_and_is_read_only(self):
         url = "/subscriptions/"
         self.assertEqual(self.client.get(url).status_code, 302)
