@@ -218,3 +218,33 @@ class WorkerTests(WorkflowTests):
             failure_reason({"reason": "secret-token or untrusted GitHub response"}),
             "Review context is incomplete or unavailable; no model review was started.",
         )
+
+    def test_exhausted_cli_coverage_falls_forward_without_publishing_partial_review(self):
+        from core.tests.test_providers import RESULT
+
+        job, gh, reviewer = self.run_case(
+            [
+                ProviderError("invalid", detail="cli_coverage"),
+                RESULT,
+            ]
+        )
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertEqual(
+            list(job.model_attempts.values_list("status", flat=True)), ["incomplete", "success"]
+        )
+        self.assertIn("model_incomplete", list(job.activity.values_list("code", flat=True)))
+        self.assertEqual(job.provider, self.second)
+
+    def test_all_coverage_failures_pause_without_publishing(self):
+        job, gh, reviewer = self.run_case(ProviderError("invalid", detail="cli_coverage"))
+        self.assertEqual(job.status, "attention")
+        self.assertEqual(reviewer.call_count, 2)
+        self.assertEqual(gh.writes, [])
+        self.assertIn("incomplete evidence", job.reason)
+
+    def test_invalid_schema_still_pauses_without_rotating(self):
+        job, gh, reviewer = self.run_case(ProviderError("invalid", detail="output_invalid"))
+        self.assertEqual(job.status, "attention")
+        self.assertEqual(reviewer.call_count, 1)
+        self.assertEqual(gh.writes, [])

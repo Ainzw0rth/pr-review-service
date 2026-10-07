@@ -55,7 +55,9 @@ no longer needed. Never print raw CLI streams or credentials into shared logs.
   review explanations remain on GitHub. Raw events and model text are not stored as progress logs.
 - Existing eligibility, commit, label, CI and publication checks remain mandatory.
 - Provider outage/refusal follows the existing ordered route. Quota waits on that connection;
-  unknown reset defaults to the existing next-check interval. Auth/config/invalid output pauses
+  unknown reset defaults to the existing next-check interval. Incomplete evidence gets one fresh
+  recovery pass with missing artifact IDs prioritized; if still incomplete, routing falls forward.
+  Coverage resets for the new session and must be complete independently. Auth/config/other invalid output pauses
   with an explicit reason. There is no silent API billing fallback.
 - No whole-review wall-clock timeout. Admin interrupt stops/removes the runner. Process, memory,
   input and event-size limits still apply. Authentication refresh stays inside the private volume.
@@ -66,8 +68,8 @@ no longer needed. Never print raw CLI streams or credentials into shared logs.
 
 For expired/revoked login, rerun the corresponding `scripts/cli_login.sh` on the VPS, then probe.
 For `cli_setup`, check the pinned image exists on the worker's Docker host and its auth-volume
-setting matches the actual volume. For `cli_coverage`, investigate missing/denied evidence reads;
-do not weaken coverage or publish the incomplete response. For quota, inspect the provider account
+setting matches the actual volume. For `cli_coverage`, inspect the recovery pass and later model attempts. Each CLI model gets at most
+one extra coverage-recovery pass. Do not weaken coverage or publish an incomplete response. For quota, inspect the provider account
 and dashboard next-check time. No credentials belong in screenshots or error reports.
 
 Deploying or fixing credentials does not restart an old paused job. The designated owner can use

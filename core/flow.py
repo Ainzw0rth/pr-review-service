@@ -179,6 +179,7 @@ def snapshot(job, events):
                 "finished_at": attempt.finished_at,
                 "category": category,
                 "events_received": event_count,
+                "recovery_pass": 1 if attempt.diagnostics.get("recovery_pass") == 1 else 0,
                 "evidence_read": evidence_read,
                 "evidence_total": evidence_total,
                 "failure_reason": failure_description(attempt.diagnostics, state),

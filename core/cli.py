@@ -25,6 +25,16 @@ class CLIStream:
         self.complete = False
         self.error = None
         self.coverage = False
+        self.missing_evidence = []
+        self.evidence_ids = {
+            identifier
+            for section, value in (context or {}).items()
+            for identifier in (
+                [f"{section}_{index}" for index in range(len(value))]
+                if isinstance(value, list)
+                else [section]
+            )
+        }
 
     def line(self, value):
         if len(value) > MAX_RESPONSE_BYTES:
@@ -117,6 +127,18 @@ class CLIStream:
             if type(read) is int and type(total) is int and 0 <= read <= total <= 1_000_000:
                 self.coverage = read == total
                 self.diagnostics.update(evidence_read=read, evidence_total=total)
+                missing = event.get("missing", [])
+                if (
+                    not isinstance(missing, list)
+                    or len(missing) > total
+                    or any(
+                        not isinstance(item, str) or item not in self.evidence_ids
+                        for item in missing
+                    )
+                    or len(set(missing)) != len(missing)
+                ):
+                    raise ProviderError("invalid", detail="cli_protocol")
+                self.missing_evidence = missing
             else:
                 raise ProviderError("invalid", detail="cli_protocol")
         elif (
@@ -218,6 +240,39 @@ def container_arguments(kind, name, image, volume):
 
 
 def review_cli(provider, context, cancelled, *, on_response=None, on_activity=None):
+    recovery = None
+    for recovery_pass in range(2):
+
+        def report(data):
+            if on_response:
+                on_response({**data, "recovery_pass": recovery_pass})
+
+        try:
+            return _review_cli_once(
+                provider,
+                context,
+                cancelled,
+                on_response=report,
+                on_activity=on_activity,
+                recovery=recovery,
+            )
+        except ProviderError as exc:
+            if exc.detail != "cli_coverage" or recovery_pass == 1:
+                raise
+            if cancelled():
+                raise ReviewCancelled() from None
+            recovery = getattr(exc, "missing_evidence", [])
+            if on_activity:
+                on_activity(
+                    "cli_output_status",
+                    "Evidence incomplete. Starting one recovery pass in a fresh CLI session; "
+                    "missing items are prioritized and full evidence coverage is required again.",
+                )
+
+
+def _review_cli_once(
+    provider, context, cancelled, *, on_response=None, on_activity=None, recovery=None
+):
     from .providers import SCHEMA, SYSTEM, _wire_schema
     from .runner import RunnerError, _docker
 
@@ -248,6 +303,7 @@ def review_cli(provider, context, cancelled, *, on_response=None, on_activity=No
                 "context": context,
                 "schema": _wire_schema(SCHEMA),
                 "system": SYSTEM,
+                "recovery": recovery,
             }
         )
         with tempfile.TemporaryFile() as request:
@@ -306,7 +362,9 @@ def review_cli(provider, context, cancelled, *, on_response=None, on_activity=No
                 raise ProviderError("invalid", detail="cli_memory")
             result = parser.result(state.get("ExitCode", 1) or process.returncode)
             if not parser.coverage:
-                raise ProviderError("invalid", detail="cli_coverage")
+                error = ProviderError("invalid", detail="cli_coverage")
+                error.missing_evidence = parser.missing_evidence
+                raise error
             return result
     except RunnerError:
         raise ProviderError("unavailable", detail="cli_setup") from None

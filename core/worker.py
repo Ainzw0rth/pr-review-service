@@ -133,16 +133,27 @@ def run_job(job):
                 metadata = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
                 metadata.update(failure_kind=exc.kind, failure_detail=exc.detail)
                 save_diagnostics(metadata)
-                state = {
-                    "attention": "refused",
-                    "unavailable": "unavailable",
-                    "quota": "quota",
-                }.get(exc.kind, "attention")
+                incomplete = exc.detail == "cli_coverage"
+                state = (
+                    "incomplete"
+                    if incomplete
+                    else {
+                        "attention": "refused",
+                        "unavailable": "unavailable",
+                        "quota": "quota",
+                    }.get(exc.kind, "attention")
+                )
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(
                     status=state, finished_at=timezone.now()
                 )
-                if exc.kind in ("unavailable", "attention"):
-                    progress("unavailable" if exc.kind == "unavailable" else "model_refused")
+                if incomplete or exc.kind in ("unavailable", "attention"):
+                    progress(
+                        "model_incomplete"
+                        if incomplete
+                        else "unavailable"
+                        if exc.kind == "unavailable"
+                        else "model_refused"
+                    )
                     continue
                 if exc.kind == "quota":
                     progress("quota")
@@ -165,7 +176,7 @@ def run_job(job):
             finish(
                 job,
                 "attention",
-                "All remaining models declined or were unavailable. Inspect model attempts before requesting another review.",
+                "All remaining models declined, were unavailable, or returned incomplete evidence. Inspect model attempts before requesting another review.",
             )
             return
         if repo.required_checks:

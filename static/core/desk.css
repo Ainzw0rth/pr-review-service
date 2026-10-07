@@ -114,7 +114,7 @@ footer { border-top:1px solid var(--line); padding:22px 5%; display:flex; justif
 .node-running .node-state::before { content:'●'; animation:pulse 2s infinite; }
 .node-refused,.node-attention,.node-blocked { background:#eee2d9; border-color:#ba9d87; }
 .node-refused .node-state::before,.node-attention .node-state::before,.node-blocked .node-state::before { content:'!'; }
-.node-unavailable,.node-quota { background:#eee8d8; border-color:#b6a780; }
+.node-unavailable,.node-quota,.node-incomplete { background:#eee8d8; border-color:#b6a780; }
 .node-pending,.node-unused { background:transparent; border-style:dashed; }
 .model-name { font-size:17px; font-weight:500; margin:20px 0 5px; letter-spacing:-.7px; }
 .model-id { color:var(--muted); font-size:8px; overflow-wrap:anywhere; margin:0 0 16px; }

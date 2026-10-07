@@ -114,8 +114,9 @@ flowchart TB
 ```
 
 **Exceptions and retries:** incomplete context stops the model review and blocks clearance.
-A provider refusal or outage tries the next configured model; exhausted routes, authentication
-errors and invalid output need attention. Quota exhaustion releases the worker and schedules a
+A provider refusal or outage tries the next configured model. Incomplete CLI evidence gets one
+fresh recovery pass prioritizing missing items, then falls forward if still incomplete. Exhausted
+routes, authentication errors and other invalid output need attention. Quota exhaustion releases the worker and schedules a
 retry on the same provider. Fresh CI and eligibility checks remain mandatory before clearance.
 New commits or loss of eligibility invalidate active attempts; pushes and discussion replies alone
 do not start another review. GitHub read/write operations are revalidated, but are not one atomic
@@ -232,7 +233,12 @@ responsible for eligibility, CI and publication. No silent fallback from subscri
 Outage errors may fall through the configured priority. Quota errors do not: dashboard shows
 Out of quota, retains the selected provider, releases the worker and shows reset/next-check time.
 Unknown reset time defaults to a check 30 minutes later. Provider refusals try the next configured model with the unchanged request, once per model
-per pass. Exhausting the route pauses for admin inspection. Authentication/invalid-output failures also require attention.
+per pass. Incomplete CLI evidence gets one additional fresh-session recovery pass on that model, with missing
+artifact IDs prioritized. Every pass must independently deliver the full evidence; prior coverage is
+never reused. If coverage remains incomplete, the next configured model is tried. Dashboard model
+attempts label this **Incomplete evidence** and identify the recovery pass. This exception does not
+rotate on malformed output, authentication errors or quota exhaustion. Exhausting the route pauses
+for admin inspection. Authentication/other invalid-output failures also require attention.
 
 Each model call retains its status, timestamps and allowlisted diagnostics in the Job admin's
 **Model attempts** section. The latest response also appears in **Provider diagnostics**
@@ -490,3 +496,11 @@ re-request the reviewer if needed and retoggle `feedback` → `on review`.
 
 The worker waits for running CI before calling the model, then refreshes required CI before
 publication. The dashboard uses the latest observed CI result, not an earlier pending snapshot.
+
+### Host configuration and activity tracking
+
+Review CLIs run in disposable Docker containers, not the host's interactive work/personal profiles.
+Only the selected service auth volume is mounted. Personal settings, hooks and tracking sender
+state from `Ainzw0rth-config` are not mounted or loaded. Its optional final-reply journal therefore
+does **not** receive these review sessions. Dashboard job history and filtered CLI activity are
+separate; this service does not forward raw sessions, review text or final replies to that journal.

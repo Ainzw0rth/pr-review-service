@@ -36,6 +36,7 @@ MESSAGES = {
     "unavailable": "Provider unavailable; checking the next configured connection.",
     "quota": "Provider quota exhausted; waiting for the next availability check.",
     "model_attention": "Provider response needs administrator attention.",
+    "model_incomplete": "Evidence coverage remained incomplete after recovery; trying the next configured model.",
     "model_refused": "Model declined the review; checking the next configured connection.",
     "models_exhausted": "All remaining model connections declined or were unavailable.",
     "result": "Structured review response received and validated.",

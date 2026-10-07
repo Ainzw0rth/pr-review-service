@@ -9,6 +9,12 @@ export function artifacts(context) {
   }
   return result;
 }
+export function missingEvidence(entries, coverage) {
+  return entries.filter(item => {
+    const ranges=coverage[item.id];
+    return !(ranges?.length===1 && ranges[0][0]===0 && ranges[0][1]===item.text.length);
+  }).map(item=>item.id);
+}
 export function readEvidence(entries, coverage, args) {
   if(!args || !Array.isArray(args.reads) || !args.reads.length || args.reads.length>3)throw Error('Provide 1–3 reads.');
   return args.reads.map(read=>{

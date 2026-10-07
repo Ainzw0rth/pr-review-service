@@ -226,3 +226,25 @@ during implementation verification.
   confirmed seven open PR #157 threads, all resolvable by the configured account, and identical
   freshly paginated comment snapshots. No test reviews/comments/resolutions were published.
 - Workflow docs updated. Existing reviews are not rewritten and old attempts are not retriggered.
+
+## Bounded CLI evidence recovery (2026-10-07)
+
+- Diagnosed PR #169 job `1e8b04b9-cd61-4e1c-94ed-9cf995fb705f`: required CI passed,
+  Opus returned a structured result, but only 51/165 evidence artifacts were fully delivered.
+  The incomplete review was rejected with zero publication receipts.
+- Each CLI provider now gets one fresh-session recovery pass when the sole failure is evidence
+  coverage. Trusted missing-artifact IDs are validated against the captured context and prioritized
+  in the recovery prompt. No prior transcript, hidden reasoning or prior coverage is reused;
+  the new session must independently receive every evidence artifact before acceptance.
+- If coverage is still incomplete, record `incomplete` and try the next configured model. Quota,
+  authentication, malformed outputs, tool-boundary violations and other errors retain their prior
+  handling. Exhausting all models pauses without publishing partial findings.
+- Dashboard shows the recovery-pass marker, public recovery notice, incomplete-evidence status and
+  subsequent model attempts. Missing artifact IDs stay internal rather than becoming diagnostics.
+- Verified 256 Django tests, 3 Node evidence-tool tests, Ruff, JS syntax, migration drift and Django
+  deployment checks. Real Codex and Claude recovery probes both delivered 6/6 synthetic artifacts
+  and returned complete validated reviews; only the initial incomplete-result event was simulated.
+  The recovery sessions used actual CLI containers. No GitHub/Sheet writes or historical-job retry.
+- Inspected `/root/Ainzw0rth-config/README.md`: its optional feature is final-reply journaling.
+  The isolated review CLI homes do not mount/load host hooks or sender configuration, so that
+  journal does not capture service reviews. Shared/global configuration was not changed.

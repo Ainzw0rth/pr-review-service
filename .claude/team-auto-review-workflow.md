@@ -260,3 +260,12 @@ new, audited attempt from the first configured model; other members and admins r
 Published/running/completed attempts are excluded. Changed commits or review cycles still require
 the normal GitHub request flow. Insufficient API credits display **Out of quota** and wait on
 the selected provider, including Anthropic's HTTP 400 credit-balance response.
+
+### Incomplete evidence recovery
+
+If a CLI finishes before reading all supplied evidence, the service makes one recovery pass on the
+same model in a fresh session, prioritizing the missing artifact IDs. The new pass must read all
+evidence independently. If it is still incomplete, the next configured model is tried. The dashboard
+shows the recovery pass and an **Incomplete evidence** result for exhausted coverage attempts.
+Nothing from a partial review is published. Quota stays on its provider; authentication and other
+invalid-output errors still require attention. Old paused jobs are not restarted by deployment.
