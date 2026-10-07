@@ -6,6 +6,35 @@ from core.tests.test_providers import RESULT
 
 
 class CLIStreamTests(TestCase):
+    def test_policy_signal_and_category_survive_without_raw_error_text(self):
+        p = self.parser()
+        p.feed(
+            {
+                "type": "turn.failed",
+                "error": {
+                    "code": "content_policy_violation",
+                    "message": "private source secret",
+                },
+            }
+        )
+        self.assertEqual(p.diagnostics.get("refusal_signal"), "content_policy_violation")
+        self.assertNotIn("private source", json.dumps(p.diagnostics))
+        p = self.parser("claude_cli")
+        p.feed(
+            {
+                "type": "stream_event",
+                "event": {
+                    "type": "message_delta",
+                    "delta": {
+                        "stop_reason": "refusal",
+                        "stop_details": {"category": "cyber"},
+                    },
+                },
+            }
+        )
+        self.assertEqual(p.diagnostics.get("refusal_category"), "cyber")
+        self.assertEqual(p.diagnostics.get("refusal_signal"), "stop_reason_refusal")
+
     def parser(self, kind="codex_cli"):
         from core.cli import CLIStream
 

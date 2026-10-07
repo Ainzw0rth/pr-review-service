@@ -18,6 +18,86 @@ from core.models import (
 
 @override_settings(SECURE_SSL_REDIRECT=False)
 class DashboardTests(TestCase):
+    def test_model_failure_explains_actual_fallback_and_exhaustion(self):
+        from core.models import ModelAttempt, Provider
+
+        first = Provider.objects.create(name="Opus", kind="claude_cli", model="opus")
+        second = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        self.visible.status = "running"
+        self.visible.provider_plan = [
+            {"id": p.pk, "name": p.name, "model": p.model, "kind": p.kind} for p in (first, second)
+        ]
+        self.visible.save()
+        a = ModelAttempt.objects.create(
+            job=self.visible,
+            provider=first,
+            provider_name=first.name,
+            model=first.model,
+            status="refused",
+            diagnostics={"failure_kind": "attention", "refusal_detected": True},
+        )
+        self.client.force_login(self.user)
+        url = f"/jobs/{self.visible.pk}/activity/"
+
+        def attempt():
+            return self.client.get(url).json()["flow"]["models"][0]["attempts"][0]
+
+        self.assertIn("Next configured model: Sol", attempt().get("next_action", ""))
+        ModelAttempt.objects.create(
+            job=self.visible,
+            provider=second,
+            provider_name=second.name,
+            model=second.model,
+            status="running",
+        )
+        self.assertIn("Continued with Sol", attempt().get("next_action", ""))
+        self.assertIn("not supplied", attempt()["failure_reason"])
+        self.visible.model_attempts.exclude(pk=a.pk).delete()
+        self.visible.status = "attention"
+        self.visible.save()
+        self.assertNotIn("Next configured", attempt().get("next_action", ""))
+
+    def test_context_failure_does_not_blame_models(self):
+        from core.activity import record
+
+        self.visible.status = "failed"
+        self.visible.save()
+        record(self.visible, "context_failed")
+        self.client.force_login(self.user)
+        flow = self.client.get(f"/jobs/{self.visible.pk}/activity/").json()["flow"]
+        self.assertIn("No model was called", flow.get("model_detail", ""))
+
+    def test_quota_node_reports_real_retry_time_and_auth_does_not_promise_fallback(self):
+        from core.models import ModelAttempt, Provider
+
+        provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        attempt = ModelAttempt.objects.create(
+            job=self.visible,
+            provider=provider,
+            provider_name=provider.name,
+            model=provider.model,
+            status="quota",
+            diagnostics={"failure_kind": "quota", "failure_detail": "cli_quota"},
+        )
+        self.visible.status = "quota"
+        self.visible.next_retry_at = timezone.now() + timedelta(minutes=30)
+        self.visible.save()
+        self.client.force_login(self.user)
+        url = f"/jobs/{self.visible.pk}/activity/"
+        data = self.client.get(url).json()["flow"]["models"][0]["attempts"][0]
+        self.assertIn("Subscription usage limit", data["failure_reason"])
+        self.assertIn("quota does not switch", data["next_action"])
+        self.assertIsNotNone(data["retry_at"])
+        attempt.status = "attention"
+        attempt.diagnostics = {"failure_kind": "auth", "failure_detail": "cli_auth"}
+        attempt.save()
+        self.visible.status = "attention"
+        self.visible.save()
+        data = self.client.get(url).json()["flow"]["models"][0]["attempts"][0]
+        self.assertIn("login is missing or expired", data["failure_reason"])
+        self.assertIn("Automatic retry paused", data["next_action"])
+        self.assertIsNone(data["retry_at"])
+
     def setUp(self):
         self.user = get_user_model().objects.create_user(
             "member", password="Uncommon-stone-bridge-41"

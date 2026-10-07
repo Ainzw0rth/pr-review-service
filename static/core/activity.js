@@ -45,11 +45,17 @@
         const row = element('li',`model-try try-${attempt.state}`);
         const line = element('div','try-heading');
         line.append(element('span','try-index',String(number + 1).padStart(2,'0')),element('strong','try-outcome',labels[attempt.state] || 'Needs attention'),element('span','try-duration',duration(attempt.started_at,attempt.finished_at,attempt.state)));
+        row.append(line,element('p','try-time',shortTime(attempt.started_at)));
         if (attempt.recovery_pass === 1) row.append(element('p','try-progress','Evidence recovery pass 1 of 1 · fresh session'));
         if (attempt.events_received !== null && attempt.events_received !== undefined) row.append(element('p','try-progress',`${attempt.events_received} CLI events received`));
         if (attempt.evidence_total !== null && attempt.evidence_total !== undefined) row.append(element('p','try-progress',`${attempt.evidence_read} / ${attempt.evidence_total} evidence items supplied`));
-        if (attempt.failure_reason) row.append(element('p','try-reason',attempt.failure_reason));
-        row.append(line,element('p','try-time',`${shortTime(attempt.started_at)}${attempt.category ? ' · ' + attempt.category.replaceAll('_',' ') : ''}`));
+        if (attempt.failure_reason) {
+          const diagnosis = element('div','try-diagnosis');
+          diagnosis.append(element('strong','try-label','Why it stopped'),element('p','try-reason',attempt.failure_reason));
+          if (attempt.next_action) diagnosis.append(element('strong','try-label','What happened next'),element('p','try-next',attempt.next_action));
+          if (attempt.retry_at) diagnosis.append(element('p','try-next',`Next availability check: ${jakarta(attempt.retry_at)} (not a guaranteed quota reset).`));
+          row.append(diagnosis);
+        }
         tries.append(row);
       }
       node.append(tries);
@@ -70,7 +76,7 @@
     const sections = [
       ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs'].includes(n.id)),false],
       ['02','Verify the change','Checks run against this exact commit.',flow.stages.filter(n => ['checks','tests'].includes(n.id)),false],
-      ['03','Review with AI','Same request. Ordered fallback on decline or unavailability.',flow.models,true],
+      ['03','Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models,true],
       ['04','Deliver the review','Results belong on GitHub, not in this dashboard.',flow.stages.filter(n => ['publication','sheet'].includes(n.id)),false],
     ];
     for (const [number,title,description,nodes,model] of sections) {

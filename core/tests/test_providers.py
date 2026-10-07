@@ -20,6 +20,36 @@ RESULT = {
 
 
 class ProviderTests(TestCase):
+    def test_refusal_explanation_distinguishes_explicit_flag_from_unknown_category(self):
+        describe = providers.failure_description
+        reason = describe(
+            {"failure_kind": "attention", "refusal_signal": "content_filter"}, "refused"
+        )
+        self.assertIn("content filter", reason)
+        self.assertIn("not supplied", reason)
+        reason = describe({"failure_kind": "attention", "refusal_category": "cyber"}, "refused")
+        self.assertIn("Cybersecurity", reason)
+        reason = describe(
+            {"failure_kind": "attention", "refusal_category": "private-secret"}, "refused"
+        )
+        self.assertIn("not supplied", reason)
+        self.assertNotIn("private-secret", reason)
+
+    def test_context_transport_diagnostics_preserve_only_static_errors(self):
+        from core.context import failure_reason
+
+        self.assertEqual(
+            failure_reason({"reason": "GitHub request failed (HTTP 502)."}),
+            "GitHub request failed (HTTP 502).",
+        )
+        self.assertEqual(
+            failure_reason({"reason": "GitHub request unavailable or malformed."}),
+            "GitHub request unavailable or malformed.",
+        )
+        self.assertNotIn(
+            "secret", failure_reason({"reason": "GitHub request failed (HTTP 502). secret"})
+        )
+
     def test_response_diagnostics_keep_protocol_metadata_not_content(self):
         data = {
             "id": "msg_diagnostic123",
@@ -44,6 +74,23 @@ class ProviderTests(TestCase):
             {"stop_reason": "secret", "stop_details": {"category": ["secret"]}},
         )
         self.assertNotIn("secret", json.dumps(result))
+
+    def test_api_policy_signal_is_not_inferred_from_error_prose(self):
+        for data, signal in [
+            (
+                {"error": {"code": "content_policy_violation", "message": "private"}},
+                "content_policy_violation",
+            ),
+            ({"incomplete_details": {"reason": "content_filter"}}, "content_filter"),
+            ({"error": {"message": "content_policy_violation private"}}, None),
+        ]:
+            diagnostics = providers.response_diagnostics(400, {}, data)
+            self.assertEqual(diagnostics.get("refusal_signal"), signal)
+            self.assertNotIn("private", json.dumps(diagnostics))
+            if signal == "content_policy_violation":
+                self.assertIn(
+                    "policy violation", providers.failure_description(diagnostics, "refused")
+                )
 
     def test_anthropic_credit_balance_400_is_quota_with_safe_reason(self):
         data = {

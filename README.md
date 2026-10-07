@@ -369,6 +369,16 @@ are retained per job (latest 100 displayed); they cascade-delete with 90-day ter
 Attempts predating this feature have no historical activity log. Current status, provider,
 start/finish times, operational note and quota retry time update without a page reload.
 
+The **Review with AI** nodes show **Why it stopped** and **What happened next** per attempt:
+explicit provider policy/content-filter signals, reported refusal categories (or explicitly
+not supplied), incomplete evidence, invalid output, authentication, quota and availability
+errors. Explanations use allowlisted protocol metadata, never inferred policy categories or
+raw provider prose. Recorded fallback names the subsequent model; an unstarted fallback is
+labeled as such. Quota waits show the next availability check in WIB, not a promised reset.
+Failures before a model call are identified as evidence-gathering failures, not AI refusals.
+Safe GitHub HTTP errors are retained for future context failures; discarded historical
+errors cannot be recovered retroactively. This changes visibility, not review/fallback policy.
+
 Members see only their organizations' PR links, commits, trigger actor, status, timestamps and
 sanitized operational messages. Job details link back to GitHub; there is no review-results view.
 Queue positions are organization-visible positions, not a leak of another organization's work.

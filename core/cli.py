@@ -11,7 +11,13 @@ import uuid
 
 from django.conf import settings
 
-from .providers import MAX_RESPONSE_BYTES, ProviderError, ReviewCancelled, validate_result
+from .providers import (
+    MAX_RESPONSE_BYTES,
+    REFUSAL_CATEGORIES,
+    ProviderError,
+    ReviewCancelled,
+    validate_result,
+)
 
 
 class CLIStream:
@@ -55,6 +61,7 @@ class CLIStream:
             error = ProviderError("auth", detail="cli_auth")
         elif code in ("content_policy_violation", "content_filter", "refusal"):
             error = ProviderError("attention")
+            self.diagnostics.update(refusal_detected=True, refusal_signal=code)
         elif any(
             s in message
             for s in (
@@ -154,7 +161,15 @@ class CLIStream:
             delta = body.get("delta", {}) if isinstance(body, dict) else {}
             if isinstance(delta, dict) and delta.get("stop_reason") == "refusal":
                 self.error = ProviderError("attention")
-                self.diagnostics.update(refusal_detected=True, last_event="declined")
+                self.diagnostics.update(
+                    refusal_detected=True,
+                    last_event="declined",
+                    refusal_signal="stop_reason_refusal",
+                )
+                details = delta.get("stop_details")
+                category = details.get("category") if isinstance(details, dict) else None
+                if isinstance(category, str) and category in REFUSAL_CATEGORIES:
+                    self.diagnostics["refusal_category"] = category
             elif isinstance(body, dict) and body.get("type") == "content_block_delta":
                 self.diagnostics["last_event"] = "receiving"
         elif kind in ("item.started", "item.completed"):

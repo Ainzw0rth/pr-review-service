@@ -57,6 +57,14 @@ ERROR_REASONS = {
     "context_limit": "Review context exceeded the service's request-size limit.",
 }
 
+REFUSAL_CATEGORIES = {
+    "cyber": "Cybersecurity",
+    "bio": "Biological safety",
+    "frontier_llm": "Frontier-model safety",
+    "reasoning_extraction": "Private reasoning extraction",
+    "general_harms": "General harms",
+}
+
 
 def error_reason(status, data):
     error = data.get("error") if isinstance(data, dict) else None
@@ -88,15 +96,31 @@ def failure_description(diagnostics, state):
     """Public operational reason from allowlisted metadata; never raw provider prose."""
     code = diagnostics.get("failure_detail") or diagnostics.get("error_reason")
     reason = ERROR_REASONS.get(code) if isinstance(code, str) else None
+    if state == "refused":
+        signal = diagnostics.get("refusal_signal")
+        reason = (
+            "Provider explicitly flagged a content policy violation."
+            if signal == "content_policy_violation"
+            else "Provider explicitly stopped the request with a content filter."
+            if signal == "content_filter"
+            else "Provider returned a refusal instead of a review."
+        )
+        category = diagnostics.get("refusal_category")
+        label = REFUSAL_CATEGORIES.get(category) if isinstance(category, str) else None
+        reason += (
+            f" Reported category: {label}."
+            if label
+            else " Specific policy category was not supplied by the provider."
+        )
     if not reason:
         kind = diagnostics.get("failure_kind")
         reason = ProviderError.MESSAGES.get(kind) if isinstance(kind, str) else None
     if not reason:
         reason = {
-            "refused": "Provider declined this review; the next configured model may be tried.",
-            "unavailable": "Provider unavailable or request timed out; trying the next model.",
+            "unavailable": "Provider unavailable or request timed out.",
             "quota": "Provider quota exhausted; waiting on this provider.",
             "attention": "Provider connection or response needs administrator attention.",
+            "interrupted": "Worker attempt ended before a complete model response was recorded.",
         }.get(state, "")
     status = diagnostics.get("http_status")
     if reason and type(status) is int and 100 <= status <= 599:
@@ -335,9 +359,21 @@ def response_diagnostics(status, headers, data):
     ):
         result["stop_reason"] = reason
     result["refusal_detected"] = _refusal(data)
+    if result["refusal_detected"]:
+        result["refusal_signal"] = "refusal"
+        if isinstance(error, dict):
+            for key in ("code", "type"):
+                if error.get(key) in ("content_policy_violation", "content_filter"):
+                    result["refusal_signal"] = error[key]
+                    break
+        incomplete = data.get("incomplete_details")
+        if isinstance(incomplete, dict) and incomplete.get("reason") == "content_filter":
+            result["refusal_signal"] = "content_filter"
+        if reason == "refusal":
+            result["refusal_signal"] = "stop_reason_refusal"
     details = data.get("stop_details")
     category = details.get("category") if isinstance(details, dict) else None
-    if category in ("cyber", "bio", "frontier_llm", "reasoning_extraction", "general_harms"):
+    if isinstance(category, str) and category in REFUSAL_CATEGORIES:
         result["refusal_category"] = category
     usage = data.get("usage")
     if isinstance(usage, dict):

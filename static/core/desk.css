@@ -119,13 +119,16 @@ footer { border-top:1px solid var(--line); padding:22px 5%; display:flex; justif
 .model-name { font-size:17px; font-weight:500; margin:20px 0 5px; letter-spacing:-.7px; }
 .model-id { color:var(--muted); font-size:8px; overflow-wrap:anywhere; margin:0 0 16px; }
 .model-backend { font-size:8px; border:1px solid #aaa496; border-radius:5px; display:inline-block; padding:4px 7px; margin:0 0 12px; }
-.model-tries { list-style:none; padding:0; margin:0; max-height:240px; overflow:auto; }
+.model-tries { list-style:none; padding:0; margin:0; }
 .model-try { padding-top:12px; border-top:1px solid #c5bfb0; }
 .try-heading { display:flex; flex-wrap:wrap; gap:8px; font-size:9px; }
 .try-index,.try-time,.try-duration { font-size:8px; color:var(--muted); }
 .try-duration { margin-left:auto; }.try-outcome { font-weight:500; }
 .try-progress,.try-reason { font-size:9px; overflow-wrap:anywhere; margin:0 0 10px; }
 .try-reason { color:#715735; }
+.try-diagnosis { border-left:2px solid #9d735b; padding:2px 0 2px 12px; margin:12px 0; }
+.try-label { display:block; font-size:8px; text-transform:uppercase; letter-spacing:.04em; margin:0 0 6px; }
+.try-next { font-size:9px; line-height:1.8; overflow-wrap:anywhere; margin:0 0 10px; }
 .flow-legacy { border-left:2px solid #9c8a58; padding-left:14px; color:var(--muted); font-size:10px; }
 .flow-placeholder { padding:28px 0; color:var(--muted); }
 .attempt-record { margin-top:28px; border-top:1px solid var(--line); padding-top:14px; }

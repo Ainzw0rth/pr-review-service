@@ -1,7 +1,35 @@
 """Read-only progress projection. Never turn planned work into claimed work."""
 
 from .models import Provider
-from .providers import failure_description
+from .providers import REFUSAL_CATEGORIES, failure_description
+
+
+def next_action(job, attempt, attempts, plan):
+    """Describe recorded routing first; never promise a fallback after a stopped job."""
+    if attempt.status in ("running", "success"):
+        return ""
+    later = next((item for item in attempts if item.pk > attempt.pk), None)
+    if later:
+        return f"Continued with {later.provider_name}. See its attempt below."
+    if job.status in ("cancelled", "superseded"):
+        return "Run cancelled or superseded. No further model calls for this attempt."
+    if job.status == "quota" and attempt.status == "quota":
+        return "Waiting to retry this provider; quota does not switch models."
+    if job.status == "running" and attempt.status in ("refused", "unavailable", "incomplete"):
+        index = next(
+            (
+                i
+                for i, p in enumerate(plan)
+                if p["id"] == attempt.provider_id and p["model"] == attempt.model
+            ),
+            None,
+        )
+        if index is not None and index + 1 < len(plan):
+            return f"Next configured model: {plan[index + 1]['name']} (not started yet)."
+        return "No remaining model in this route; administrator attention required."
+    if attempt.status in ("refused", "unavailable", "incomplete"):
+        return "Run stopped. No further model call recorded; inspect the operational note before retrying."
+    return "Automatic retry paused. Resolve the cause, then the owner can request a fresh review."
 
 
 def snapshot(job, events):
@@ -149,13 +177,7 @@ def snapshot(job, events):
         if state == "running" and job.status in ("cancelled", "superseded"):
             state = "cancelling"
         category = attempt.diagnostics.get("refusal_category")
-        if category not in (
-            "cyber",
-            "bio",
-            "frontier_llm",
-            "reasoning_extraction",
-            "general_harms",
-        ):
+        if not isinstance(category, str) or category not in REFUSAL_CATEGORIES:
             category = None
         transport = attempt.diagnostics.get("transport", "")
         if transport in {"claude_cli", "codex_cli"}:
@@ -183,6 +205,10 @@ def snapshot(job, events):
                 "evidence_read": evidence_read,
                 "evidence_total": evidence_total,
                 "failure_reason": failure_description(attempt.diagnostics, state),
+                "next_action": next_action(job, attempt, attempts, plan),
+                "retry_at": job.next_retry_at
+                if state == "quota" and job.status == "quota" and attempt == attempts[-1]
+                else None,
             }
         )
         group["state"] = state
@@ -212,4 +238,13 @@ def snapshot(job, events):
             "superseded",
         ):
             group["state"] = "unused"
-    return {"stages": stages, "models": groups, "legacy": legacy, "findings": count("findings")}
+    model_detail = "Each attempt shows its recorded failure cause and what happened next."
+    if not attempts and not legacy and "context_failed" in codes:
+        model_detail = "No model was called. Evidence gathering failed before AI review; see the operational note."
+    return {
+        "stages": stages,
+        "models": groups,
+        "legacy": legacy,
+        "findings": count("findings"),
+        "model_detail": model_detail,
+    }

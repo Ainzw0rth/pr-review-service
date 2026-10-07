@@ -30,13 +30,25 @@ SAFE_FAILURES = frozenset(
         "GitHub discussion pagination is incomplete.",
         "Discussion context exceeds supported size.",
         "GitHub discussion exceeds supported context limit.",
+        "GitHub request unavailable or malformed.",
+        "GitHub returned malformed data.",
+        "GitHub response exceeds safe context limit.",
+        "GitHub returned malformed pagination.",
+        "GitHub pagination is incomplete.",
+        "GitHub pagination exceeds supported context size.",
+        "GitHub pagination exceeds supported context limit.",
+        "Required review context is malformed or unavailable.",
+        "Repository contains an unsupported source path.",
     }
 )
 
 
 def failure_reason(context):
     reason = context.get("reason")
-    if isinstance(reason, str) and reason in SAFE_FAILURES:
+    if isinstance(reason, str) and (
+        reason in SAFE_FAILURES
+        or re.fullmatch(r"GitHub request failed \(HTTP [1-5][0-9]{2}\)\.", reason)
+    ):
         return reason
     return "Review context is incomplete or unavailable; no model review was started."
 
