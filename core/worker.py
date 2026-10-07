@@ -7,7 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.activity import Progress
-from core.models import Job, ModelAttempt, Provider
+from core.models import Job, ModelAttempt, Provider, Receipt
 from core.publication import (
     LabelCleanupError,
     StaleReview,
@@ -272,7 +272,11 @@ def run_job(job):
             "Review published on GitHub; workflow-label cleanup failed. "
             "Admin should reconcile labels; do not rerun the AI review just to repair labels.",
         )
-    except (StaleReview, ReviewCancelled):
+    except StaleReview as exc:
+        delivered = Receipt.objects.filter(job=job, key="review").exists()
+        prefix = "Review published; finalization stopped" if delivered else "Review stopped"
+        finish(job, "superseded", f"{prefix}: {exc.public_reason}. Request a new review if needed.")
+    except ReviewCancelled:
         finish(
             job,
             "superseded",

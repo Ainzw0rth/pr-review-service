@@ -17,7 +17,29 @@ class LabelCleanupError(Exception):
 
 
 class StaleReview(Exception):
-    pass
+    # Only application-owned messages may be shown on the dashboard.
+    REASONS = frozenset(
+        {
+            "Attempt no longer active",
+            "Attempt cancelled during eligibility check",
+            "Cannot establish current review cycle",
+            "PR no longer in this human review cycle",
+            "Discussion target changed",
+            "Discussion reopened after resolution",
+            "Discussion changed since evidence collection",
+            "Terminal state changed",
+            "Human removed requested reviewer",
+            "Human changed review lifecycle during publication",
+            "Unexpected label change during publication",
+            "Cannot establish terminal review cycle",
+            "Human review cycle changed",
+        }
+    )
+
+    @property
+    def public_reason(self):
+        message = str(self)
+        return message if message in self.REASONS else "Review eligibility changed"
 
 
 def _guard_state(github, job):
@@ -403,7 +425,10 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
             or not row.pr.repository.enabled
         ):
             raise StaleReview("Terminal state changed")
-        allow_removed = blocked and Receipt.objects.filter(job=job, key="request_changes").exists()
+        # COMMENT and REQUEST_CHANGES both consume a pending review request.
+        # Only this job's successfully persisted review permits that implicit
+        # change. Explicit lifecycle events below still invalidate publication.
+        allow_removed = Receipt.objects.filter(job=job, key="review").exclude(remote_id="").exists()
         requested = {item["login"].casefold() for item in fresh.get("requested_reviewers", [])}
         if job.pr.repository.reviewer.casefold() not in requested and not allow_removed:
             raise StaleReview("Human removed requested reviewer")
@@ -428,15 +453,6 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
             ):
                 continue
             item_actor = (item.get("actor") or {}).get("login", "").casefold()
-            if (
-                action == "review_request_removed"
-                and allow_removed
-                and item_actor == actor
-                and (item.get("requested_reviewer") or {}).get("login", "").casefold()
-                == job.pr.repository.reviewer.casefold()
-            ):
-                own_ids.add(item["id"])
-                continue
             if action in ("labeled", "unlabeled") and item_actor == actor:
                 observed.append((action, item["label"]["name"]))
                 own_ids.add(item["id"])

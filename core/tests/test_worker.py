@@ -67,6 +67,31 @@ class WorkerTests(WorkflowTests):
         self.assertFalse(Receipt.objects.filter(job=job, key="failure").exists())
         self.assertEqual(reviewer.call_count, 1)
 
+    def test_stale_publication_reason_preserves_delivered_review_context(self):
+        from core.publication import StaleReview
+        from core.tests.test_providers import RESULT
+
+        with patch(
+            "core.publication.terminal_transition",
+            side_effect=StaleReview("Human changed review lifecycle during publication"),
+        ):
+            job, gh, reviewer = self.run_case([{**RESULT, "blocking": True}])
+        self.assertEqual(job.status, "superseded")
+        self.assertIn("Review published", job.reason)
+        self.assertIn("Human changed review lifecycle", job.reason)
+        self.assertEqual(reviewer.call_count, 1)
+
+    def test_unrecognized_cancellation_reason_is_not_exposed(self):
+        from core.publication import StaleReview
+        from core.tests.test_providers import RESULT
+
+        with patch(
+            "core.publication.terminal_transition", side_effect=StaleReview("secret-content")
+        ):
+            job, gh, reviewer = self.run_case([RESULT])
+        self.assertEqual(job.status, "superseded")
+        self.assertNotIn("secret-content", job.reason)
+
     def test_quota_keeps_provider_and_releases_worker_without_backup(self):
         retry = timezone.now() + timezone.timedelta(hours=1)
         job, gh, reviewer = self.run_case(ProviderError("quota", retry_at=retry))

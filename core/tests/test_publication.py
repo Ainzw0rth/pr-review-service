@@ -217,7 +217,7 @@ class PublicationTests(WorkflowTests):
             publish(gh, job, self.result(), {}, {"passed": True, "summary": "Pass"})
         self.assertNotIn("approved", [label["name"] for label in gh.snapshot["labels"]])
 
-    def test_comment_receipt_never_allows_missing_reviewer_approval(self):
+    def comment_review(self, after_review=None):
         job, gh = self.prepare()
         result = self.result()
         result["findings"] = [
@@ -228,19 +228,58 @@ class PublicationTests(WorkflowTests):
         def post(path, data):
             response = original(path, data)
             if path.endswith("/reviews"):
+                # A submitted COMMENT also consumes the pending request on GitHub.
                 gh.snapshot["requested_reviewers"] = []
+                if after_review:
+                    after_review(job, gh)
             return response
 
         gh.post = post
+        return job, gh, result, {"files": [{"filename": "a.py", "valid_lines": [1]}]}
+
+    def test_comment_review_can_finish_after_implicit_request_consumption(self):
+        from core.models import Receipt
+
+        job, gh, result, context = self.comment_review()
+        self.assertEqual(
+            publish(gh, job, result, context, {"passed": True, "summary": "Pass"}), "ready"
+        )
+        self.assertEqual(gh.snapshot["labels"], [{"name": "approved"}])
+        self.assertEqual([r["state"] for r in gh.reviews], ["COMMENTED"])
+        self.assertTrue(Receipt.objects.filter(job=job, key="review").exists())
+        self.assertFalse(any(data.get("event") == "APPROVE" for _, data in gh.writes))
+
+    def test_comment_review_still_stops_for_explicit_reviewer_removal(self):
+        for actor in ["developer", "louis"]:
+            with self.subTest(actor=actor):
+                # Each cycle must be independent of the previous subtest.
+                Job.objects.all().delete()
+                PullRequest.objects.all().delete()
+                job, gh, result, context = self.comment_review(
+                    lambda job, gh: gh.timeline_event("review_request_removed", actor=actor)
+                )
+                with self.assertRaises(StaleReview):
+                    publish(gh, job, result, context, {"passed": True, "summary": "Pass"})
+                self.assertNotIn({"name": "approved"}, gh.snapshot["labels"])
+
+    def test_comment_review_still_stops_for_new_commit(self):
+        def new_commit(job, gh):
+            gh.snapshot["head"]["sha"] = "b" * 40
+
+        job, gh, result, context = self.comment_review(new_commit)
         with self.assertRaises(StaleReview):
-            publish(
-                gh,
-                job,
-                result,
-                {"files": [{"filename": "a.py", "valid_lines": [1]}]},
-                {"passed": True, "summary": "Pass"},
-            )
-        self.assertNotIn("approved", [label["name"] for label in gh.snapshot["labels"]])
+            publish(gh, job, result, context, {"passed": True, "summary": "Pass"})
+        self.assertNotIn({"name": "approved"}, gh.snapshot["labels"])
+
+    def test_comment_review_still_stops_for_human_label_override(self):
+        def human_override(job, gh):
+            gh.snapshot["labels"].append({"name": "feedback"})
+            gh.timeline_event("labeled", "feedback", actor="louis")
+
+        job, gh, result, context = self.comment_review(human_override)
+        with self.assertRaises(StaleReview):
+            publish(gh, job, result, context, {"passed": True, "summary": "Pass"})
+        self.assertNotIn({"name": "approved"}, gh.snapshot["labels"])
 
     def test_same_account_human_override_between_own_label_writes_stops(self):
         job, gh = self.prepare()

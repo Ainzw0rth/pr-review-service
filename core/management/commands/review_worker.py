@@ -1,5 +1,6 @@
 import fcntl
 import time
+import uuid
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -19,6 +20,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         with open(settings.DATA_DIR / "worker.lock", "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            worker_token = uuid.uuid4().hex
+            (settings.DATA_DIR / "worker.drained").unlink(missing_ok=True)
             if any(
                 isinstance(command, list) and command
                 for command in Repository.objects.values_list("test_command", flat=True)
@@ -30,7 +33,15 @@ class Command(BaseCommand):
                 cleanup_cli_orphans()
             recover_interrupted()
             while True:
-                if (settings.DATA_DIR / "worker.drain").exists():
+                with open(settings.DATA_DIR / "worker.intake.lock", "a") as intake:
+                    fcntl.flock(intake, fcntl.LOCK_EX)
+                    draining = (settings.DATA_DIR / "worker.drain").exists()
+                    if draining:
+                        # Reached only after run_job and all of its finally cleanup.
+                        (settings.DATA_DIR / "worker.drained").write_text(worker_token)
+                    else:
+                        (settings.DATA_DIR / "worker.drained").unlink(missing_ok=True)
+                if draining:
                     if options["once"]:
                         return
                     time.sleep(2)

@@ -417,22 +417,48 @@ subscription route from the beginning. Skipped entries are recorded without a mo
 
 **Do not restart a worker during a review.** A hard restart marks running attempts interrupted/
 Needs attention; it does not resume the model session or blindly replay GitHub publication.
-For a worker version that supports draining:
+### Graceful application updates
+
+The team can keep working in GitHub while an update waits. Stop **job starts**, not incoming
+requests: queued jobs and accepted webhook deliveries remain in the persistent database.
+
+After running the test/lint checks, from the VPS checkout run:
 
 ```sh
-docker compose exec web python manage.py worker_control drain
-docker compose exec web python manage.py worker_control status
-# Wait for Active jobs: 0; keep the drain flag in place throughout deployment.
-# Build, migrate and recreate the services only after the active job finishes.
+python3 scripts/deploy.py
+```
+
+The command serializes deployments, saves a rollback image, builds the current checkout, and
+checks Django deployment settings and migration compatibility **before** pausing job starts.
+It then drains the worker, waits for its explicit idle acknowledgment (including final cleanup),
+backs up SQLite, replaces the app containers, checks web health and the replacement worker's
+readiness, and resumes the queue. It does not push Git or rebuild/change the pinned CLI image.
+There is no deadline that kills an active review; interrupt a stuck review through the existing
+admin controls only when that is intended.
+
+This is a **drain-and-restart**, not zero downtime: the dashboard/webhook endpoint can briefly
+be unavailable during web replacement. Already accepted requests are retained. Check failed GitHub
+webhook deliveries during this interval and redeliver them; this command does not automatically
+recover deliveries GitHub could not send. Fully uninterrupted webhook ingress needs a separate
+always-on receiver or a rolling web setup.
+
+Failures or Ctrl-C after draining leave intake paused, with recovery instructions and the saved
+rollback image printed. Inspect health before manually resuming:
+
+```sh
+docker compose exec web python manage.py worker_control status --json
 docker compose exec web python manage.py worker_control resume
 ```
 
-Draining stops intake, not the active review. Queue entries and webhooks remain stored; the drain
-flag persists in the shared data volume across restarts. Do not use a short forced-stop timeout as
-a substitute for draining. **First rollout caveat:** the currently deployed older worker does not
-understand the flag. Its active review must finish before that worker is replaced. This release
-also requires migration `0010` and a rebuilt/pinned CLI image containing `quota.mjs`; do not deploy
-only the web image or point the quota collector at the old CLI image.
+Pending schema migrations are rejected before drain: plan and back up schema upgrades separately.
+The rollback image restores application code only, not environment changes, database schema, or
+CLI authentication/configuration. Do not run concurrent manual restarts/resumes during deployment.
+
+**One-time rollout:** older installed workers support the drain flag but not the new idle
+acknowledgment/JSON protocol. Install this release using the supervised drain procedure first:
+pause starts, wait for the active review and its cleanup to finish, back up, recreate services,
+verify health, then resume. Subsequent compatible updates use the command above. The script
+fails before mutation when the installed command does not support its status protocol.
 
 Members see only their organizations' PR links, commits, trigger actor, status, timestamps and
 sanitized operational messages. Job details link back to GitHub; there is no review-results view.
