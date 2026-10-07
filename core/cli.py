@@ -57,7 +57,13 @@ class CLIStream:
         code = data.get("code") or data.get("type")
         message = data.get("message", "")
         message = message.lower()[:64000] if isinstance(message, str) else ""
-        if code in ("rate_limit", "rate_limit_error", "usage_limit_reached"):
+        if code in ("cli_stream_malformed", "cli_stream_truncated", "cli_stream_too_large"):
+            self.diagnostics["protocol_error"] = code
+            error = ProviderError(
+                "invalid",
+                detail="response_too_large" if code == "cli_stream_too_large" else "cli_protocol",
+            )
+        elif code in ("rate_limit", "rate_limit_error", "usage_limit_reached"):
             error = ProviderError("quota", detail="cli_quota")
         elif code == "auth_missing":
             error = ProviderError("auth", detail="cli_auth")
@@ -131,7 +137,13 @@ class CLIStream:
         self.transcript.feed(event)
         self.diagnostics["events_received"] += 1
         kind = event.get("type")
-        if kind == "runner_coverage":
+        if kind == "runner_exit":
+            code, signal = event.get("code"), event.get("signal")
+            if type(code) is int and 0 <= code <= 255:
+                self.diagnostics["cli_exit_code"] = code
+            if signal in ("SIGTERM", "SIGKILL", "SIGINT", "SIGABRT", "SIGSEGV", "SIGPIPE"):
+                self.diagnostics["cli_exit_signal"] = signal
+        elif kind == "runner_coverage":
             read, total = event.get("read"), event.get("total")
             if type(read) is int and type(total) is int and 0 <= read <= total <= 1_000_000:
                 self.coverage = read == total
@@ -210,11 +222,9 @@ class CLIStream:
                 self.diagnostics["last_event"] = "completed"
 
     def usage(self, usage):
-        if isinstance(usage, dict):
-            for key in ("input_tokens", "output_tokens"):
-                value = usage.get(key)
-                if type(value) is int and 0 <= value <= 1_000_000_000:
-                    self.diagnostics[key] = value
+        from .usage import usage_counters
+
+        self.diagnostics.update(usage_counters(usage))
 
     def result(self, exit_code):
         if self.error:
@@ -260,11 +270,22 @@ def container_arguments(kind, name, image, volume):
 
 def review_cli(provider, context, cancelled, *, on_response=None, on_activity=None):
     recovery = None
+    usage_passes = []
     for recovery_pass in range(2):
+        usage_passes.append({})
 
         def report(data):
+            from .usage import usage_counters
+
+            usage_passes[recovery_pass].update(usage_counters(data))
             if on_response:
-                on_response({**data, "recovery_pass": recovery_pass})
+                on_response(
+                    {
+                        **data,
+                        "recovery_pass": recovery_pass,
+                        "usage_passes": [dict(p) for p in usage_passes],
+                    }
+                )
 
         try:
             return _review_cli_once(

@@ -381,3 +381,66 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(capture.call_args.args[1], RESULT)
         self.assertEqual(capture.call_args.args[2], "ready")
         self.assertTrue(gh.writes)
+
+    def test_owner_delivery_retry_reuses_saved_analysis_and_summary(self):
+        from core.delivery import queue_retry
+        from core.github import IntegrationError
+        from core.tests.test_providers import RESULT
+
+        original = FakeGitHub.post
+
+        def fail_review(github, path, data):
+            if path.endswith("/reviews"):
+                raise IntegrationError("GitHub request failed (HTTP 403).")
+            return original(github, path, data)
+
+        with patch.object(FakeGitHub, "post", autospec=True, side_effect=fail_review):
+            job, gh, reviewer = self.run_case([{**RESULT, "blocking": True}])
+        self.assertEqual(job.status, "attention")
+        self.assertIn("HTTP 403", job.reason)
+        self.assertEqual(len(gh.comments), 1)
+        queued = queue_retry(job)
+        self.assertEqual(queued.pk, job.pk)
+        with (
+            patch("core.github.GitHub", return_value=gh),
+            patch("core.providers.review") as model,
+            patch("core.context.build_context") as context,
+            patch("core.sheets.sync_status"),
+        ):
+            run_job(workflow.claim())
+        model.assert_not_called()
+        context.assert_not_called()
+        job.refresh_from_db()
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(len(gh.comments), 1)
+        self.assertEqual(len(gh.reviews), 1)
+
+    def test_delivery_retry_new_commit_cannot_publish_saved_analysis(self):
+        from core.delivery import queue_retry, save_review
+        from core.tests.test_providers import RESULT
+
+        self.reconcile(self.event("labeled"), self.snapshot())
+        job = workflow.claim()
+        save_review(job, RESULT, {}, {"passed": True, "summary": "Pass"})
+        workflow.finish(job, "attention")
+        job.refresh_from_db()
+        queue_retry(job)
+        gh = FakeGitHub(self.snapshot(sha="b" * 40))
+        with patch("core.github.GitHub", return_value=gh), patch("core.providers.review") as model:
+            run_job(workflow.claim())
+        model.assert_not_called()
+        self.assertEqual(gh.writes, [])
+        job.refresh_from_db()
+        self.assertEqual(job.status, "superseded")
+
+    def test_restart_recognizes_confirmed_delivery_without_rerunning(self):
+        from core.models import ReviewCheckpoint
+        from core.worker import recover_interrupted
+
+        self.reconcile(self.event("labeled"), self.snapshot())
+        job = workflow.claim()
+        ReviewCheckpoint.objects.create(job=job, stage="done", encrypted_payload="saved")
+        recover_interrupted()
+        job.refresh_from_db()
+        self.assertEqual(job.status, "completed")
+        self.assertIn("delivery completed", job.reason)

@@ -240,3 +240,28 @@ class ThreadResolutionTests(TestCase):
         with self.assertRaises(StaleReview):
             self.run_publish(gh, job, result, context)
         self.assertEqual(mutations, [])
+
+    def test_delivery_reconciles_reply_when_post_response_is_lost(self):
+        from unittest.mock import patch
+
+        from core.delivery import deliver, save_review
+        from core.github import IntegrationError
+
+        job, gh, result, context, thread, mutations = self.setup_thread()
+        save_review(job, result, context, {"passed": True, "summary": "Pass"})
+        original = gh.post
+
+        def post(path, data):
+            row = original(path, data)
+            if path.endswith("/replies"):
+                raise IntegrationError("GitHub request unavailable or malformed.")
+            return row
+
+        gh.post = post
+        with (
+            patch("core.delivery.time.sleep"),
+            patch("core.context.threads", return_value=[thread]),
+        ):
+            self.assertEqual(deliver(gh, job, publish, lambda *a: None), "ready")
+        self.assertEqual(sum(path.endswith("/replies") for path, _ in gh.writes), 1)
+        self.assertEqual(len(mutations), 1)

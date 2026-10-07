@@ -96,6 +96,17 @@ def failure_description(diagnostics, state):
     """Public operational reason from allowlisted metadata; never raw provider prose."""
     code = diagnostics.get("failure_detail") or diagnostics.get("error_reason")
     reason = ERROR_REASONS.get(code) if isinstance(code, str) else None
+    stream_reasons = {
+        "cli_stream_malformed": "CLI emitted malformed JSON; the output stream could not be decoded.",
+        "cli_stream_truncated": "CLI output ended mid-message; the structured response was truncated.",
+        "cli_stream_too_large": "A CLI output message exceeded the runner transport limit.",
+    }
+    if code in ("cli_protocol", "response_too_large"):
+        protocol = diagnostics.get("protocol_error")
+        reason = stream_reasons.get(protocol, reason) if isinstance(protocol, str) else reason
+        exit_code = diagnostics.get("cli_exit_code")
+        if reason and type(exit_code) is int and 0 <= exit_code <= 255:
+            reason += f" CLI exit code: {exit_code}."
     if state == "refused":
         signal = diagnostics.get("refusal_signal")
         reason = (
@@ -375,12 +386,9 @@ def response_diagnostics(status, headers, data):
     category = details.get("category") if isinstance(details, dict) else None
     if isinstance(category, str) and category in REFUSAL_CATEGORIES:
         result["refusal_category"] = category
-    usage = data.get("usage")
-    if isinstance(usage, dict):
-        for key in ("input_tokens", "output_tokens"):
-            value = usage.get(key)
-            if type(value) is int and 0 <= value <= 1_000_000_000:
-                result[key] = value
+    from .usage import usage_counters
+
+    result.update(usage_counters(data.get("usage")))
     return result
 
 

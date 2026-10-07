@@ -19,7 +19,9 @@ def is_retry_owner(user):
 
 
 def retry_available(job):
-    return (
+    from .delivery import retry_available as delivery_available
+
+    return delivery_available(job) or (
         job.status in RETRYABLE
         and job.generation == job.pr.generation
         and job.head_sha == job.pr.head_sha
@@ -29,6 +31,11 @@ def retry_available(job):
 
 
 def retry_job(job, actor):
+    from .delivery import queue_retry
+    from .delivery import retry_available as delivery_available
+
+    if delivery_available(job):
+        return queue_retry(job)
     from .github import GitHub
     from .workflow import canonical_cycle, eligible
 

@@ -257,3 +257,14 @@ class JournalEntry(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
     attempts = models.PositiveIntegerField(default=0)
     last_error = models.CharField(max_length=180, blank=True)
+
+
+class ReviewCheckpoint(models.Model):
+    """Private review artifact and delivery cursor; never returned by dashboard endpoints."""
+
+    job = models.OneToOneField(Job, on_delete=models.CASCADE, related_name="review_checkpoint")
+    encrypted_payload = models.TextField(editable=False)
+    stage = models.CharField(max_length=20, default="ready")
+    state = models.JSONField(default=dict, editable=False)
+    delivery_attempts = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)

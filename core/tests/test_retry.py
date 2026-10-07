@@ -98,3 +98,23 @@ class RetryTests(TestCase):
         Receipt.objects.create(job=self.visible, key="review")
         self.retry()
         self.assertEqual(Job.objects.filter(pr=self.visible.pr).count(), 1)
+
+    def test_saved_delivery_owner_only_and_payload_never_exposed(self):
+        from core.models import ReviewCheckpoint
+
+        ReviewCheckpoint.objects.create(job=self.visible, encrypted_payload="private-saved-payload")
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.post(self.url).status_code, 403)
+        page = self.client.get(reverse("job_detail", args=[self.visible.pk]))
+        self.assertNotContains(page, "Retry delivery")
+        self.assertNotContains(page, "private-saved-payload")
+        self.client.force_login(self.owner)
+        self.assertContains(
+            self.client.get(reverse("job_detail", args=[self.visible.pk])), "Retry delivery"
+        )
+        with patch("core.github.GitHub") as github:
+            self.assertEqual(self.client.post(self.url).status_code, 302)
+            github.assert_not_called()
+        self.visible.refresh_from_db()
+        self.assertEqual(self.visible.status, "queued")
+        self.assertEqual(Job.objects.filter(pr=self.visible.pr).count(), 1)

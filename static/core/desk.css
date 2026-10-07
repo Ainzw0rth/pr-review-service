@@ -177,3 +177,8 @@ footer { border-top:1px solid var(--line); padding:22px 5%; display:flex; justif
 .terminal-message {white-space:pre-wrap;}
 .cli_output_text .terminal-message {color:#f6f4ee;}
 .cli_output_failed .terminal-message {color:#efb299;}
+
+.try-usage { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--line); }
+.try-usage summary { cursor: pointer; }
+.usage-grid { display: grid; grid-template-columns: 1fr auto; gap: .35rem 1rem; margin: .75rem 0; font-size: .75rem; }
+.usage-grid dd { margin: 0; font-variant-numeric: tabular-nums; }

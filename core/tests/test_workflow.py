@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from core import workflow
@@ -7,6 +7,11 @@ from core.models import Credential, Job, Organization, Repository, Webhook
 
 class WorkflowTests(TestCase):
     def setUp(self):
+        from cryptography.fernet import Fernet
+
+        setting = override_settings(CREDENTIAL_KEY=Fernet.generate_key().decode())
+        setting.enable()
+        self.addCleanup(setting.disable)
         org = Organization.objects.create(name="Team", slug="team")
         c = Credential.objects.create(name="test", encrypted_value="x")
         self.repo = Repository.objects.create(

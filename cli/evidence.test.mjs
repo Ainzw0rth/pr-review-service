@@ -26,3 +26,21 @@ test('recovery identifies omitted and partially read entries without granting co
  assert.deepEqual(missingEvidence(entries,coverage),['files_1']);
  assert.deepEqual(missingEvidence(entries,{}),['files_0','files_1']);
 });
+
+test('identical artifacts share reads without losing their original identities',()=>{
+ const file={path:'docs/rules.md',content:'x'.repeat(1200)};
+ const entries=artifacts({sources:[file],docs:[file]});
+ const coverage={};
+ assert.equal(entries[1].canonical_id,'sources_0');
+ readEvidence(entries,coverage,{reads:[{id:'sources_0'}]});
+ assert.deepEqual(missingEvidence(entries,coverage),[]);
+ const changed=artifacts({sources:[file],docs:[{...file,content:'changed agreement'}]});
+ assert.equal(changed[1].canonical_id,undefined);
+ assert.deepEqual(missingEvidence(changed,coverage),['docs_0']);
+});
+test('small artifacts batch efficiently while total output remains bounded',()=>{
+ const entries=artifacts({files:Array.from({length:8},(_,n)=>({path:`${n}.py`,content:'small'}))});
+ assert.equal(readEvidence(entries,{}, {reads:entries.map(x=>({id:x.id}))}).length,8);
+ const big=artifacts({files:Array.from({length:4},(_,n)=>({path:`${n}.py`,content:'x'.repeat(20000)}))});
+ assert.throws(()=>readEvidence(big,{}, {reads:big.map(x=>({id:x.id}))}));
+});

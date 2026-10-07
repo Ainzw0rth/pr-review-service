@@ -2,6 +2,7 @@
 
 from .models import Provider
 from .providers import REFUSAL_CATEGORIES, failure_description
+from .usage import public_usage
 
 
 def next_action(job, attempt, attempts, plan):
@@ -50,6 +51,8 @@ def snapshot(job, events):
     starts = [i for i, event in enumerate(events) if event.code == "starting"]
     if starts:
         events = events[starts[-1] :]
+    if any(event.code == "delivery_resume" for event in events):
+        events = all_events
     codes = {event.code for event in events}
 
     def count(code):
@@ -215,6 +218,7 @@ def snapshot(job, events):
                 "category": category,
                 "events_received": event_count,
                 "recovery_pass": 1 if attempt.diagnostics.get("recovery_pass") == 1 else 0,
+                "usage": None if state == "skipped" else public_usage(attempt.diagnostics),
                 "evidence_read": evidence_read,
                 "evidence_total": evidence_total,
                 "failure_reason": failure_description(attempt.diagnostics, state),
@@ -251,7 +255,11 @@ def snapshot(job, events):
             "superseded",
         ):
             group["state"] = "unused"
-    model_detail = "Each attempt shows its recorded failure cause and what happened next."
+    model_detail = (
+        "Saved analysis reused for delivery; no additional model call."
+        if "delivery_resume" in codes
+        else "Each attempt shows its recorded failure cause and what happened next."
+    )
     if not attempts and not legacy and "context_failed" in codes:
         model_detail = "No model was called. Evidence gathering failed before AI review; see the operational note."
     return {

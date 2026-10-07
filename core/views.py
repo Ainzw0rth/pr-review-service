@@ -204,6 +204,7 @@ def job_detail(request, job_id):
             .count()
             + 1
         )
+    from .delivery import retry_available as delivery_available
     from .retries import is_retry_owner, retry_available
 
     return render(
@@ -214,6 +215,7 @@ def job_detail(request, job_id):
             "position": position,
             "retry_owner": is_retry_owner(request.user),
             "retry_available": is_retry_owner(request.user) and retry_available(job),
+            "delivery_retry": delivery_available(job),
         },
     )
 
@@ -223,6 +225,7 @@ def job_detail(request, job_id):
 @require_GET
 def job_activity(request, job_id):
     from .activity import message
+    from .delivery import retry_available as delivery_available
     from .flow import snapshot
     from .retries import is_retry_owner, retry_available
 
@@ -239,6 +242,7 @@ def job_activity(request, job_id):
             "next_retry_at": job.next_retry_at,
             "reason": job.reason,
             "retry_available": is_retry_owner(request.user) and retry_available(job),
+            "delivery_retry": delivery_available(job),
             "flow": snapshot(job, events),
             "events": [
                 {
@@ -273,7 +277,9 @@ def job_retry(request, job_id):
     else:
         messages.success(
             request,
-            "Fresh review queued from the first configured model. PR eligibility will be checked again by the worker.",
+            "Saved review queued for delivery without a model call; eligibility will be rechecked."
+            if fresh.pk == job.pk
+            else "Fresh review queued from the first configured model. PR eligibility will be checked again by the worker.",
         )
         return redirect("job_detail", job_id=fresh.pk)
     return redirect("job_detail", job_id=job.pk)

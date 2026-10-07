@@ -630,3 +630,36 @@ docker compose exec maintenance python manage.py flush_journal
 
 This retries pending delivery without printing summary contents. The same backend exports accepted
 notes for the existing vault/Hermes workflow. No shared client configuration changes are required.
+
+
+### Review efficiency and delivery recovery
+
+CLI attempts remain fresh sessions: no saved terminal conversation is resumed. Exact duplicate
+serialized evidence shares read coverage while retaining every original artifact ID. Changed
+content still requires reading; this does not introduce a file-count cap. Evidence reads accept
+up to 12 items per call, at most 20,000 characters per item and 60,000 content characters per batch.
+
+The job's model cards show provider-reported input, output, cache-read and cache-creation tokens,
+including separate initial/recovery sessions. Repeated cumulative snapshots are not added twice.
+Missing counters display **Unavailable**, never estimated zero. Claude input and cache counters
+are separate; Codex cached input is included in input. These are not subscription charges or
+cross-provider cost estimates. Known exhausted accounts continue to be skipped without a call.
+
+Before publication, validated analysis and its evidence are saved in an encrypted, commit-pinned
+checkpoint. Transient GitHub transport/5xx failures get at most three delivery attempts with short
+backoff, without rerunning the model. Rate-limit and other failures pause for owner attention.
+The owner can select **Retry delivery** to resume the same job, preserving publication markers
+and receipts. Members cannot retry. GitHub receipts are reconciled before repeating writes;
+uncertain outcomes are not assumed successful. A new commit, changed requirements/discussion,
+or human lifecycle override stops stale delivery. Current eligibility and CI guards still apply.
+
+After delivery, full evidence is replaced by a concise encrypted review record plus its evidence
+fingerprint. Checkpoints expire after 90 days and are removed by the cleanup command. Neither
+saved evidence nor review contents are exposed by dashboard endpoints. These records do not
+currently provide automatic memory to later CLI sessions.
+
+**Rollout:** this change requires migration `0011_reviewcheckpoint` and rebuilding the CLI runner
+image as well as the application image. The graceful deployment script intentionally rejects
+pending migrations: drain the worker, wait for active work/cleanup to finish, back up the database,
+apply the schema migration in a supervised rollout, then start and verify the updated services
+before resuming intake. Do not restart an active worker to apply this change.

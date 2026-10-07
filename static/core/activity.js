@@ -49,6 +49,21 @@
         if (attempt.recovery_pass === 1) row.append(element('p','try-progress','Evidence recovery pass 1 of 1 · fresh session'));
         if (attempt.events_received !== null && attempt.events_received !== undefined) row.append(element('p','try-progress',`${attempt.events_received} CLI events received`));
         if (attempt.evidence_total !== null && attempt.evidence_total !== undefined) row.append(element('p','try-progress',`${attempt.evidence_read} / ${attempt.evidence_total} evidence items supplied`));
+        if (attempt.usage) {
+          const usage = element('details','try-usage');
+          usage.dataset.attemptId = String(attempt.id);
+          usage.open = Boolean(graph.querySelector(`details[data-attempt-id="${attempt.id}"][open]`));
+          usage.append(element('summary','try-label',`Usage · ${attempt.usage.session_count} CLI/API session(s)`));
+          const labels = {input_tokens:'Input',cached_input_tokens:'Cache read',cache_creation_input_tokens:'Cache creation',output_tokens:'Output'};
+          const show = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString() : 'Unavailable';
+          const totals = element('dl','usage-grid');
+          for (const [key,label] of Object.entries(labels)) totals.append(element('dt','',label),element('dd','',show(attempt.usage.totals[key])));
+          usage.append(totals,element('p','node-detail','Provider-reported tokens. Claude input excludes separately reported cache tokens; Codex cache reads are part of input. Not subscription charges.'));
+          if (attempt.usage.passes.length > 1) {
+            attempt.usage.passes.forEach((pass,index) => usage.append(element('p','node-detail',`${index ? 'Recovery' : 'Initial'}: input ${show(pass.input_tokens)} · output ${show(pass.output_tokens)} · cache read ${show(pass.cached_input_tokens)}`)));
+          }
+          row.append(usage);
+        }
         if (attempt.failure_reason) {
           const diagnosis = element('div','try-diagnosis');
           diagnosis.append(element('strong','try-label','Why it stopped'),element('p','try-reason',attempt.failure_reason));
@@ -141,7 +156,11 @@
         text(heartbeat,states[data.status] || 'Review is not running');
       }
       const retryControl = document.querySelector("[data-job-retry-control]");
-      if (retryControl) retryControl.hidden = !data.retry_available;
+      if (retryControl) {
+        retryControl.hidden = !data.retry_available;
+        retryControl.querySelector('[data-retry-label]').textContent = data.delivery_retry ? 'Retry delivery ↻' : 'Retry review ↻';
+        retryControl.querySelector('[data-retry-explanation]').textContent = data.delivery_retry ? 'Owner only · deliver the saved review without another model call. Existing receipts and current GitHub state are rechecked.' : 'Owner only · starts a fresh attempt from the first model. The current commit, reviewer and on review label must still match.';
+      }
       renderFlow(data.flow);
       let changed = false;
       for (const event of data.events) {

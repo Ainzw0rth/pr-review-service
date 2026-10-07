@@ -8,6 +8,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.utils import timezone
 
+from core.delivery import checkpoint_state, safe_error, update_cursor
 from core.models import ExpectedLabel, Job, Receipt
 from core.workflow import canonical_cycle, current
 
@@ -33,6 +34,10 @@ class StaleReview(Exception):
             "Unexpected label change during publication",
             "Cannot establish terminal review cycle",
             "Human review cycle changed",
+            "Saved review expired",
+            "Saved review is no longer applicable",
+            "Review requirements or discussion changed since analysis",
+            "Published review is no longer available",
         }
     )
 
@@ -213,6 +218,25 @@ def _fresh_thread(github, job, original, reply):
         ]
 
     comments = fresh["comments"]
+    if not receipt:
+        body = _reply_body(job, reply, fresh.get("viewerCanResolve"))
+        expected = (
+            f"**Automated review · Auto Reviewer**\n\n{body}\n\n{marker(job, f'reply:{root}')}"
+        )
+        own = next(
+            (
+                c
+                for c in fresh["comments"]
+                if c.get("body") == expected
+                and (c.get("author") or {}).get("login", "").casefold()
+                == github.identity().casefold()
+            ),
+            None,
+        )
+        if own:
+            receipt, _ = Receipt.objects.get_or_create(
+                job=job, key=f"reply:{root}", defaults={"remote_id": str(own["databaseId"])}
+            )
     if receipt:
         body = _reply_body(job, reply, fresh.get("viewerCanResolve"))
         own_body = (
@@ -282,6 +306,18 @@ def publish(github, job, result, context, checks):
     if not settings.LIVE_WRITES:
         raise RuntimeError("Live publishing is disabled")
     number = job.pr.number
+    stage, state = checkpoint_state(job)
+    if stage in ("review", "labels"):
+        inline = [
+            {
+                "path": f["path"],
+                "line": f["line"],
+                "side": "RIGHT",
+                "body": f"**{f['severity']}** — {f['body']}",
+            }
+            for f in result["findings"]
+        ]
+        return _publish_review(github, job, inline, state["blocked"], state["baseline"])
     # Allowed targets are established by trusted context retrieval, not the model.
     related = {p["number"] for p in context.get("related_prs", [])}
     replies = thread_replies(result, context)
@@ -337,8 +373,20 @@ def publish(github, job, result, context, checks):
     # Use issue summary first: preserves reviewer request while thread replies publish.
     once(github, job, "summary", body, f"/issues/{number}/comments", f"/issues/{number}/comments")
     _, baseline_timeline = _guard_state(github, job)
+    update_cursor(
+        job,
+        "review",
+        blocked=blocked,
+        baseline=[{"event": x.get("event"), "id": x["id"]} for x in baseline_timeline if "id" in x],
+        label_transitions=[],
+    )
+    return _publish_review(github, job, inline, blocked, baseline_timeline)
+
+
+def find_review(github, job, blocked):
+    number = job.pr.number
     tag = marker(job, "review")
-    existing = next(
+    return next(
         (
             x
             for x in github.pages(f"/pulls/{number}/reviews")
@@ -349,6 +397,15 @@ def publish(github, job, result, context, checks):
         ),
         None,
     )
+
+
+def _publish_review(github, job, inline, blocked, baseline_timeline):
+    number = job.pr.number
+    tag = marker(job, "review")
+    existing = find_review(github, job, blocked)
+    stage, _ = checkpoint_state(job)
+    if stage == "labels" and (inline or blocked) and not existing:
+        raise StaleReview("Published review is no longer available")
     if not existing and (inline or blocked):
         guard(github, job)
         if blocked:
@@ -380,14 +437,15 @@ def publish(github, job, result, context, checks):
     if blocked and Receipt.objects.filter(job=job, key="review").exists():
         Receipt.objects.get_or_create(job=job, key="request_changes")
 
+    update_cursor(job, "labels")
     try:
         return terminal_transition(
             github, job, blocked=blocked, baseline_timeline=baseline_timeline
         )
     except StaleReview:
         raise
-    except Exception:
-        raise LabelCleanupError() from None
+    except Exception as exc:
+        raise LabelCleanupError(safe_error(exc)) from None
 
 
 def fail_to_feedback(github, job):
@@ -399,7 +457,8 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
     number = job.pr.number
     # Pin terminal label normalization to the checked timeline. Only this call's
     # exact label writes may be excluded from later eligibility checks.
-    own_transitions = []
+    _, state = checkpoint_state(job)
+    own_transitions = [tuple(x) for x in state.get("label_transitions", [])]
     baseline_ids = {(item.get("event"), item["id"]) for item in baseline_timeline if "id" in item}
     actor = github.identity().casefold()
     relevant_actions = {
@@ -483,6 +542,10 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
         if not cycle["eligible"] or cycle["key"] != row.pr.canonical_trigger:
             raise StaleReview("Human review cycle changed")
 
+    def record_transition(action, label):
+        own_transitions.append((action, label))
+        update_cursor(job, "labels", label_transitions=own_transitions)
+
     terminal_guard()
     if not blocked and job.pr.repository.required_checks:
         from core.github import check_required
@@ -495,7 +558,7 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
         number,
         job.pr.repository.feedback_label if blocked else job.pr.repository.approved_label,
         terminal_guard,
-        lambda action, label: own_transitions.append((action, label)),
+        record_transition,
     )
     terminal_guard()
     return "feedback" if blocked else "ready"

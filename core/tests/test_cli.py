@@ -6,6 +6,26 @@ from core.tests.test_providers import RESULT
 
 
 class CLIStreamTests(TestCase):
+    def test_stream_failure_and_exit_metadata_are_retained_without_raw_text(self):
+        p = self.parser("codex_cli")
+        p.feed(
+            {"type": "runner_error", "code": "cli_stream_truncated", "message": "private source"}
+        )
+        p.feed({"type": "runner_exit", "code": 1, "signal": "SIGKILL"})
+        self.assertEqual(p.diagnostics["protocol_error"], "cli_stream_truncated")
+        self.assertEqual(p.diagnostics["cli_exit_code"], 1)
+        self.assertEqual(p.diagnostics["cli_exit_signal"], "SIGKILL")
+        self.assertNotIn("private source", json.dumps(p.diagnostics))
+        with self.assertRaises(ProviderError) as caught:
+            p.result(1)
+        self.assertEqual(caught.exception.detail, "cli_protocol")
+
+    def test_exit_metadata_rejects_untrusted_values(self):
+        p = self.parser("codex_cli")
+        p.feed({"type": "runner_exit", "code": "secret", "signal": "secret"})
+        self.assertNotIn("cli_exit_code", p.diagnostics)
+        self.assertNotIn("cli_exit_signal", p.diagnostics)
+
     def test_claude_assistant_rate_limit_survives_generic_final_error(self):
         p = self.parser("claude_cli")
         p.feed({"type": "assistant", "error": "rate_limit", "message": {"content": []}})

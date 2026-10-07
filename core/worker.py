@@ -7,7 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.activity import Progress
-from core.models import Job, ModelAttempt, Provider, Receipt
+from core.models import Job, ModelAttempt, Provider, Receipt, ReviewCheckpoint
 from core.publication import (
     LabelCleanupError,
     StaleReview,
@@ -22,11 +22,11 @@ from core.workflow import finish
 
 def run_job(job):
     from core.context import build_context, failure_reason
+    from core.delivery import DeliveryPaused, load_review, save_review
     from core.github import GitHub, IntegrationError, check_required
     from core.providers import ProviderError, ReviewCancelled, failure_description, review
     from core.quota import blocked_until, record_exhausted
     from core.runner import run_tests
-    from core.sheets import sync_status
 
     github = None
     model_attempt = None
@@ -38,6 +38,15 @@ def run_job(job):
     try:
         progress("starting")
         github = GitHub(job.pr.repository)
+        if ReviewCheckpoint.objects.filter(job=job).exists():
+            if not settings.LIVE_WRITES:
+                finish(job, "attention", "Publishing disabled; saved review retained.")
+                return
+            _, saved = load_review(job)
+            result = saved["result"]
+            progress("delivery_resume")
+            outcome = _deliver_and_finish(github, job, progress)
+            return
         guard(github, job)
         if not settings.LIVE_WRITES:
             finish(
@@ -245,25 +254,15 @@ def run_job(job):
                 "passed": latest["passed"] and (tests is None or tests["passed"]),
                 "summary": latest["summary"] + (" " + tests["summary"] if tests else ""),
             }
-        progress("publishing")
-        outcome = publish(github, job, result, context, checks)
-        progress("published")
-        finish(job, "completed")
-        try:
-            if repo.sheet_config:
-                progress("sheet")
-            sync_status(
-                github,
-                repo,
-                job.pr.number,
-                outcome,
-                before_write=lambda: completed_guard(github, job, outcome),
-            )
-        except Exception:
-            progress("sheet_attention")
-            Job.objects.filter(pk=job.pk, status="completed").update(
-                reason="Review published; Sheet update needs admin attention."
-            )
+        save_review(job, result, context, checks)
+        outcome = _deliver_and_finish(github, job, progress)
+    except DeliveryPaused as exc:
+        progress("delivery_attention")
+        delivered = Receipt.objects.filter(job=job, key="review").exists()
+        prefix = (
+            "Review published; label cleanup paused. " if delivered else "GitHub delivery paused. "
+        )
+        finish(job, "attention", prefix + str(exc))
     except LabelCleanupError:
         progress("labels_attention")
         finish(
@@ -283,6 +282,14 @@ def run_job(job):
             "Attempt cancelled, commit or discussion changed; request a new review.",
         )
     except Exception:
+        if ReviewCheckpoint.objects.filter(job=job).exists():
+            progress("delivery_attention")
+            finish(
+                job,
+                "attention",
+                "Saved review retained; delivery could not be confirmed. Retry delivery after checking the connection.",
+            )
+            return
         # Exception messages can contain HTTP response content or credentials: never persist them.
         try:
             guard(github, job)
@@ -332,7 +339,39 @@ def run_job(job):
                 pass
 
 
+def _deliver_and_finish(github, job, progress):
+    from core.delivery import deliver
+    from core.sheets import sync_status
+
+    progress("publishing")
+    outcome = deliver(github, job, publish, progress)
+    progress("published")
+    finish(job, "completed")
+    try:
+        if job.pr.repository.sheet_config:
+            progress("sheet")
+        sync_status(
+            github,
+            job.pr.repository,
+            job.pr.number,
+            outcome,
+            before_write=lambda: completed_guard(github, job, outcome),
+        )
+    except Exception:
+        progress("sheet_attention")
+        Job.objects.filter(pk=job.pk, status="completed").update(
+            reason="Review published; Sheet update needs admin attention."
+        )
+    return outcome
+
+
 def recover_interrupted():
+    # Confirmed delivery is not an interrupted analysis; never run it again.
+    Job.objects.filter(status="running", review_checkpoint__stage="done").update(
+        status="completed",
+        finished_at=timezone.now(),
+        reason="GitHub delivery completed before restart; optional timeline synchronization may need attention.",
+    )
     # Never replay uncertain external publication automatically after a process crash.
     Job.objects.filter(status="running").update(
         status="attention",
