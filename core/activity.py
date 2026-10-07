@@ -46,6 +46,8 @@ MESSAGES = {
     "published": "GitHub publication finished.",
     "sheet": "Synchronizing the configured timeline status.",
     "sheet_attention": "Timeline synchronization needs administrator attention.",
+    "journal_queued": "Final run summary queued for the private journal.",
+    "journal_attention": "Private journal capture needs administrator attention; review outcome unchanged.",
     "ended": "Worker attempt ended; see the current job status.",
 }
 

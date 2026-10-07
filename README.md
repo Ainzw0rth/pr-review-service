@@ -44,6 +44,7 @@ flowchart TB
 
     provider["Model providers<br/>Official subscription CLI or configured API"]
     sheet["Optional Google Sheet<br/>Confirmed task map and status cells only"]
+    journal["Optional private summary journal<br/>Vault and existing Hermes workflow"]
 
     github -->|Signed PR webhooks| tunnel
     browser <-->|Authenticated dashboard access| tunnel
@@ -65,6 +66,7 @@ flowchart TB
     worker -.->|Review outcome status sync| sheet
     events -.->|Review and merge lifecycle status sync| sheet
     maintenance -.->|Expire eligible records after retention period| db
+    maintenance -.->|Deliver encrypted outbox summaries| journal
 ```
 
 - **GitHub is the collaboration surface:** findings, replies, request-changes reviews and thread
@@ -501,6 +503,39 @@ publication. The dashboard uses the latest observed CI result, not an earlier pe
 
 Review CLIs run in disposable Docker containers, not the host's interactive work/personal profiles.
 Only the selected service auth volume is mounted. Personal settings, hooks and tracking sender
-state from `Ainzw0rth-config` are not mounted or loaded. Its optional final-reply journal therefore
-does **not** receive these review sessions. Dashboard job history and filtered CLI activity are
-separate; this service does not forward raw sessions, review text or final replies to that journal.
+state from `Ainzw0rth-config` are not mounted or loaded.
+
+The service can submit **final review summaries** to the same journal through its submission API,
+without enabling host hooks inside CLI containers. Completed runs include the published review's
+summary, finding/thread counts, model, outcome and PR/job links. Unsuccessful runs include only
+operational status and links, not rejected model output. It does not send prompts, private reasoning,
+source files, raw CLI transcripts or individual finding/thread bodies. This is summary journaling,
+not full activity capture. Historical runs are not automatically imported.
+
+To enable, create an encrypted Credential using the journal's **submission-only** token, then set:
+
+```dotenv
+JOURNAL_ENABLED=1
+JOURNAL_ENDPOINT=https://tsunagu.ainzw0rth.xyz/api/v1/sessions
+JOURNAL_CREDENTIAL_ID=<credential database ID>
+JOURNAL_REPOSITORIES=MarkAny-GaneshaIT/AnyOne-2.0
+```
+
+Only explicitly listed repositories are captured or delivered. The worker queues summaries in an
+encrypted SQLite outbox. Maintenance retries up to eight entries each minute, with five-second
+network timeouts. Stable event IDs prevent duplicates on the receiving backend. An outage never
+changes a review's GitHub outcome. Entries above the backend's 64 KiB summary limit are rejected,
+not silently truncated; a capture-warning activity event appears if capture fails.
+
+**Admin → Journal entries** shows queued/accepted delivery metadata and safe errors; payloads are
+not exposed there or to dashboard members. Successful acknowledgment clears the local encrypted
+payload; delivery receipts expire after 90 days. Pending deliveries survive job-history cleanup.
+The remote journal/vault has its own retention policy. `JOURNAL_ENABLED=0` stops both new capture
+and delivery of pending entries. No credentials or journal sender state enter model containers.
+
+```bash
+docker compose exec maintenance python manage.py flush_journal
+```
+
+This retries pending delivery without printing summary contents. The same backend exports accepted
+notes for the existing vault/Hermes workflow. No shared client configuration changes are required.

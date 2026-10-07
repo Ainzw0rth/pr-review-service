@@ -248,3 +248,24 @@ during implementation verification.
 - Inspected `/root/Ainzw0rth-config/README.md`: its optional feature is final-reply journaling.
   The isolated review CLI homes do not mount/load host hooks or sender configuration, so that
   journal does not capture service reviews. Shared/global configuration was not changed.
+
+## Private final-summary journal (2026-10-07)
+
+- Added opt-in service-side submission to the existing coding-summary journal API. CLI containers
+  remain isolated: no host hooks, sender files, extra credentials or tracking settings are mounted.
+- Enabled repository: `MarkAny-GaneshaIT/AnyOne-2.0`. Submission-only credential copied through a
+  private stdin pipe into the existing encrypted credential store; no token in code, Git or logs.
+- Successful runs queue their final review summary, finding/thread counts, workflow outcome,
+  model and PR/job links. Other outcomes queue only operational metadata, never rejected model text.
+  No prompt/source dump/private reasoning/raw transcript/individual finding body is exported.
+- Migration 0009 adds an encrypted durable outbox. Maintenance retries up to eight pending entries
+  each minute. Stable event IDs and bound receipt validation make delivery idempotent. Redirects
+  are rejected, HTTP is not allowed, and response sizes/network timeouts are bounded.
+- Accepted payloads are cleared locally; metadata receipts expire after 90 days. Pending entries
+  survive job cleanup. Disabled integration or removed allowlist membership stops pending delivery.
+  Admin shows delivery metadata only. Journal capture/delivery failures cannot change PR outcomes.
+- Verified 268 Django tests, Ruff, whitespace, migration drift and deployment checks. Updated
+  Mermaid architecture diagrams both render. End-to-end setup probe accepted/exported note
+  `500fdd04-9ae6-5659-adda-00ebaa221fff` to Coding Sessions and cleared the local payload. Probe
+  explicitly identifies itself as setup verification, not a PR review. No historical import.
+- Backup before migration: `20261007T010714572340Z.sqlite3`. Shared config was not modified.

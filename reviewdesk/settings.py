@@ -112,3 +112,11 @@ STORAGES = {
 CLI_RUNNER_IMAGE = os.environ.get("CLI_RUNNER_IMAGE", "")
 CLI_CODEX_AUTH_VOLUME = os.environ.get("CLI_CODEX_AUTH_VOLUME", "auto-reviewer_codex-auth")
 CLI_CLAUDE_AUTH_VOLUME = os.environ.get("CLI_CLAUDE_AUTH_VOLUME", "auto-reviewer_claude-auth")
+
+# Opt-in final-summary journal; service credentials never enter CLI containers.
+JOURNAL_ENABLED = os.environ.get("JOURNAL_ENABLED", "0") == "1"
+JOURNAL_ENDPOINT = os.environ.get("JOURNAL_ENDPOINT", "")
+JOURNAL_CREDENTIAL_ID = int(os.environ.get("JOURNAL_CREDENTIAL_ID", "0"))
+JOURNAL_REPOSITORIES = [
+    x.strip() for x in os.environ.get("JOURNAL_REPOSITORIES", "").split(",") if x.strip()
+]

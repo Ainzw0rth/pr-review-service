@@ -21,6 +21,8 @@ def run_job(job):
 
     github = None
     model_attempt = None
+    result = None
+    outcome = None
     diagnostic = "Review incomplete. Check connections and required checks; request a new review."
     progress = Progress(job)
     progress.start()
@@ -249,6 +251,17 @@ def run_job(job):
         if github is not None and hasattr(github, "close"):
             github.close()
         progress("ended")
+        try:
+            from core.journal import queue_job
+
+            if queue_job(job, result, outcome):
+                progress("journal_queued")
+        except Exception:
+            # Journaling never changes the GitHub outcome or exposes payload/credential errors.
+            try:
+                progress("journal_attention")
+            except Exception:
+                pass
 
 
 def recover_interrupted():

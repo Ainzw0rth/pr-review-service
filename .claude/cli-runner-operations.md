@@ -82,3 +82,10 @@ Opus 5.5 → Sol 6.1 → Opus 4.8, all official subscription CLI backends. Both 
 passed after VPS login. A real-PR Opus 5.5 probe emitted an explicit refusal; the controller now
 terminates that runner immediately and reports decline to the existing fallback route. Sol previously
 completed the full PR probe. Probe results never publish. API provider records remain disabled.
+
+## Optional final-summary journal
+
+Service-side journaling uses the existing journal submission API, not host CLI Stop hooks.
+Configure the repository allowlist, endpoint and encrypted submission credential as documented in
+README. Only accepted final review summaries or unsuccessful-run operational outcomes are queued;
+raw CLI transcripts and rejected model text are excluded. Delivery runs separately in maintenance.

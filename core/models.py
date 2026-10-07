@@ -232,3 +232,18 @@ class LoginAttempt(models.Model):
     key = models.CharField(max_length=64, unique=True)
     count = models.PositiveIntegerField(default=0)
     window_at = models.DateTimeField()
+
+
+class JournalEntry(models.Model):
+    """Private delivery outbox; never included in member dashboard feeds."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    job = models.ForeignKey(
+        Job, null=True, on_delete=models.SET_NULL, related_name="journal_entries"
+    )
+    repository = models.CharField(max_length=200)
+    encrypted_payload = models.TextField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.CharField(max_length=180, blank=True)

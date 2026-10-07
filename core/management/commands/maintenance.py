@@ -5,9 +5,18 @@ from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = "Run hourly retention cleanup; active attempts are never expired."
+    help = "Run hourly cleanup and retry optional journal delivery every minute."
 
     def handle(self, *args, **options):
+        from core.journal import flush
+
+        next_cleanup = 0
         while True:
-            call_command("cleanup")
-            time.sleep(3600)
+            if time.monotonic() >= next_cleanup:
+                call_command("cleanup")
+                next_cleanup = time.monotonic() + 3600
+            try:
+                flush()
+            except Exception:
+                self.stderr.write("Journal delivery unavailable; retrying later.")
+            time.sleep(60)

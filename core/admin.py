@@ -11,6 +11,7 @@ from .models import (
     AccessLink,
     Credential,
     Job,
+    JournalEntry,
     Membership,
     ModelAttempt,
     Organization,
@@ -159,6 +160,20 @@ class WebhookAdmin(admin.ModelAdmin):
         return False
 
     def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(JournalEntry)
+class JournalEntryAdmin(admin.ModelAdmin):
+    list_display = ["id", "repository", "job", "created_at", "sent_at", "attempts", "last_error"]
+    readonly_fields = list_display
+    fields = readonly_fields
+    list_filter = ["repository", "sent_at"]
+
+    def has_add_permission(self, request):
         return False
 
     def has_delete_permission(self, request, obj=None):

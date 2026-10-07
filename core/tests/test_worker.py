@@ -248,3 +248,23 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(job.status, "attention")
         self.assertEqual(reviewer.call_count, 1)
         self.assertEqual(gh.writes, [])
+
+    def test_journal_capture_failure_does_not_change_review_outcome(self):
+        from core.tests.test_providers import RESULT
+
+        with patch("core.journal.queue_job", side_effect=RuntimeError("private-token")):
+            job, gh, _ = self.run_case([RESULT])
+        self.assertEqual(job.status, "completed")
+        self.assertIn({"name": "approved"}, gh.snapshot["labels"])
+        self.assertIn("journal_attention", list(job.activity.values_list("code", flat=True)))
+        self.assertNotIn("private-token", job.reason)
+
+    def test_final_review_is_handed_to_journal_only_after_publication(self):
+        from core.tests.test_providers import RESULT
+
+        with patch("core.journal.queue_job", return_value=None) as capture:
+            job, gh, _ = self.run_case([RESULT])
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(capture.call_args.args[1], RESULT)
+        self.assertEqual(capture.call_args.args[2], "ready")
+        self.assertTrue(gh.writes)

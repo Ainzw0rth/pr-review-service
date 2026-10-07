@@ -4,7 +4,7 @@ from django.contrib.sessions.models import Session
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from core.models import AccessLink, ExpectedLabel, Job, LoginAttempt, Webhook
+from core.models import AccessLink, ExpectedLabel, Job, JournalEntry, LoginAttempt, Webhook
 
 
 class Command(BaseCommand):
@@ -15,6 +15,7 @@ class Command(BaseCommand):
         jobs, _ = Job.objects.filter(
             finished_at__lt=cutoff, status__in=["completed", "failed", "cancelled", "superseded"]
         ).delete()
+        JournalEntry.objects.filter(sent_at__lt=cutoff).delete()
         Webhook.objects.filter(processed_at__lt=cutoff).delete()
         AccessLink.objects.filter(expires_at__lt=cutoff).delete()
         ExpectedLabel.objects.filter(expires_at__lt=timezone.now()).delete()
