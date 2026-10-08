@@ -695,3 +695,32 @@ Deployment requires migration `0012` and rebuilding both app and CLI images (eff
 configuration is passed to the CLI wrapper). Use the drain/idle/backup/migrate
 procedure for schema changes. Migration freezes existing job configurations before
 workflow edits become available. This page does not change CI or publication guards.
+
+### Hermes Telegram approval alerts
+
+Optional integration reuses your existing Hermes bot identity through Telegram's
+[sendMessage API](https://core.telegram.org/bots/api#sendmessage); no Hermes agent
+inference, webhook changes, or incoming-message polling. Hermes chat remains independent.
+
+Configure `TELEGRAM_APPROVAL_ENABLED=1`, an encrypted Credential containing JSON
+`{"token":"BOT_TOKEN","chat_id":"PRIVATE_CHAT_ID"}`, its ID in
+`TELEGRAM_APPROVAL_CREDENTIAL_ID`, an explicit timezone-aware activation timestamp
+in `TELEGRAM_APPROVAL_SINCE`, and the comma-separated repository allowlist in
+`TELEGRAM_APPROVAL_REPOSITORIES`. Positive private chat IDs only; no group broadcast.
+Never commit bot tokens. If the Hermes bot token rotates, update this encrypted credential too.
+
+Maintenance checks once a minute for completed jobs with a confirmed, encrypted
+`ready` publication checkpoint. Sends only approvals completed after activation:
+repository/PR, commit, attempt, WIB timestamp, PR link and dashboard link. Feedback,
+blocked CI, incomplete publication and manually applied labels do not trigger alerts.
+An AI-approved workflow label is **not** formal human GitHub approval or permission to merge.
+
+A durable one-per-job receipt prevents routine duplicates across restarts and delivery
+retries. Unsent connection failures and explicit rate limits retry up to eight attempts.
+Telegram has no application idempotency key for sends: a response timeout, unclear
+server response or crash during sending is marked **uncertain**, not automatically
+replayed. This favors avoiding duplicate alerts over guaranteed delivery. Inspect
+**Administration → Approval notifications** for read-only delivery status. Telegram
+failures never change review status or block the review worker; no source, findings,
+model output or credentials are included in notifications. Receipts expire with the
+normal 90-day job cleanup. Disabled by default; no historical backfill or test alerts.

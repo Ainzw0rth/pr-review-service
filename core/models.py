@@ -3,6 +3,7 @@ import uuid
 from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import models
+from django.utils import timezone
 
 
 class Organization(models.Model):
@@ -289,3 +290,16 @@ class ModelProbe(models.Model):
     reason = models.CharField(max_length=250, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True)
+
+
+class ApprovalNotification(models.Model):
+    """Durable Telegram receipt; never contains review content or bot credentials."""
+
+    job = models.OneToOneField(Job, on_delete=models.CASCADE, related_name="approval_notification")
+    status = models.CharField(max_length=20, default="pending")
+    attempts = models.PositiveIntegerField(default=0)
+    reason = models.CharField(max_length=200, blank=True)
+    message_id = models.CharField(max_length=30, blank=True)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True)

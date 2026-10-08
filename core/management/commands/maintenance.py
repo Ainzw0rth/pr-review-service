@@ -9,6 +9,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from core.journal import flush
+        from core.notifications import flush_approvals
 
         next_cleanup = 0
         while True:
@@ -19,4 +20,10 @@ class Command(BaseCommand):
                 flush()
             except Exception:
                 self.stderr.write("Journal delivery unavailable; retrying later.")
+            try:
+                result = flush_approvals()
+                if result.get("error"):
+                    self.stderr.write("Telegram approval notification configuration unavailable.")
+            except Exception:
+                self.stderr.write("Telegram approval notification maintenance unavailable.")
             time.sleep(60)

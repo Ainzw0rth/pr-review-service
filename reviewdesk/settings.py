@@ -95,7 +95,7 @@ LIVE_WRITES = os.environ.get("LIVE_WRITES", "0") == "1"
 
 SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
 
-# Explicit account binding; superuser status alone does not grant dashboard retry.
+# Explicit Workflow editor owner binding; superuser status alone does not grant access.
 DASHBOARD_RETRY_USER_ID = int(os.environ.get("DASHBOARD_RETRY_USER_ID", "0"))
 
 # Fingerprinted URLs prevent old dashboard assets surviving a deployment in browser/CDN caches.
@@ -120,4 +120,14 @@ JOURNAL_ENDPOINT = os.environ.get("JOURNAL_ENDPOINT", "")
 JOURNAL_CREDENTIAL_ID = int(os.environ.get("JOURNAL_CREDENTIAL_ID", "0"))
 JOURNAL_REPOSITORIES = [
     x.strip() for x in os.environ.get("JOURNAL_REPOSITORIES", "").split(",") if x.strip()
+]
+
+# Approval-only notifications through the existing Hermes Telegram bot. Opt-in.
+TELEGRAM_APPROVAL_ENABLED = os.environ.get("TELEGRAM_APPROVAL_ENABLED", "0") == "1"
+TELEGRAM_APPROVAL_CREDENTIAL_ID = int(os.environ.get("TELEGRAM_APPROVAL_CREDENTIAL_ID", "0"))
+TELEGRAM_APPROVAL_SINCE = os.environ.get("TELEGRAM_APPROVAL_SINCE", "")
+TELEGRAM_APPROVAL_REPOSITORIES = [
+    value.strip()
+    for value in os.environ.get("TELEGRAM_APPROVAL_REPOSITORIES", "").split(",")
+    if value.strip()
 ]

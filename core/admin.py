@@ -9,6 +9,7 @@ from django.views.decorators.debug import sensitive_post_parameters
 from .forms import CredentialForm, RepositoryForm
 from .models import (
     AccessLink,
+    ApprovalNotification,
     Credential,
     Job,
     JournalEntry,
@@ -174,6 +175,33 @@ class JournalEntryAdmin(admin.ModelAdmin):
     list_filter = ["repository", "sent_at"]
 
     def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ApprovalNotification)
+class ApprovalNotificationAdmin(admin.ModelAdmin):
+    list_display = ["job", "status", "attempts", "created_at", "sent_at", "reason"]
+    list_filter = ["status"]
+    readonly_fields = [
+        "job",
+        "status",
+        "attempts",
+        "message_id",
+        "next_attempt_at",
+        "created_at",
+        "sent_at",
+        "reason",
+    ]
+    fields = readonly_fields
+    actions = None
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
         return False
 
     def has_delete_permission(self, request, obj=None):
