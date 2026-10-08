@@ -38,26 +38,48 @@ class RetryTests(TestCase):
             "requested_reviewers": [{"login": "louis"}],
         }
 
-    def test_members_and_other_admins_cannot_retry(self):
+    def test_members_and_other_admins_can_retry_visible_jobs(self):
         for user in [self.user, self.other_admin]:
             self.client.force_login(user)
-            self.assertEqual(self.client.post(self.url).status_code, 403)
-            self.assertNotContains(
+            self.assertContains(
                 self.client.get(reverse("job_detail", args=[self.visible.pk])), "Retry review"
             )
+            activity = self.client.get(f"/jobs/{self.visible.pk}/activity/").json()
+            self.assertTrue(activity["retry_available"])
+        for user in [self.user, self.other_admin]:
+            response = self.retry(user=user)
+            self.assertEqual(response.status_code, 302)
+        fresh = Job.objects.get(retry_of=self.visible)
+        self.assertEqual(fresh.actor, "member (dashboard retry)")
+        self.assertEqual(Job.objects.filter(pr=self.visible.pr).count(), 2)
 
-    def test_owner_only_post_and_csrf(self):
-        self.client.force_login(self.owner)
+    def test_member_cannot_retry_another_organization_or_without_membership(self):
+        from core.models import Membership
+
+        self.client.force_login(self.user)
+        with patch("core.github.GitHub") as github:
+            self.assertEqual(self.client.post(f"/jobs/{self.hidden.pk}/retry/").status_code, 404)
+            Membership.objects.filter(user=self.user).delete()
+            self.assertEqual(self.client.post(self.url).status_code, 404)
+            github.assert_not_called()
+        self.assertFalse(Job.objects.filter(retry_of=self.visible).exists())
+
+    def test_anonymous_user_must_sign_in_before_retry(self):
+        self.assertEqual(self.client.post(self.url).status_code, 302)
+        self.assertFalse(Job.objects.filter(retry_of=self.visible).exists())
+
+    def test_member_retry_requires_post_and_csrf(self):
+        self.client.force_login(self.user)
         self.assertEqual(self.client.get(self.url).status_code, 405)
         client = Client(enforce_csrf_checks=True)
-        client.force_login(self.owner)
+        client.force_login(self.user)
         self.assertEqual(client.post(self.url).status_code, 403)
         self.assertContains(
             self.client.get(reverse("job_detail", args=[self.visible.pk])), "Retry review"
         )
 
-    def retry(self):
-        self.client.force_login(self.owner)
+    def retry(self, user=None):
+        self.client.force_login(user or self.owner)
         with (
             patch("core.github.GitHub") as cls,
             patch("core.workflow.canonical_cycle", return_value={"key": "10", "eligible": True}),
@@ -82,7 +104,7 @@ class RetryTests(TestCase):
         for change in [{"head": {"sha": "b" * 40}}, {"labels": []}]:
             old = self.snapshot.copy()
             self.snapshot.update(change)
-            self.assertEqual(self.retry().status_code, 302)
+            self.assertEqual(self.retry(user=self.user).status_code, 302)
             self.assertEqual(Job.objects.filter(pr=self.visible.pr).count(), 1)
             self.snapshot = old
 
@@ -91,27 +113,22 @@ class RetryTests(TestCase):
 
         self.visible.status = "running"
         self.visible.save()
-        self.retry()
+        self.retry(user=self.user)
         self.assertEqual(Job.objects.filter(pr=self.visible.pr).count(), 1)
         self.visible.status = "attention"
         self.visible.save()
         Receipt.objects.create(job=self.visible, key="review")
-        self.retry()
+        self.retry(user=self.user)
         self.assertEqual(Job.objects.filter(pr=self.visible.pr).count(), 1)
 
-    def test_saved_delivery_owner_only_and_payload_never_exposed(self):
+    def test_member_can_retry_saved_delivery_without_exposing_payload(self):
         from core.models import ReviewCheckpoint
 
         ReviewCheckpoint.objects.create(job=self.visible, encrypted_payload="private-saved-payload")
         self.client.force_login(self.user)
-        self.assertEqual(self.client.post(self.url).status_code, 403)
         page = self.client.get(reverse("job_detail", args=[self.visible.pk]))
-        self.assertNotContains(page, "Retry delivery")
+        self.assertContains(page, "Retry delivery")
         self.assertNotContains(page, "private-saved-payload")
-        self.client.force_login(self.owner)
-        self.assertContains(
-            self.client.get(reverse("job_detail", args=[self.visible.pk])), "Retry delivery"
-        )
         with patch("core.github.GitHub") as github:
             self.assertEqual(self.client.post(self.url).status_code, 302)
             github.assert_not_called()

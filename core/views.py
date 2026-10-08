@@ -205,7 +205,7 @@ def job_detail(request, job_id):
             + 1
         )
     from .delivery import retry_available as delivery_available
-    from .retries import is_retry_owner, retry_available
+    from .retries import retry_available
 
     return render(
         request,
@@ -213,8 +213,7 @@ def job_detail(request, job_id):
         {
             "job": job,
             "position": position,
-            "retry_owner": is_retry_owner(request.user),
-            "retry_available": is_retry_owner(request.user) and retry_available(job),
+            "retry_available": retry_available(job),
             "delivery_retry": delivery_available(job),
         },
     )
@@ -227,7 +226,7 @@ def job_activity(request, job_id):
     from .activity import message
     from .delivery import retry_available as delivery_available
     from .flow import snapshot
-    from .retries import is_retry_owner, retry_available
+    from .retries import retry_available
 
     job = get_object_or_404(visible_jobs(request.user), pk=job_id)
     events = list(reversed(list(job.activity.order_by("-id")[:300])))
@@ -241,7 +240,7 @@ def job_activity(request, job_id):
             "finished_at": job.finished_at,
             "next_retry_at": job.next_retry_at,
             "reason": job.reason,
-            "retry_available": is_retry_owner(request.user) and retry_available(job),
+            "retry_available": retry_available(job),
             "delivery_retry": delivery_available(job),
             "flow": snapshot(job, events),
             "events": [
@@ -263,10 +262,8 @@ def job_activity(request, job_id):
 @require_POST
 def job_retry(request, job_id):
     from .github import IntegrationError
-    from .retries import RetryRejected, is_retry_owner, retry_job
+    from .retries import RetryRejected, retry_job
 
-    if not is_retry_owner(request.user):
-        return HttpResponseForbidden("Only the configured owner can retry reviews.")
     job = get_object_or_404(visible_jobs(request.user), pk=job_id)
     try:
         fresh = retry_job(job, request.user.username)

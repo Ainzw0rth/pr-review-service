@@ -1,4 +1,4 @@
-"""Explicit owner requests; no label writes or bypass of commit/cycle guards."""
+"""Explicit dashboard retry requests; no label writes or bypass of commit/cycle guards."""
 
 from django.conf import settings
 from django.db import transaction

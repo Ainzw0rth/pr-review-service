@@ -159,7 +159,7 @@
       if (retryControl) {
         retryControl.hidden = !data.retry_available;
         retryControl.querySelector('[data-retry-label]').textContent = data.delivery_retry ? 'Retry delivery ↻' : 'Retry review ↻';
-        retryControl.querySelector('[data-retry-explanation]').textContent = data.delivery_retry ? 'Owner only · deliver the saved review without another model call. Existing receipts and current GitHub state are rechecked.' : 'Owner only · starts a fresh attempt from the first model. The current commit, reviewer and on review label must still match.';
+        retryControl.querySelector('[data-retry-explanation]').textContent = data.delivery_retry ? 'Deliver the saved review without another model call. Existing receipts and current GitHub state are rechecked.' : 'Starts a fresh attempt from the first model. The current commit, reviewer and on review label must still match.';
       }
       renderFlow(data.flow);
       let changed = false;

@@ -76,8 +76,8 @@ flowchart TB
   cleanup and optional Sheet sync.
 - **SQLite is the durable queue:** no Redis or separate message broker. Web, events, worker and
   maintenance are separate processes sharing the persistent data volume.
-- **Access is organization-scoped:** members have read-only dashboard access; the configured owner
-  can retry eligible attempts, and administrators manage connections and interrupt jobs.
+- **Access is organization-scoped:** signed-in members can view and retry eligible attempts in their
+  organizations. Workflow editing stays owner-only; administrators manage connections and interrupt jobs.
 - **Startup:** the one-shot `migrate` service applies schema migrations before the long-running
   services start. Cloudflare Tunnel is managed outside this project's Compose stack.
 
@@ -518,7 +518,7 @@ organization secrets and example task mappings are never invented or pre-enabled
 
 ### Live review workflow
 
-The read-only job page shows connected stage nodes: file and documentation counters, discussions,
+The job page shows connected stage nodes: file and documentation counters, discussions,
 CI, optional tests, ordered model attempts, and GitHub publication. Each model call has its own
 result and duration. Quota checks remain on the selected provider. Detailed events are collapsed
 by default. Historical jobs show only recorded evidence; deployment does not resume them.
