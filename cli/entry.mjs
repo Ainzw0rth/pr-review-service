@@ -17,7 +17,7 @@ if(request.action==='quota') {
   await emit(await quotaSnapshot(request.kind));
   process.exit(0);
 }
-if (!['claude_cli','codex_cli'].includes(request.kind) || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(request.model)) {
+if ((request.effort && !['low','medium','high','xhigh'].includes(request.effort)) || !['claude_cli','codex_cli'].includes(request.kind) || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(request.model)) {
   await emit({type:'runner_error',code:'invalid_input'});process.exit(1);
 }
 try {
@@ -48,7 +48,7 @@ let command,args;
 if(request.kind==='codex_cli') {
   command='codex';
   args=['exec','--ignore-user-config','--ignore-rules','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--json','--color','never','--model',request.model,'--output-schema','/tmp/review/schema.json',
-    '-c','mcp_servers.review_context.command="node"','-c','mcp_servers.review_context.args=["/opt/evidence.mjs"]','-c','mcp_servers.review_context.enabled_tools=["read_evidence"]','-c','mcp_servers.review_context.required=true','-c','mcp_servers.review_context.tools.read_evidence.approval_mode="approve"','-c','mcp_servers.review_context.tools.read_evidence.output_token_limit=30000','-c','approval_policy="never"','-c','web_search="disabled"','-c','tool_output_token_limit=30000','-c','project_doc_max_bytes=0','-c','model_reasoning_effort="high"',
+    '-c','mcp_servers.review_context.command="node"','-c','mcp_servers.review_context.args=["/opt/evidence.mjs"]','-c','mcp_servers.review_context.enabled_tools=["read_evidence"]','-c','mcp_servers.review_context.required=true','-c','mcp_servers.review_context.tools.read_evidence.approval_mode="approve"','-c','mcp_servers.review_context.tools.read_evidence.output_token_limit=30000','-c','approval_policy="never"','-c','web_search="disabled"','-c','tool_output_token_limit=30000','-c','project_doc_max_bytes=0','-c','model_reasoning_effort='+JSON.stringify(request.effort || 'high'),
     '--disable','shell_tool','--disable','unified_exec','--disable','multi_agent','--disable','apps','--disable','skill_search','--disable','sleep_tool','--disable','memories','-'];
 } else {
   command='claude';

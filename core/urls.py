@@ -1,8 +1,11 @@
 from django.urls import path
 
-from . import views
+from . import views, workflow_views
 
 urlpatterns = [
+    path("workflow/", workflow_views.workflow_page, name="workflow"),
+    path("workflow/state/", workflow_views.workflow_state, name="workflow_state"),
+    path("workflow/probe/<int:provider_id>/", workflow_views.workflow_probe, name="workflow_probe"),
     path("healthz/", views.health, name="health"),
     path("", views.dashboard, name="dashboard"),
     path("subscriptions/", views.subscription_quota, name="subscription_quota"),

@@ -50,6 +50,22 @@ class WorkerTests(WorkflowTests):
         job.refresh_from_db()
         return job, gh, reviewer
 
+    def test_workflow_edit_after_claim_cannot_change_model(self):
+        from core.tests.test_providers import RESULT
+
+        original = self.first.model
+        actual_run = run_job
+
+        def run_with_changed_configuration(job):
+            Provider.objects.filter(pk=self.first.pk).update(model="edited-model", enabled=False)
+            actual_run(job)
+
+        with patch("core.tests.test_worker.run_job", side_effect=run_with_changed_configuration):
+            job, _, reviewer = self.run_case([{**RESULT, "blocking": True}])
+        self.assertEqual(reviewer.call_count, 1)
+        self.assertEqual(reviewer.call_args.args[0].model, original)
+        self.assertEqual(job.provider_plan[0]["model"], original)
+
     def test_label_failure_after_publication_does_not_report_review_failure(self):
         from core.github import IntegrationError
         from core.models import Receipt

@@ -340,6 +340,7 @@ def _review_cli_once(
             {
                 "kind": provider.kind,
                 "model": provider.model,
+                "effort": getattr(provider, "effort", ""),
                 "context": context,
                 "schema": _wire_schema(SCHEMA),
                 "system": SYSTEM,

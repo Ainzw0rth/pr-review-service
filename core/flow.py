@@ -157,7 +157,7 @@ def snapshot(job, events):
     attempts = list(job.model_attempts.order_by("id"))
     legacy = not attempts and "model" in {e.code for e in all_events}
     plan = job.provider_plan
-    if not plan and not legacy:
+    if not plan and not legacy and not job.workflow_version:
         plan = list(Provider.objects.filter(enabled=True).values("id", "name", "model", "kind"))
     groups = []
     for provider in plan:

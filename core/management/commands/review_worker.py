@@ -32,6 +32,12 @@ class Command(BaseCommand):
 
                 cleanup_cli_orphans()
             recover_interrupted()
+            from core.model_probe import claim_probe, run_probe
+            from core.models import ModelProbe
+
+            ModelProbe.objects.filter(status="running").update(
+                status="failed", reason="Worker restarted during connection test; test again."
+            )
             while True:
                 with open(settings.DATA_DIR / "worker.intake.lock", "a") as intake:
                     fcntl.flock(intake, fcntl.LOCK_EX)
@@ -55,9 +61,14 @@ class Command(BaseCommand):
                 # Once drain returns, no job can slip through a check/claim race.
                 with open(settings.DATA_DIR / "worker.intake.lock", "a") as intake:
                     fcntl.flock(intake, fcntl.LOCK_EX)
+                    probe = None
                     job = None if (settings.DATA_DIR / "worker.drain").exists() else claim()
+                    if not job and not (settings.DATA_DIR / "worker.drain").exists():
+                        probe = claim_probe()
                 if job:
                     run_job(job)
+                elif probe:
+                    run_probe(probe)
                 if options["once"]:
                     return
                 if not job:

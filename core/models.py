@@ -55,6 +55,7 @@ class Provider(models.Model):
         ],
     )
     model = models.CharField(max_length=120)
+    effort = models.CharField(max_length=10, blank=True, default="")
     credential = models.ForeignKey(Credential, on_delete=models.PROTECT, null=True, blank=True)
     order = models.PositiveIntegerField(default=0)
     enabled = models.BooleanField(default=True)
@@ -169,6 +170,7 @@ class Job(models.Model):
     reason = models.CharField(max_length=250, blank=True)
     provider_diagnostics = models.JSONField(default=dict, blank=True)
     provider_plan = models.JSONField(default=list, blank=True)
+    workflow_version = models.CharField(max_length=16, blank=True, default="")
     retry_of = models.OneToOneField(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="dashboard_retry"
     )
@@ -178,6 +180,16 @@ class Job(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     heartbeat_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and not self.workflow_version:
+            from .review_config import snapshot, version
+
+            revision, plan = snapshot()
+            self.workflow_version = version(self.provider_plan) if self.provider_plan else revision
+            if not self.provider_plan:
+                self.provider_plan = plan
+        super().save(*args, **kwargs)
 
     class Meta:
         ordering = ["created_at"]
@@ -268,3 +280,12 @@ class ReviewCheckpoint(models.Model):
     state = models.JSONField(default=dict, editable=False)
     delivery_attempts = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ModelProbe(models.Model):
+    provider = models.ForeignKey(Provider, on_delete=models.CASCADE)
+    configuration = models.JSONField(default=dict)
+    status = models.CharField(max_length=20, default="queued")
+    reason = models.CharField(max_length=250, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True)

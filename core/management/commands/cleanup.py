@@ -10,6 +10,7 @@ from core.models import (
     Job,
     JournalEntry,
     LoginAttempt,
+    ModelProbe,
     ReviewCheckpoint,
     Webhook,
 )
@@ -23,6 +24,7 @@ class Command(BaseCommand):
         jobs, _ = Job.objects.filter(
             finished_at__lt=cutoff, status__in=["completed", "failed", "cancelled", "superseded"]
         ).delete()
+        ModelProbe.objects.filter(created_at__lt=cutoff).delete()
         ReviewCheckpoint.objects.filter(created_at__lt=cutoff).delete()
         JournalEntry.objects.filter(sent_at__lt=cutoff).delete()
         Webhook.objects.filter(processed_at__lt=cutoff).delete()

@@ -663,3 +663,35 @@ image as well as the application image. The graceful deployment script intention
 pending migrations: drain the worker, wait for active work/cleanup to finish, back up the database,
 apply the schema migration in a supervised rollout, then start and verify the updated services
 before resuming intake. Do not restart an active worker to apply this change.
+
+### Owner workflow editor
+
+The top-level **Workflow** tab (`/workflow/`) is restricted to the configured
+`DASHBOARD_RETRY_USER_ID` owner, who must also be an active superuser. Team members
+and other superusers cannot read or modify it.
+
+- Drag model nodes, or use their up/down buttons, to set fallback priority.
+- Add CLI models by exact provider model ID, rename connections, and remove nodes
+  from the active chain without deleting their history. Existing API connections
+  can be edited/reordered; provision their private credentials in Administration.
+- The library lists **configured connections**, not an authoritative catalog of
+  subscription entitlements. New IDs do not require application changes, but the
+  subscription and pinned CLI version must support them.
+- Codex CLI effort can use the runner default (currently high), low, medium, high,
+  or xhigh. Model support varies. Claude keeps its native effort default.
+- Save is atomic and rejects stale versions from another browser tab. A new job
+  snapshots its model order, model IDs, connection references and effort. Already
+  queued/running jobs and quota retries retain their snapshot. A new review retry
+  gets the latest configuration; a delivery-only retry does not call a model.
+- Workflow versions appear in job details. Snapshots contain credential references,
+  never secret values; rotating credentials still takes effect when used.
+- **Test saved connection** explicitly queues a small, possibly quota-consuming
+  structured-response probe. The serial worker runs it only when no review is
+  queued. It has a 90-second deadline, responds to deployment drain, and performs
+  no GitHub/Sheet actions. Test outcomes refresh every five seconds. Saving alone
+  does not invoke any model.
+
+Deployment requires migration `0012` and rebuilding both app and CLI images (effort
+configuration is passed to the CLI wrapper). Use the drain/idle/backup/migrate
+procedure for schema changes. Migration freezes existing job configurations before
+workflow edits become available. This page does not change CI or publication guards.

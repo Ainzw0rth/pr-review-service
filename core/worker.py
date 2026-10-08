@@ -7,7 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.activity import Progress
-from core.models import Job, ModelAttempt, Provider, Receipt, ReviewCheckpoint
+from core.models import Job, ModelAttempt, Receipt, ReviewCheckpoint
 from core.publication import (
     LabelCleanupError,
     StaleReview,
@@ -93,19 +93,17 @@ def run_job(job):
             "feedback_label": repo.feedback_label,
             "approved_label": repo.approved_label,
         }
-        providers = list(Provider.objects.filter(enabled=True))
-        if job.provider_id and not job.provider.kind.endswith("_cli"):
+        from core.review_config import providers_for_job
+
+        providers = providers_for_job(job)
+        prior_provider = next((p for p in providers if p.pk == job.provider_id), None)
+        if prior_provider and not prior_provider.kind.endswith("_cli"):
             # A quota retry stays on its provider, then may fall forward on refusal/outage.
             index = next((i for i, p in enumerate(providers) if p.pk == job.provider_id), None)
             providers = providers[index:] if index is not None else []
         if not providers:
             finish(job, "attention", "No enabled model connection. Admin configuration required.")
             return
-        if not job.provider_plan:
-            job.provider_plan = [
-                {"id": p.pk, "name": p.name, "model": p.model, "kind": p.kind} for p in providers
-            ]
-            Job.objects.filter(pk=job.pk, status="running").update(provider_plan=job.provider_plan)
         result = None
         quota_waits = []
         for provider in providers:
