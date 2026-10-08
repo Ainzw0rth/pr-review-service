@@ -724,3 +724,35 @@ replayed. This favors avoiding duplicate alerts over guaranteed delivery. Inspec
 failures never change review status or block the review worker; no source, findings,
 model output or credentials are included in notifications. Receipts expire with the
 normal 90-day job cleanup. Disabled by default; no historical backfill or test alerts.
+
+### Owner Settings: formal GitHub auto-approval
+
+The owner-only **Settings** tab (`/settings/`) controls auto-approval per repository.
+It is **off by default**, separate from the Workflow model-order editor.
+
+- Off: passing reviews retain the existing approved-label workflow; no formal approval.
+- On: new jobs capture permission to submit a commit-pinned `APPROVE` review only when
+  the analysis is complete, no blocking findings remain, and required checks pass.
+  Approvals are submitted even when there are no inline comments. Feedback still uses
+  `REQUEST_CHANGES`.
+- Turning it on does not upgrade existing queued jobs or retroactively approve PRs.
+  Turning it off is checked before publication, including delivery retries. A request
+  already in flight cannot be recalled atomically. Existing valid approvals remain.
+- The service never merges or enables GitHub auto-merge. It refuses to formally approve
+  a PR with GitHub auto-merge already enabled. Other repository automations remain separate.
+- The connected GitHub account cannot approve its own PR. Missing author information,
+  CI changes, or GitHub rejection stop approval with an actionable delivery reason.
+- Push webhooks dismiss **only tracked service approvals** for older commits and clear
+  stale approved labels. Human approvals are not dismissed. A minute-based maintenance
+  sweep repairs missed webhooks and publication/push races, including while the toggle
+  is off. Dismissal requires GitHub permissions; failures remain retryable and visible
+  under **Administration → Approval records**. Invalidating an approval does not enqueue
+  a new AI review: request the reviewer and retoggle `on review` as usual.
+- Approval records outlive 90-day job history so cleanup does not lose dismissal ownership.
+  Lost submission responses are reconciled using the service marker, author and commit;
+  delivery retries do not blindly submit another approval.
+
+For repository-enforced invalidation without waiting for webhooks or the maintenance
+sweep, configure GitHub's [dismiss stale approvals rule](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).
+That broader rule also affects human reviews; this service does not change it.
+Telegram alerts distinguish formal approval from approved-label-only clearance.

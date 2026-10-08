@@ -69,12 +69,20 @@ def _queue(since):
 
 
 def _message(job):
+    from .models import ApprovalRecord
+
+    formal = ApprovalRecord.objects.filter(job=job).exclude(review_id="").exists()
+    final_note = (
+        "Formal GitHub approval submitted. Merge remains manual."
+        if formal
+        else "Approved workflow status published. Human approval/merge is still required."
+    )
     at = timezone.localtime(job.finished_at).strftime("%d %b %Y, %H:%M WIB")
     return (
         f"✅ AI review approved\n{job.pr.repository.full_name} #{job.pr.number}\n"
         f"Commit: {job.head_sha[:8]} · Attempt {job.generation}\n{at}\n\n"
         f"{job.pr.url}\n{settings.PUBLIC_URL.rstrip('/')}/jobs/{job.pk}/\n\n"
-        "Approved workflow status published. Human approval/merge is still required."
+        f"{final_note}"
     )
 
 

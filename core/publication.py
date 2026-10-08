@@ -368,7 +368,7 @@ def publish(github, job, result, context, checks):
     body += (
         f"Changes or clarification required. After addressing feedback, request @{job.pr.repository.reviewer} again if needed, then toggle `{job.pr.repository.feedback_label}` → `{job.pr.repository.review_label}`."
         if blocked
-        else "No blocking findings. AI clearance is not a formal human approval; repository merge rules still apply."
+        else "No blocking findings. Formal GitHub approval follows the repository auto-approve setting. The service never merges; repository merge rules still apply."
     )
     # Use issue summary first: preserves reviewer request while thread replies publish.
     once(github, job, "summary", body, f"/issues/{number}/comments", f"/issues/{number}/comments")
@@ -383,6 +383,15 @@ def publish(github, job, result, context, checks):
     return _publish_review(github, job, inline, blocked, baseline_timeline)
 
 
+def review_event(job, blocked):
+    from core.approvals import enabled_for
+
+    _, state = checkpoint_state(job)
+    return state.get("review_event") or (
+        "REQUEST_CHANGES" if blocked else "APPROVE" if enabled_for(job) else "COMMENT"
+    )
+
+
 def find_review(github, job, blocked):
     number = job.pr.number
     tag = marker(job, "review")
@@ -393,7 +402,12 @@ def find_review(github, job, blocked):
             if tag in (x.get("body") or "")
             and (x.get("user") or {}).get("login", "").casefold() == github.identity().casefold()
             and x.get("commit_id") == job.head_sha
-            and x.get("state") == ("CHANGES_REQUESTED" if blocked else "COMMENTED")
+            and x.get("state")
+            == {
+                "REQUEST_CHANGES": "CHANGES_REQUESTED",
+                "APPROVE": "APPROVED",
+                "COMMENT": "COMMENTED",
+            }[review_event(job, blocked)]
         ),
         None,
     )
@@ -402,13 +416,43 @@ def find_review(github, job, blocked):
 def _publish_review(github, job, inline, blocked, baseline_timeline):
     number = job.pr.number
     tag = marker(job, "review")
+    from core.approvals import dismiss_stale, enabled_for, remember, withdraw
+    from core.github import IntegrationError, check_required
+
+    event = review_event(job, blocked)
     existing = find_review(github, job, blocked)
     stage, _ = checkpoint_state(job)
-    if stage == "labels" and (inline or blocked) and not existing:
+    if stage == "labels" and (inline or blocked or event == "APPROVE") and not existing:
         raise StaleReview("Published review is no longer available")
-    if not existing and (inline or blocked):
+    if not existing and event == "APPROVE" and not enabled_for(job):
+        event = "COMMENT"
+    update_cursor(job, stage or "review", review_event=event)
+    needs_review = bool(inline or blocked or event == "APPROVE")
+    if stage == "labels" and needs_review and not existing:
+        raise StaleReview("Published review is no longer available")
+    if not existing and needs_review:
         guard(github, job)
-        if blocked:
+        if event == "APPROVE":
+            fresh = github.pull(number)
+            if fresh.get("auto_merge"):
+                raise IntegrationError(
+                    "GitHub auto-merge is enabled on this PR; disable it before automatic approval."
+                )
+            author = (fresh.get("user") or {}).get("login")
+            if not author:
+                raise IntegrationError("GitHub PR author could not be verified.")
+            if author.casefold() == github.identity().casefold():
+                raise IntegrationError(
+                    "Connected GitHub account cannot approve its own PR; another reviewer is required."
+                )
+            if (
+                job.pr.repository.required_checks
+                and not check_required(github, job.pr.repository, job.head_sha)["passed"]
+            ):
+                raise IntegrationError("Required checks changed during review")
+            remember(github, job, tag)
+            guard(github, job)
+        if blocked or event == "APPROVE":
             ExpectedLabel.objects.create(
                 repository=job.pr.repository,
                 number=number,
@@ -421,7 +465,7 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
             f"/pulls/{number}/reviews",
             {
                 "commit_id": job.head_sha,
-                "event": "REQUEST_CHANGES" if blocked else "COMMENT",
+                "event": event,
                 "body": f"Automated review. See summary above.\n\n{tag}",
                 "comments": inline,
             },
@@ -434,6 +478,13 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
             job=job, key="review", defaults={"remote_id": str(existing["id"])}
         )
 
+    if event == "APPROVE" and Receipt.objects.filter(job=job, key="review").exists():
+        record = remember(github, job, tag)
+        record.review_id = Receipt.objects.get(job=job, key="review").remote_id
+        record.save(update_fields=["review_id"])
+        # Catch a push racing the approval POST; the webhook/sweeper also repairs this.
+        dismiss_stale(github, job.pr.repository, number)
+
     if blocked and Receipt.objects.filter(job=job, key="review").exists():
         Receipt.objects.get_or_create(job=job, key="request_changes")
 
@@ -443,8 +494,12 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
             github, job, blocked=blocked, baseline_timeline=baseline_timeline
         )
     except StaleReview:
+        if event == "APPROVE":
+            withdraw(github, job)
         raise
     except Exception as exc:
+        if event == "APPROVE" and str(exc) == "Required checks changed during review":
+            withdraw(github, job)
         raise LabelCleanupError(safe_error(exc)) from None
 
 
@@ -469,6 +524,7 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
         "closed",
         "reopened",
         "merged",
+        "review_dismissed",
     }
 
     def terminal_guard():

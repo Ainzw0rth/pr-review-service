@@ -8,6 +8,7 @@ class Command(BaseCommand):
     help = "Run hourly cleanup and retry optional journal delivery every minute."
 
     def handle(self, *args, **options):
+        from core.approvals import sweep_stale
         from core.journal import flush
         from core.notifications import flush_approvals
 
@@ -26,4 +27,8 @@ class Command(BaseCommand):
                     self.stderr.write("Telegram approval notification configuration unavailable.")
             except Exception:
                 self.stderr.write("Telegram approval notification maintenance unavailable.")
+            try:
+                sweep_stale()
+            except Exception:
+                self.stderr.write("Stale approval check unavailable; retry pending.")
             time.sleep(60)

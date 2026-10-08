@@ -56,10 +56,14 @@ class FakeGitHub:
         if path.endswith("/reviews"):
             row.update(
                 commit_id=data["commit_id"],
-                state="CHANGES_REQUESTED" if data["event"] == "REQUEST_CHANGES" else "COMMENTED",
+                state={
+                    "REQUEST_CHANGES": "CHANGES_REQUESTED",
+                    "APPROVE": "APPROVED",
+                    "COMMENT": "COMMENTED",
+                }[data["event"]],
             )
             self.reviews.append(row)
-            if data["event"] == "REQUEST_CHANGES":
+            if data["event"] in ("REQUEST_CHANGES", "APPROVE"):
                 self.snapshot["requested_reviewers"] = []
         elif path.endswith("/labels"):
             self.snapshot["labels"] += [{"name": x} for x in data["labels"]]

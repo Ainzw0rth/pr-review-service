@@ -42,6 +42,9 @@ def safe_error(exc):
         "GitHub request unavailable or malformed.",
         "GitHub returned malformed data.",
         "Required checks changed during review",
+        "GitHub PR author could not be verified.",
+        "GitHub auto-merge is enabled on this PR; disable it before automatic approval.",
+        "Connected GitHub account cannot approve its own PR; another reviewer is required.",
     }:
         return message
     return "GitHub delivery could not be confirmed."

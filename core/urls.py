@@ -1,8 +1,9 @@
 from django.urls import path
 
-from . import views, workflow_views
+from . import settings_views, views, workflow_views
 
 urlpatterns = [
+    path("settings/", settings_views.service_settings, name="service_settings"),
     path("workflow/", workflow_views.workflow_page, name="workflow"),
     path("workflow/state/", workflow_views.workflow_state, name="workflow_state"),
     path("workflow/probe/<int:provider_id>/", workflow_views.workflow_probe, name="workflow_probe"),

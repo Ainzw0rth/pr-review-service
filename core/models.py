@@ -99,6 +99,7 @@ class Repository(models.Model):
         validators=[RegexValidator(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")],
     )
     reviewer = models.CharField(max_length=100)
+    auto_approve = models.BooleanField(default=False)
     enabled = models.BooleanField(default=True)
     github_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
     webhook_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
@@ -171,6 +172,7 @@ class Job(models.Model):
     reason = models.CharField(max_length=250, blank=True)
     provider_diagnostics = models.JSONField(default=dict, blank=True)
     provider_plan = models.JSONField(default=list, blank=True)
+    auto_approve = models.BooleanField(default=False)
     workflow_version = models.CharField(max_length=16, blank=True, default="")
     retry_of = models.OneToOneField(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="dashboard_retry"
@@ -183,6 +185,10 @@ class Job(models.Model):
     finished_at = models.DateTimeField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
+        if self._state.adding:
+            self.auto_approve = Repository.objects.values_list("auto_approve", flat=True).get(
+                pk=self.pr.repository_id
+            )
         if self._state.adding and not self.workflow_version:
             from .review_config import snapshot, version
 
@@ -303,3 +309,20 @@ class ApprovalNotification(models.Model):
     next_attempt_at = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True)
+
+
+class ApprovalRecord(models.Model):
+    """Own approval intent survives job-history cleanup, allowing later dismissal."""
+
+    job = models.OneToOneField(Job, null=True, on_delete=models.SET_NULL)
+    repository = models.ForeignKey(Repository, on_delete=models.PROTECT)
+    number = models.PositiveIntegerField()
+    head_sha = models.CharField(max_length=64)
+    marker = models.CharField(max_length=100, unique=True)
+    actor = models.CharField(max_length=100)
+    revoke_requested = models.BooleanField(default=False)
+    review_id = models.CharField(max_length=30, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    checked_at = models.DateTimeField(null=True)
+    dismissed_at = models.DateTimeField(null=True)
+    error = models.CharField(max_length=200, blank=True)

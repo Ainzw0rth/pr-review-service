@@ -1,0 +1,13 @@
+{% extends 'core/base.html' %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<section class="page-heading"><div><p class="eyebrow">OWNER WORKSPACE / SERVICE BEHAVIOR</p><h1>Review policy.<br><em>Your call.</em></h1><p class="lede">Control what happens after a successful review. Merging stays in human hands.</p></div></section>
+{% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
+<form method="post">{% csrf_token %}<input type="hidden" name="version" value="{{ version }}">
+<section class="panel"><p class="eyebrow">01 / GITHUB APPROVALS</p><h2>Automatically approve passing PRs</h2><p class="note">When enabled, a complete review with passing required CI and no blocking findings submits a formal GitHub APPROVE review for the exact commit. It never merges or enables auto-merge.</p>
+{% for repo in repositories %}<div class="approval-setting"><div><label for="approve-{{ repo.pk }}">{{ repo.full_name }}</label><p class="note">{% if repo.enabled %}Monitored repository{% else %}Repository currently disabled{% endif %}</p></div><label class="setting-switch"><input id="approve-{{ repo.pk }}" type="checkbox" role="switch" name="auto_approve_{{ repo.pk }}" {% if repo.auto_approve %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">Automatically approve passing PRs for {{ repo.full_name }}</span></label></div>{% empty %}<p>No repositories configured.</p>{% endfor %}
+<p class="note">Off by default. Enabling applies to new jobs; queued jobs keep their original policy. Disabling prevents approvals not yet submitted—it does not revoke existing valid approvals.</p>
+<p class="note">New commits invalidate the service’s approval and clear its approved label. Human reviews are not dismissed. Cleanup runs on webhooks, with periodic recovery; GitHub permissions must allow review dismissal. Enable GitHub’s stale-approval branch rule if you also need repository-enforced protection without waiting for the service.</p>
+<p class="note">The connected GitHub account cannot approve its own PRs. Those attempts need another reviewer. Existing approval requirements and merge rules still apply.</p>
+</section><div class="workflow-toolbar"><p>Owner-only settings · model order lives in Workflow.</p><button type="submit">Save settings</button></div></form>
+{% endblock %}

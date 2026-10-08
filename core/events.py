@@ -35,8 +35,19 @@ def _process_event(event, github):
     action = payload.get("action")
     reconcile(event, snapshot, canonical=canonical)
     try:
+        if action == "synchronize":
+            from core.approvals import dismiss_stale
+
+            dismiss_stale(github, repo, number)
         labels = {label["name"] for label in snapshot.get("labels", [])}
-        if action == "synchronize" and repo.approved_label in labels:
+        reviewed_current_head = Job.objects.filter(
+            pr__repository=repo,
+            pr__number=number,
+            head_sha=snapshot["head"]["sha"],
+            status="completed",
+            review_checkpoint__stage="done",
+        ).exists()
+        if action == "synchronize" and repo.approved_label in labels and not reviewed_current_head:
 
             def unchanged_commit():
                 fresh = github.pull(number)

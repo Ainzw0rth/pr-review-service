@@ -10,6 +10,7 @@ from .forms import CredentialForm, RepositoryForm
 from .models import (
     AccessLink,
     ApprovalNotification,
+    ApprovalRecord,
     Credential,
     Job,
     JournalEntry,
@@ -91,6 +92,7 @@ class ProviderAdmin(admin.ModelAdmin):
 
 @admin.register(Repository)
 class RepositoryAdmin(admin.ModelAdmin):
+    readonly_fields = ["auto_approve"]
     form = RepositoryForm
     list_display = ["full_name", "organization", "reviewer", "enabled"]
     list_filter = ["organization", "enabled"]
@@ -195,6 +197,23 @@ class ApprovalNotificationAdmin(admin.ModelAdmin):
         "sent_at",
         "reason",
     ]
+    fields = readonly_fields
+    actions = None
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ApprovalRecord)
+class ApprovalRecordAdmin(admin.ModelAdmin):
+    list_display = ["repository", "number", "head_sha", "review_id", "dismissed_at", "error"]
+    readonly_fields = [field.name for field in ApprovalRecord._meta.fields]
     fields = readonly_fields
     actions = None
 

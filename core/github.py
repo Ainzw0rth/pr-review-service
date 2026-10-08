@@ -111,6 +111,9 @@ class GitHub:
     def post(self, path, data):
         return self._json(self._request("POST", path, data))
 
+    def put(self, path, data):
+        return self._json(self._request("PUT", path, data))
+
     def patch(self, path, data):
         return self._json(self._request("PATCH", path, data))
 
