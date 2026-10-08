@@ -25,6 +25,62 @@
     const p = state.probes.find(p => p.provider_id === m.id);
     $('model-probe').textContent = p ? `${p.model} · ${p.status}. ${p.reason}` : 'Not tested here yet.';
   }
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let dragSource = null, dragPreview = null, dropMarker = null, dropBefore = null;
+  const positions = () => new Map([...document.querySelectorAll('#workflow-chain .workflow-node')].map(node => [node.dataset.key, node.getBoundingClientRect()]));
+  function animateNodes(previous) {
+    if (reducedMotion.matches) return;
+    for (const node of $('workflow-chain').querySelectorAll('.workflow-node')) {
+      const before = previous.get(node.dataset.key); if (!before) continue;
+      const after = node.getBoundingClientRect(), dx = before.left - after.left, dy = before.top - after.top;
+      if (Math.abs(dx) + Math.abs(dy) > 1) node.animate([
+        {transform: `translate(${dx}px, ${dy}px)`}, {transform: 'translate(0, 0)'}
+      ], {duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)'});
+    }
+  }
+  function clearDrag() {
+    dragSource?.classList.remove('is-dragging');
+    dragPreview?.remove(); dropMarker?.remove();
+    $('workflow-chain').classList.remove('is-drop-target');
+    document.body.classList.remove('workflow-dragging');
+    dragged = null; dragSource = null; dragPreview = null; dropMarker = null; dropBefore = null;
+  }
+  function startDrag(event, model, source) {
+    if (busy) { event.preventDefault(); return; }
+    clearDrag();
+    for (const node of $('workflow-chain').querySelectorAll('.workflow-node')) node.getAnimations().forEach(animation => animation.cancel());
+    dragged = model.key; dragSource = source;
+    event.dataTransfer.setData('text/plain', model.key);
+    event.dataTransfer.effectAllowed = 'move';
+    const rect = source.getBoundingClientRect();
+    dragPreview = el('div', '', 'workflow-drag-preview');
+    dragPreview.style.width = `${Math.min(rect.width, 380)}px`;
+    dragPreview.style.left = `${rect.left}px`; dragPreview.style.top = `${rect.top}px`;
+    dragPreview.setAttribute('aria-hidden', 'true');
+    dragPreview.append(el('span', '⋮⋮  MOVE REVIEWER', 'eyebrow'), el('strong', model.name || 'New model'), el('code', model.model), el('span', 'Drop into the review sequence', 'note'));
+    document.body.append(dragPreview);
+    event.dataTransfer.setDragImage(dragPreview, Math.min(event.clientX - rect.left, 160), 28);
+    dropMarker = el('li', 'Drop here', 'workflow-drop-marker');
+    dropMarker.setAttribute('aria-hidden', 'true');
+    document.body.classList.add('workflow-dragging');
+    status(`Moving ${model.name}. Drop at a marker to place it; press Escape to cancel.`);
+    // Capture the solid preview before dimming the original card.
+    requestAnimationFrame(() => { dragPreview?.remove(); dragSource?.classList.add('is-dragging'); });
+  }
+  function showDrop(event) {
+    if (!dragged || busy) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+    const chain = $('workflow-chain'); chain.classList.add('is-drop-target');
+    if (event.target.closest('.workflow-drop-marker')) return;
+    const top = chain.getBoundingClientRect().top;
+    const nodes = [...chain.querySelectorAll('.workflow-node')].filter(node => node.dataset.key !== dragged);
+    const target = nodes.find(node => event.clientY < top + node.offsetTop + node.offsetHeight / 2);
+    const before = target?.dataset.key ?? null;
+    if (dropMarker.parentNode === chain && before === dropBefore) return;
+    const previous = positions();
+    for (const node of chain.querySelectorAll('.workflow-node')) node.getAnimations().forEach(animation => animation.cancel());
+    dropBefore = before; chain.insertBefore(dropMarker, target || null); animateNodes(previous);
+  }
   function move(key, delta) {
     const active = state.models.filter(m => m.enabled);
     const i = active.findIndex(m => m.key === key), target = active[i + delta];
@@ -32,6 +88,7 @@
     const from = state.models.findIndex(m => m.key === key), to = state.models.indexOf(target);
     const [m] = state.models.splice(from, 1); state.models.splice(to, 0, m);
     mark(); render();
+    [...$('workflow-chain').querySelectorAll('.workflow-node')].find(node => node.dataset.key === key)?.querySelector('button')?.focus();
   }
   function drop(before) {
     if (busy) return;
@@ -39,23 +96,25 @@
     state.models = state.models.filter(item => item !== m);
     const index = state.models.findIndex(item => item.key === before);
     m.enabled = true; state.models.splice(index < 0 ? state.models.length : index, 0, m);
-    mark(); render();
+    clearDrag(); mark(); render();
   }
   function render() {
+    const previous = positions();
     $('model-library').replaceChildren(); $('workflow-chain').replaceChildren();
     let index = 0;
     for (const m of state.models) {
       const item = el('div', '', 'workflow-model'); item.draggable = true;
-      item.addEventListener('dragstart', e => { dragged = m.key; e.dataTransfer.setData('text/plain', m.key); e.dataTransfer.effectAllowed = 'move'; });
+      item.addEventListener('dragstart', e => startDrag(e, m, item));
+      item.append(el('span', '⋮⋮', 'workflow-drag-handle'));
       item.append(button(m.name || 'New model', `Edit ${m.name}`, () => select(m.key)), el('code', m.model || 'Set model ID'));
       if (!m.id) item.append(button('Discard', 'Discard new model', () => { state.models = state.models.filter(row => row !== m); if (selected === m.key) selected = null; mark(); render(); select(selected); }));
       const add = button(m.enabled ? 'In sequence' : 'Add →', `Add ${m.name} to sequence`, () => { m.enabled = true; mark(); render(); });
       add.disabled = m.enabled; item.append(add); $('model-library').append(item);
       if (!m.enabled) continue;
       const node = el('li', '', 'workflow-node'); node.draggable = true;
-      node.addEventListener('dragstart', e => { dragged = m.key; e.dataTransfer.setData('text/plain', m.key); });
-      node.addEventListener('dragover', e => { e.preventDefault(); });
-      node.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); drop(m.key); });
+      node.dataset.key = m.key;
+      node.addEventListener('dragstart', e => startDrag(e, m, node));
+      const handle = el('span', '⋮⋮', 'workflow-drag-handle'); handle.setAttribute('aria-hidden', 'true'); node.append(handle);
       node.append(el('span', String(++index).padStart(2, '0'), 'section-number'), button(m.name || 'New model', `Configure ${m.name}`, () => select(m.key)), el('code', m.model));
       const controls = el('div', '', 'workflow-node-controls');
       const up = button('↑', `Move ${m.name} up`, () => move(m.key, -1)); up.disabled = index === 1;
@@ -66,6 +125,7 @@
     if (!index) $('workflow-chain').append(el('li', 'Add a model to begin.', 'workflow-terminal'));
     $('workflow-version').textContent = `WORKFLOW / ${state.version.slice(0, 8)}`;
     if (selected) select(selected);
+    animateNodes(previous);
   }
   async function request(url, data) {
     const response = await fetch(url, {method: data ? 'POST' : 'GET', headers: data ? {'Content-Type': 'application/json', 'X-CSRFToken': csrf} : {}, body: data ? JSON.stringify(data) : undefined, cache: 'no-store'});
@@ -84,8 +144,18 @@
     Object.assign(m, {name: $('model-name').value.trim(), kind: $('model-kind').value, model: $('model-id').value.trim(), effort: $('model-kind').value === 'codex_cli' ? $('model-effort').value : ''});
     mark();
   });
-  $('workflow-chain').addEventListener('dragover', e => e.preventDefault());
-  $('workflow-chain').addEventListener('drop', e => { e.preventDefault(); drop(null); });
+  $('workflow-chain').addEventListener('dragover', showDrop);
+  $('workflow-chain').addEventListener('dragleave', e => {
+    if (!$('workflow-chain').contains(e.relatedTarget)) {
+      dropMarker?.remove(); $('workflow-chain').classList.remove('is-drop-target');
+    }
+  });
+  $('workflow-chain').addEventListener('drop', e => {
+    if (!dragged) return;
+    e.preventDefault();
+    if (dropMarker?.parentNode !== $('workflow-chain')) showDrop(e);
+    drop(dropBefore);
+  });
   $('workflow-form').onsubmit = async e => {
     e.preventDefault(); if (busy || (selectedModel() && !$('model-settings').reportValidity())) return; busy = true; $('workflow-save').disabled = true; $('workflow-editor').inert = true;
     try { const data = await request('/workflow/state/', {version: state.version, models: state.models}); dirty = false; hydrate(data); status('Saved · new jobs will use this workflow.'); }
@@ -97,7 +167,7 @@
     try { const result = await request(`/workflow/probe/${m.id}/`, {}); $('model-probe').textContent = result.message; }
     catch (error) { $('model-probe').textContent = error.message; }
   };
-  document.addEventListener('dragend', () => { dragged = null; });
+  document.addEventListener('dragend', () => { clearDrag(); status(dirty ? 'Unsaved changes · applies to new jobs only' : 'Saved configuration · drag nodes or use arrow buttons to reorder.'); });
   window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
   request('/workflow/state/').then(data => { hydrate(data); $('workflow-editor').hidden = false; status('Saved configuration · drag nodes or use arrow buttons to reorder.'); }).catch(error => status(error.message));
   setInterval(async () => { if (!state || document.hidden || busy) return; try { const data = await request('/workflow/state/'); state.probes = data.probes; probeStatus(); if (!dirty && selectedModel()) $('model-test').disabled = !selectedModel().id || !selectedModel().kind.endsWith('_cli') || data.probes.some(p => ['queued', 'running'].includes(p.status)); } catch { /* Keep draft intact during network interruptions. */ } }, 5000);
