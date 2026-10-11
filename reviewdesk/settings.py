@@ -131,3 +131,11 @@ TELEGRAM_APPROVAL_REPOSITORIES = [
     for value in os.environ.get("TELEGRAM_APPROVAL_REPOSITORIES", "").split(",")
     if value.strip()
 ]
+
+# Optional, isolated structural evidence collection. Explicit repositories only.
+GRAPH_REPOSITORIES = [
+    name.strip() for name in os.environ.get("GRAPH_REPOSITORIES", "").split(",") if name.strip()
+]
+GRAPH_RUNNER_IMAGE = os.environ.get("GRAPH_RUNNER_IMAGE", "")
+GRAPH_CACHE_VOLUME = os.environ.get("GRAPH_CACHE_VOLUME", "auto-reviewer-graph-cache")
+GRAPH_TIMEOUT_SECONDS = int(os.environ.get("GRAPH_TIMEOUT_SECONDS", "1200"))

@@ -209,6 +209,40 @@ class ContextTests(TestCase):
         }
         return github, job
 
+    def test_graph_selected_source_is_read_at_reviewed_head(self):
+        github, job = self.fixture()
+        with patch(
+            "core.graph.collect",
+            return_value={"paths": ["docs/guide.md"], "head_sha": job.head_sha},
+        ):
+            result = build_context(github, job)
+        self.assertTrue(result["complete"], result)
+        self.assertIn("docs/guide.md", [item["path"] for item in result["sources"]])
+        self.assertEqual(result["graph"]["head_sha"], job.head_sha)
+        self.assertTrue(
+            any(
+                "docs/guide.md?ref=" + job.head_sha in call.args[0]
+                for call in github.get.call_args_list
+            )
+        )
+
+    def test_graph_failure_blocks_clearance(self):
+        github, job = self.fixture()
+        with patch(
+            "core.graph.collect",
+            side_effect=IntegrationError(
+                "Code graph unavailable or incomplete; no model review was started."
+            ),
+        ):
+            result = build_context(github, job)
+        self.assertFalse(result["complete"])
+        self.assertIn("Code graph", result["reason"])
+
+    def test_graph_cannot_select_file_outside_current_tree(self):
+        github, job = self.fixture()
+        with patch("core.graph.collect", return_value={"paths": ["missing.py"]}):
+            self.assertFalse(build_context(github, job)["complete"])
+
     def test_context_pins_source_and_includes_issue(self):
         github, job = self.fixture()
         result = build_context(github, job)

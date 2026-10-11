@@ -785,3 +785,82 @@ all repositories. It requires automatic approval to also be enabled. Choose squa
   auto-merge, which could otherwise merge a later, unreviewed commit.
 
 Reference: [GitHub merge API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request).
+
+### Code-review-graph evidence adapter
+
+Optional **code-review-graph 2.3.9** integration augments the existing collector;
+GitHub discussions, linked issues, documentation and required CI remain authoritative
+inputs. No new LLM/MCP permissions are added: graph-selected files are fetched at the
+reviewed SHA and delivered through the existing read-only evidence tool.
+
+**Cache correctness and scope**
+
+- One persistent, locked SQLite graph per repository in a dedicated Docker volume.
+  Initial indexing is local; there are no embeddings, cloud indexing calls, install
+  hooks, or modifications to shared Codex/Claude/Hermes configuration.
+- Every snapshot is an archive of an explicit SHA. Content hashes identify additions,
+  edits and deletions across *all* files, including switches between unrelated branches.
+  Unchanged files reuse parsing work; initial builds and cache-version changes rebuild.
+- Analyze the PR base and then head. Union their impacted paths so removed/renamed
+  definitions can still lead to surviving dependents. Always read final evidence from
+  the head, never supply base contents as current source. Prior filenames are seeds too.
+- Selection includes a two-hop reverse impact neighborhood and direct outgoing graph
+  dependencies. This is structural evidence, not exhaustive runtime/cross-service
+  dependency discovery. Keep text/docs selection alongside it. Unsupported languages,
+  generated code and dynamic dispatch remain limitations; file counts do not establish
+  that every repository file or relationship is understood.
+- Parser exceptions or truncated impact results fail the review's context stage. An
+  interrupted/failed mutation removes the successful-cache marker; the next run rebuilds
+  rather than trusting leftover rows. Repository caches never overlap.
+- The disposable parser has no credentials, network, Docker socket, or project execution
+  tools. It runs as UID 10001, read-only except its cache and temporary directory, with
+  two CPUs and 2 GiB RAM. Cancellation removes the container. The configurable 1200-second
+  graph-operation timeout is separate from model execution.
+- Dashboard jobs show a **Code graph** collection stage when enabled. Graph statistics,
+  pinned SHAs and selected paths are included in the evidence manifest.
+
+**Setup** (trusted VPS operator; does not modify monitored repositories):
+
+```sh
+docker compose build web
+docker build -f graph/Dockerfile -t auto-reviewer-graph:2.3.9 .
+docker volume create auto-reviewer-graph-cache
+docker run --rm --network none --user 0:0 --entrypoint chown \
+  --mount type=volume,src=auto-reviewer-graph-cache,dst=/graph-cache \
+  auto-reviewer-graph:2.3.9 10001:10001 /graph-cache
+docker image inspect --format '{{.Id}}' auto-reviewer-graph:2.3.9
+```
+
+Set `GRAPH_RUNNER_IMAGE` to that immutable image ID and `GRAPH_CACHE_VOLUME` to the
+volume name. Enable chosen repositories with a comma-separated `GRAPH_REPOSITORIES`,
+e.g. `MarkAny-GaneshaIT/AnyOne-2.0`. Keep it empty to disable this integration. Apply
+configuration with the usual drained deployment; never restart an active review.
+Prewarm an explicit commit using the newly deployed management command:
+
+```sh
+docker compose exec -T worker python manage.py warm_code_graph \
+  MarkAny-GaneshaIT/AnyOne-2.0 <40-character-commit-sha>
+```
+
+Prewarming works even with an empty review allowlist. The worker service is required
+because it alone has the Docker socket. Existing prewarmed volume data survives app
+redeployments. Do not prune the pinned graph image or its cache volume. This initial
+integration is opt-in; no repository is silently enabled by updating the app.
+
+Observed on this VPS at AnyOne commit `6b643f0f6a46d948b59bf168752149247fd6357f`:
+900 indexed files, 8,337 nodes, 100,555 edges. Cold indexing: 26.176 seconds;
+unchanged incremental indexing: 0.351 seconds. A 74-file snapshot transition reparsed
+63 files in about 4.3–4.4 seconds per snapshot. These are **index update times**, not
+end-to-end review times; downloads, extraction, impact queries and LLM work cost extra.
+
+Adapter integration tests (real parser; no network):
+
+```sh
+docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --cpus 2 --memory 2g \
+  --tmpfs /tmp:rw,nosuid,nodev,size=128m \
+  --mount type=bind,src="$PWD/graph/test_entry.py",dst=/opt/test_entry.py,readonly \
+  --entrypoint /opt/graph-venv/bin/python auto-reviewer-graph:2.3.9 /opt/test_entry.py
+```
+
+Upstream: [code-review-graph](https://github.com/tirth8205/code-review-graph/tree/v2.3.9).

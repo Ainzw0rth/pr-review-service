@@ -17,6 +17,8 @@ MESSAGES = {
     "related": "Loading linked issues and related pull requests.",
     "docs": "Relevant documentation loaded",
     "docs_started": "Gathering relevant documentation and supporting source.",
+    "graph_started": "Updating isolated code graph for PR base and reviewed commit.",
+    "graph_ready": "Commit-pinned code graph checked; loading impacted source files.",
     "context_ready": "Review context collected.",
     "context_failed": "Context collection stopped; see the operational note for the cause.",
     "checks": "Checking required CI for the reviewed commit.",

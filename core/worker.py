@@ -56,7 +56,7 @@ def run_job(job):
             )
             return
         progress("context")
-        context = build_context(github, job, progress=progress)
+        context = build_context(github, job, progress=progress, cancelled=progress.cancelled)
         if not context.get("complete", False):
             diagnostic = failure_reason(context)
             progress("context_failed")

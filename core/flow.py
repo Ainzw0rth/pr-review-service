@@ -97,7 +97,7 @@ def snapshot(job, events):
             "docs",
             "Documentation",
             {"docs_started", "docs"},
-            context_done,
+            context_done | {"graph_started"},
             unit="documents",
             detail="Relevant docs & supporting source",
         ),
@@ -109,6 +109,17 @@ def snapshot(job, events):
             detail="Evidence for this commit",
         ),
     ]
+    if "graph_started" in codes:
+        stages.insert(
+            3,
+            node(
+                "graph",
+                "Code graph",
+                {"graph_started"},
+                context_done,
+                detail="Base/head index & impacted source",
+            ),
+        )
     latest_ci = next(
         (
             event

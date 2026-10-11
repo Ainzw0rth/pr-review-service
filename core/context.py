@@ -14,6 +14,7 @@ MAX_CONTEXT_BYTES = 32 * 1024 * 1024  # Memory safeguard, not a file/document co
 MAX_RELATED = 25
 SAFE_FAILURES = frozenset(
     {
+        "Code graph unavailable or incomplete; no model review was started.",
         "Too many linked issues or pull requests for complete review.",
         "Review context exceeds supported size; split the PR or narrow its scope.",
         "The change exceeds supported source context size.",
@@ -184,7 +185,7 @@ def _references(text, full_name):
     return {int(number) for number in explicit if int(number) > 0}
 
 
-def build_context(github, job, progress=None):
+def build_context(github, job, progress=None, cancelled=lambda: False):
     progress = progress or (lambda *args, **kwargs: None)
     repo = job.pr.repository
     result = {
@@ -429,6 +430,31 @@ def build_context(github, job, progress=None):
                 )
         for path in sorted(candidates - existing):
             result["sources"].append(_source(github, path, job.head_sha))
+            bound()
+        from .graph import collect
+
+        graph = collect(
+            github,
+            repo.full_name,
+            job.head_sha,
+            pr.get("base", {}).get("sha"),
+            files,
+            cancelled,
+            progress,
+        )
+        if graph is not None:
+            progress("graph_ready")
+            result["graph"] = graph
+            present = {entry["path"] for entry in result["sources"] + result["docs"]}
+            for path in graph["paths"]:
+                if path not in paths:
+                    raise IntegrationError(
+                        "Code graph unavailable or incomplete; no model review was started."
+                    )
+                if path not in present:
+                    result["sources"].append(_source(github, path, job.head_sha))
+                    present.add(path)
+                    bound()
             bound()
         # REST files use current head: verify again after pagination and reads.
         if github.pull(job.pr.number)["head"]["sha"] != job.head_sha:
