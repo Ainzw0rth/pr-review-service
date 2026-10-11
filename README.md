@@ -738,7 +738,8 @@ It is **off by default**, separate from the Workflow model-order editor.
 - Turning it on does not upgrade existing queued jobs or retroactively approve PRs.
   Turning it off is checked before publication, including delivery retries. A request
   already in flight cannot be recalled atomically. Existing valid approvals remain.
-- The service never merges or enables GitHub auto-merge. It refuses to formally approve
+- Unless the separate auto-merge setting below is enabled, merging remains manual.
+  The service never schedules GitHub auto-merge. It refuses to formally approve
   a PR with GitHub auto-merge already enabled. Other repository automations remain separate.
 - The connected GitHub account cannot approve its own PR. Missing author information,
   CI changes, or GitHub rejection stop approval with an actionable delivery reason.
@@ -756,3 +757,31 @@ For repository-enforced invalidation without waiting for webhooks or the mainten
 sweep, configure GitHub's [dismiss stale approvals rule](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).
 That broader rule also affects human reviews; this service does not change it.
 Telegram alerts distinguish formal approval from approved-label-only clearance.
+
+
+### Optional automatic merging
+
+Owner **Settings → Automatically merge approved PRs** is **off by default** for
+all repositories. It requires automatic approval to also be enabled. Choose squash
+(default), merge commit, or rebase; GitHub must permit the chosen method.
+
+- New jobs snapshot both toggles and the method. Enabling is not retroactive.
+- Only a completed, passing service review with its formal approval still valid can
+  merge. Human approval or the `approved` label alone does not trigger this feature.
+- After publishing, the worker rechecks the PR head, workflow labels, required CI,
+  recorded approval, and GitHub's `APPROVED` review decision and `CLEAN`/`MERGEABLE`
+  merge state. Missing/unknown state, conflicts and unmet requirements fail closed.
+- The merge API request includes the reviewed SHA, so a racing new commit cannot be
+  merged by that request. No rules are changed, no bypass is requested, and no branch
+  is deleted. GitHub still applies permissions and rules to the connected account.
+- There is one merge attempt, not a background merge queue. A blocked/failed attempt
+  leaves the review published and adds a reason to the dashboard job. Resolve the
+  blocker and merge manually or request a new review; old jobs are not auto-replayed.
+- A durable intent is recorded before the request. Uncertain responses/process crashes
+  are not blindly retried. Inspect GitHub to determine whether the merge succeeded.
+  A crash before the merge step can leave a completed review needing manual merging.
+- Turning the toggle off prevents requests not yet submitted. It cannot undo merges
+  or recall an in-flight request. Enabling this option does not enable GitHub's native
+  auto-merge, which could otherwise merge a later, unreviewed commit.
+
+Reference: [GitHub merge API](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request).

@@ -368,7 +368,7 @@ def publish(github, job, result, context, checks):
     body += (
         f"Changes or clarification required. After addressing feedback, request @{job.pr.repository.reviewer} again if needed, then toggle `{job.pr.repository.feedback_label}` → `{job.pr.repository.review_label}`."
         if blocked
-        else "No blocking findings. Formal GitHub approval follows the repository auto-approve setting. The service never merges; repository merge rules still apply."
+        else "No blocking findings. Formal GitHub approval follows the repository auto-approve setting. Merging follows the separate opt-in auto-merge setting; repository merge rules still apply."
     )
     # Use issue summary first: preserves reviewer request while thread replies publish.
     once(github, job, "summary", body, f"/issues/{number}/comments", f"/issues/{number}/comments")

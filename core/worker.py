@@ -360,6 +360,9 @@ def _deliver_and_finish(github, job, progress):
         Job.objects.filter(pk=job.pk, status="completed").update(
             reason="Review published; Sheet update needs admin attention."
         )
+    from core.merging import merge_approved
+
+    merge_approved(github, job, outcome)
     return outcome
 
 

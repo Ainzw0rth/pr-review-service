@@ -17,7 +17,9 @@ from .retries import is_retry_owner
 
 def revision(repositories):
     return hashlib.sha256(
-        json.dumps([(r.pk, r.auto_approve) for r in repositories]).encode()
+        json.dumps(
+            [(r.pk, r.auto_approve, r.auto_merge, r.merge_method) for r in repositories]
+        ).encode()
     ).hexdigest()[:16]
 
 
@@ -37,18 +39,37 @@ def service_settings(request):
                 error = "Settings changed in another tab. Reload before saving."
                 status = 409
             elif any(
-                request.POST.get(f"auto_approve_{repo.pk}", "") not in ("", "on")
+                request.POST.get(f"{field}_{repo.pk}", "") not in ("", "on")
                 for repo in repositories
+                for field in ("auto_approve", "auto_merge")
             ):
                 error = "Invalid toggle value."
+                status = 400
+            elif any(
+                request.POST.get(f"merge_method_{repo.pk}", repo.merge_method)
+                not in ("squash", "merge", "rebase")
+                for repo in repositories
+            ):
+                error = "Invalid merge method."
+                status = 400
+            elif any(
+                request.POST.get(f"auto_merge_{repo.pk}") == "on"
+                and request.POST.get(f"auto_approve_{repo.pk}") != "on"
+                for repo in repositories
+            ):
+                error = "Automatic merging requires automatic approval for the same repository."
                 status = 400
             else:
                 for repo in repositories:
                     repo.auto_approve = request.POST.get(f"auto_approve_{repo.pk}") == "on"
-                    repo.save(update_fields=["auto_approve"])
+                    repo.auto_merge = request.POST.get(f"auto_merge_{repo.pk}") == "on"
+                    repo.merge_method = request.POST.get(
+                        f"merge_method_{repo.pk}", repo.merge_method
+                    )
+                    repo.save(update_fields=["auto_approve", "auto_merge", "merge_method"])
                 messages.success(
                     request,
-                    "Settings saved. Enabling applies to new jobs; disabling prevents pending approvals. The service never merges.",
+                    "Settings saved. Enabling applies to new jobs; disabling prevents approvals and merges not yet submitted.",
                 )
                 return redirect("service_settings")
     return render(

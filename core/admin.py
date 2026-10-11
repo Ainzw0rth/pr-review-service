@@ -92,7 +92,7 @@ class ProviderAdmin(admin.ModelAdmin):
 
 @admin.register(Repository)
 class RepositoryAdmin(admin.ModelAdmin):
-    readonly_fields = ["auto_approve"]
+    readonly_fields = ["auto_approve", "auto_merge", "merge_method"]
     form = RepositoryForm
     list_display = ["full_name", "organization", "reviewer", "enabled"]
     list_filter = ["organization", "enabled"]

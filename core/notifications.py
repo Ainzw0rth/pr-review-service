@@ -77,6 +77,14 @@ def _message(job):
         if formal
         else "Approved workflow status published. Human approval/merge is still required."
     )
+    if job.auto_merge and formal:
+        from .models import Receipt
+
+        final_note = (
+            "PR merged automatically."
+            if Receipt.objects.filter(job=job, key="merge").exists()
+            else "Formal GitHub approval submitted. Check the dashboard for the opt-in merge outcome."
+        )
     at = timezone.localtime(job.finished_at).strftime("%d %b %Y, %H:%M WIB")
     return (
         f"✅ AI review approved\n{job.pr.repository.full_name} #{job.pr.number}\n"

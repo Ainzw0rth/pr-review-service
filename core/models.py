@@ -100,6 +100,12 @@ class Repository(models.Model):
     )
     reviewer = models.CharField(max_length=100)
     auto_approve = models.BooleanField(default=False)
+    auto_merge = models.BooleanField(default=False)
+    merge_method = models.CharField(
+        max_length=10,
+        default="squash",
+        choices=[("squash", "Squash merge"), ("merge", "Merge commit"), ("rebase", "Rebase merge")],
+    )
     enabled = models.BooleanField(default=True)
     github_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
     webhook_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
@@ -173,6 +179,12 @@ class Job(models.Model):
     provider_diagnostics = models.JSONField(default=dict, blank=True)
     provider_plan = models.JSONField(default=list, blank=True)
     auto_approve = models.BooleanField(default=False)
+    auto_merge = models.BooleanField(default=False)
+    merge_method = models.CharField(
+        max_length=10,
+        default="squash",
+        choices=[("squash", "Squash merge"), ("merge", "Merge commit"), ("rebase", "Rebase merge")],
+    )
     workflow_version = models.CharField(max_length=16, blank=True, default="")
     retry_of = models.OneToOneField(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="dashboard_retry"
@@ -186,9 +198,9 @@ class Job(models.Model):
 
     def save(self, *args, **kwargs):
         if self._state.adding:
-            self.auto_approve = Repository.objects.values_list("auto_approve", flat=True).get(
-                pk=self.pr.repository_id
-            )
+            self.auto_approve, self.auto_merge, self.merge_method = Repository.objects.values_list(
+                "auto_approve", "auto_merge", "merge_method"
+            ).get(pk=self.pr.repository_id)
         if self._state.adding and not self.workflow_version:
             from .review_config import snapshot, version
 
