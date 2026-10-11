@@ -148,4 +148,16 @@ def collect(
     result = execute(
         {"repository": repository, "snapshots": snapshots, "changed": changed}, cancelled
     )
-    return validate(result, repository, head_sha)
+    result = validate(result, repository, head_sha)
+    for summary in result["snapshots"]:
+        if not isinstance(summary, dict) or summary.get("mode") not in {"full", "incremental"}:
+            raise IntegrationError(FAILURE)
+        parsed = summary.get("files_parsed")
+        indexed = summary.get("indexed_files")
+        if any(type(n) is not int or not 0 <= n <= 1_000_000 for n in (parsed, indexed)):
+            raise IntegrationError(FAILURE)
+        progress("graph_" + summary["mode"], count=parsed)
+    if result["snapshots"]:
+        progress("graph_indexed", count=result["snapshots"][-1]["indexed_files"])
+    progress("graph_impacted", count=len(result["paths"]))
+    return result

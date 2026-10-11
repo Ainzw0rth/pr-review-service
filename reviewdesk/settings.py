@@ -139,3 +139,6 @@ GRAPH_REPOSITORIES = [
 GRAPH_RUNNER_IMAGE = os.environ.get("GRAPH_RUNNER_IMAGE", "")
 GRAPH_CACHE_VOLUME = os.environ.get("GRAPH_CACHE_VOLUME", "auto-reviewer-graph-cache")
 GRAPH_TIMEOUT_SECONDS = int(os.environ.get("GRAPH_TIMEOUT_SECONDS", "1200"))
+
+# Read-only graph cache mount for dashboard readiness; never the Docker socket.
+GRAPH_STATUS_DIR = os.environ.get("GRAPH_STATUS_DIR", "")

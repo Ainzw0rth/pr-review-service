@@ -1,5 +1,7 @@
 """Read-only progress projection. Never turn planned work into claimed work."""
 
+from django.conf import settings
+
 from .models import Provider
 from .providers import REFUSAL_CATEGORIES, failure_description
 from .usage import public_usage
@@ -109,15 +111,40 @@ def snapshot(job, events):
             detail="Evidence for this commit",
         ),
     ]
-    if "graph_started" in codes:
+    if "graph_started" in codes or (
+        job.status in {"queued", "running", "quota"}
+        and "context_ready" not in codes
+        and job.pr.repository.full_name in settings.GRAPH_REPOSITORIES
+    ):
+        builds = [event for event in events if event.code in {"graph_full", "graph_incremental"}]
+        graph_detail = "Build or update base/head graphs; load impacted source"
+        if builds:
+            modes = (
+                "Full build + incremental update"
+                if {e.code for e in builds} == {"graph_full", "graph_incremental"}
+                else "Full build"
+                if builds[0].code == "graph_full"
+                else "Incremental update"
+            )
+            graph_detail = (
+                f"{modes} · {sum(e.count or 0 for e in builds)} files parsed across snapshots"
+            )
+            if count("graph_indexed") is not None:
+                graph_detail += f" · {count('graph_indexed')} indexed at head"
+            if count("graph_impacted") is not None:
+                graph_detail += f" · {count('graph_impacted')} impacted paths"
+        elif "graph_ready" in codes:
+            graph_detail = "Base/head graphs updated; loading impacted source"
+        elif "graph_started" in codes:
+            graph_detail = "Fetching snapshots, updating dependency graphs and selecting impact"
         stages.insert(
             3,
             node(
                 "graph",
-                "Code graph",
+                "Dependency graph",
                 {"graph_started"},
                 context_done,
-                detail="Base/head index & impacted source",
+                detail=graph_detail,
             ),
         )
     latest_ci = next(

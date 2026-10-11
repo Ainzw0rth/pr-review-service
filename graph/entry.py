@@ -62,11 +62,7 @@ def update(cache, snapshot):
         if result.get("errors"):
             raise RuntimeError("Graph parsing incomplete")
         stats = store.get_stats()
-        state = {"version": VERSION, "sha": sha, "hashes": hashes}
-        temporary = cache / "state.tmp"
-        temporary.write_text(json.dumps(state))
-        temporary.replace(state_path)
-        return {
+        summary = {
             "sha": sha,
             "mode": "incremental" if previous else "full",
             "changed_files": len(changed),
@@ -76,6 +72,11 @@ def update(cache, snapshot):
             "edges": stats.total_edges,
             "seconds": round(time.monotonic() - started, 3),
         }
+        state = {"version": VERSION, "sha": sha, "hashes": hashes, "summary": summary}
+        temporary = cache / "state.tmp"
+        temporary.write_text(json.dumps(state))
+        temporary.replace(state_path)
+        return summary
     finally:
         store.close()
 

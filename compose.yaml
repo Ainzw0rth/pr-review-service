@@ -19,6 +19,9 @@ services:
   web:
     <<: *app
     build: .
+    environment:
+      GRAPH_STATUS_DIR: /graph-cache
+    volumes: ["data:/app/var", "graph-cache:/graph-cache:ro"]
     ports: ["127.0.0.1:8040:8040"]
     restart: unless-stopped
     depends_on:
@@ -51,3 +54,5 @@ services:
       migrate: {condition: service_completed_successfully}
 volumes:
   data:
+  graph-cache:
+    name: ${GRAPH_CACHE_VOLUME:-auto-reviewer-graph-cache}

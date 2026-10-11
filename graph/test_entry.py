@@ -3,6 +3,7 @@
 import base64
 import importlib.util
 import io
+import json
 import tarfile
 import tempfile
 import unittest
@@ -44,6 +45,10 @@ class CacheTests(unittest.TestCase):
                 )
 
             cold = run(one)
+            cache = next(Path(directory).iterdir())
+            marker = json.loads((cache / "state.json").read_text())
+            self.assertEqual(marker["summary"], cold["snapshots"][0])
+            self.assertEqual(marker["sha"], "a" * 40)
             warm = run(one)
             self.assertEqual(cold["snapshots"][0]["mode"], "full")
             self.assertEqual(warm["snapshots"][0]["files_parsed"], 0)

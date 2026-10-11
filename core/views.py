@@ -141,6 +141,7 @@ def visible_jobs(user):
 @never_cache
 @require_GET
 def dashboard(request):
+    from .graph_status import cards as graph_cards
     from .quota import cards
 
     jobs = visible_jobs(request.user)
@@ -160,8 +161,11 @@ def dashboard(request):
     page = Paginator(jobs.order_by("-created_at"), 30).get_page(request.GET.get("page"))
     return render(
         request,
-        "core/queue_results.html" if request.GET.get("partial") == "1" else "core/dashboard.html",
+        "core/dashboard_results.html"
+        if request.GET.get("partial") == "1"
+        else "core/dashboard.html",
         {
+            "graph_cards": graph_cards(request.user),
             "quota_cards": cards()
             if request.user.is_superuser or Membership.objects.filter(user=request.user).exists()
             else [],

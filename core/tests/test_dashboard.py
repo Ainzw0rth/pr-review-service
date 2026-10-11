@@ -33,8 +33,56 @@ class DashboardTests(TestCase):
         response = self.client.get("/", {"partial": "1", "status": "running"})
         self.assertContains(response, 'data-running="0"')
         self.assertContains(response, 'data-completed="1"')
-        self.assertNotContains(response, "visible/project")
+        self.assertEqual(response.context["page"].paginator.count, 0)
         self.assertIn("no-store", response.headers["Cache-Control"])
+
+    @override_settings(GRAPH_REPOSITORIES=["visible/project"], GRAPH_STATUS_DIR="")
+    def test_graph_setup_is_scoped_even_without_jobs_and_pending_node_is_visible(self):
+        from core.flow import snapshot
+
+        self.client.force_login(self.user)
+        stages = snapshot(self.visible, [])["stages"]
+        graph = next(stage for stage in stages if stage["id"] == "graph")
+        self.assertEqual(graph["state"], "pending")
+        self.visible.delete()
+        response = self.client.get("/", {"partial": "1"})
+        self.assertContains(response, "Dependency graphs.")
+        self.assertContains(response, "visible/project")
+        self.assertContains(response, "Status unavailable")
+        self.assertNotContains(response, "private/secret-project")
+        Membership.objects.filter(user=self.user).delete()
+        self.assertNotContains(self.client.get("/"), "Dependency graphs.")
+
+    def test_graph_phase_reports_build_metrics_and_interrupted_state(self):
+        from core.activity import record
+        from core.flow import snapshot
+
+        self.visible.status = "running"
+        for code, count in [
+            ("graph_started", None),
+            ("graph_full", 900),
+            ("graph_incremental", 3),
+            ("graph_indexed", 901),
+            ("graph_impacted", 17),
+            ("graph_ready", None),
+        ]:
+            record(self.visible, code, count=count)
+
+        def graph():
+            return next(
+                s
+                for s in snapshot(self.visible, list(self.visible.activity.all()))["stages"]
+                if s["id"] == "graph"
+            )
+
+        self.assertIn("Full build + incremental update", graph()["detail"])
+        self.assertIn("903 files parsed", graph()["detail"])
+        self.assertIn("901 indexed at head", graph()["detail"])
+        self.assertEqual(graph()["state"], "running")
+        self.visible.status = "attention"
+        self.assertEqual(graph()["state"], "attention")
+        record(self.visible, "context_ready")
+        self.assertEqual(graph()["state"], "done")
 
     def test_quota_panel_requires_membership_and_is_read_only(self):
         url = "/subscriptions/"

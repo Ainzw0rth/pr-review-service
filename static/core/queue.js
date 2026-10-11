@@ -22,7 +22,14 @@
       if (controller !== current) return;
       if (background && results.contains(document.activeElement)) return;
       const scrollLeft = results.querySelector('.table-scroll')?.scrollLeft || 0;
-      if (results.innerHTML !== html) results.innerHTML = html; // Same-origin, server-rendered, Django-escaped fragment only.
+      const fragment = document.createElement('template');
+      fragment.innerHTML = html; // Same-origin, server-rendered, Django-escaped fragment only.
+      const queue = fragment.content.querySelector('[data-queue-results]');
+      const graph = fragment.content.querySelector('[data-graph-results]');
+      if (!queue || !graph) throw Error('Invalid dashboard fragment');
+      if (results.innerHTML !== queue.innerHTML) results.innerHTML = queue.innerHTML;
+      const graphResults = document.querySelector('[data-graph-results]');
+      if (graphResults && graphResults.innerHTML !== graph.innerHTML) graphResults.innerHTML = graph.innerHTML;
       const table = results.querySelector('.table-scroll');
       if (table) table.scrollLeft = scrollLeft;
       const counts = results.querySelector('[data-queue-counts]');

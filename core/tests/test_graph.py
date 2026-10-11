@@ -59,3 +59,28 @@ class GraphTests(SimpleTestCase):
         request = execute.call_args.args[0]
         self.assertEqual([s["sha"] for s in request["snapshots"]], ["a" * 40, "b" * 40])
         self.assertEqual(set(request["changed"]), {"new.py", "old.py"})
+
+    @override_settings(GRAPH_REPOSITORIES=["org/repo"])
+    def test_collection_reports_real_build_metrics(self):
+        from core.graph import VERSION, collect
+
+        progress = Mock()
+        github = Mock()
+        github.archive.return_value = b"archive"
+        result = {
+            "version": VERSION,
+            "repository": "org/repo",
+            "head_sha": "b" * 40,
+            "depth": 2,
+            "paths": ["x.py"],
+            "snapshots": [
+                {"mode": "full", "files_parsed": 4, "indexed_files": 4},
+                {"mode": "incremental", "files_parsed": 0, "indexed_files": 4},
+            ],
+        }
+        with patch("core.graph.execute", return_value=result):
+            collect(github, "org/repo", "b" * 40, "a" * 40, [], progress=progress)
+        progress.assert_any_call("graph_full", count=4)
+        progress.assert_any_call("graph_incremental", count=0)
+        progress.assert_any_call("graph_indexed", count=4)
+        progress.assert_any_call("graph_impacted", count=1)

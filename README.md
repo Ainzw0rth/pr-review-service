@@ -793,6 +793,33 @@ GitHub discussions, linked issues, documentation and required CI remain authorit
 inputs. No new LLM/MCP permissions are added: graph-selected files are fetched at the
 reviewed SHA and delivered through the existing read-only evidence tool.
 
+**Dashboard readiness and workflow**
+
+The queue's **Dependency graphs** setup cards show each accessible repository even
+before it has any jobs. States distinguish not enabled, not built, building/updating,
+ready, rebuild needed, and status unavailable. Ready means a successful reusable cache,
+not necessarily the latest main commit. The card shows its exact commit (full SHA on
+hover), last update in WIB, and indexed-file/node/edge counts when available. Older
+cache markers remain usable; counts appear after the next graph update.
+
+Cards refresh with the queue every five seconds. The web container mounts only the
+configured graph cache **read-only** (`GRAPH_STATUS_DIR`); it never receives the Docker
+socket. A nonblocking shared lock prevents reading an in-progress snapshot. No separate
+readiness database is maintained. Missing or invalid graphs rebuild automatically on
+the next eligible review. Operators may use `warm_code_graph` below to prebuild without
+starting a review. Dashboard users cannot trigger arbitrary graph builds.
+
+The Workflow editor includes the fixed dependency-graph step before CI/model routing.
+Each job's evidence lane shows **Dependency graph**, then recorded full/incremental
+build modes, total files parsed across base/head snapshots, head indexed files, and
+selected impacted paths. These counts report completed parser work, not live per-file
+progress; the node completes after impacted source has been loaded. Refreshing a graph
+does not itself approve, comment on, or merge a PR.
+
+When deploying changes to `graph/entry.py`, rebuild the graph image and update
+`GRAPH_RUNNER_IMAGE` to its new pinned image digest before restarting an idle worker.
+Do not remove the existing cache volume. No database migration is required for this UI.
+
 **Cache correctness and scope**
 
 - One persistent, locked SQLite graph per repository in a dedicated Docker volume.

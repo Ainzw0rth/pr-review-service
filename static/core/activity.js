@@ -89,7 +89,7 @@
   function renderFlow(flow) {
     const fragment = document.createDocumentFragment();
     const sections = [
-      ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs'].includes(n.id)),false],
+      ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph'].includes(n.id)),false],
       ['02','Verify the change','Checks run against this exact commit.',flow.stages.filter(n => ['checks','tests'].includes(n.id)),false],
       ['03','Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models,true],
       ['04','Deliver the review','Results belong on GitHub, not in this dashboard.',flow.stages.filter(n => ['publication','sheet'].includes(n.id)),false],

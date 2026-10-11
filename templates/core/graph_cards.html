@@ -1,0 +1,19 @@
+{% if graph_cards %}<section class="graph-section" aria-labelledby="graph-title">
+<div class="section-heading"><div><p class="section-number">SETUP / REPOSITORY READINESS</p><h2 id="graph-title">Dependency graphs.</h2></div><span class="quiet">LIVE CACHE STATE</span></div>
+<div class="graph-cards">{% for graph in graph_cards %}
+<article class="graph-card graph-{{ graph.state }}">
+<header><h3>{{ graph.repository }}</h3><span class="graph-badge">{{ graph.label }}</span></header>
+<ol class="graph-track" aria-label="Graph setup steps">
+<li class="complete"><span aria-hidden="true">01</span>Repository connected</li>
+<li {% if graph.state == 'ready' %}class="complete"{% elif graph.state == 'updating' %}class="active"{% endif %}><span aria-hidden="true">02</span>Initial graph</li>
+<li {% if graph.state == 'ready' %}class="complete"{% endif %}><span aria-hidden="true">03</span>Commit-pinned updates</li>
+</ol>
+{% if graph.state == 'ready' %}
+<div class="graph-facts"><div><span class="metric-label">INDEXED COMMIT</span><code title="{{ graph.sha }}">{{ graph.sha|slice:':12' }}</code></div><div><span class="metric-label">LAST UPDATED / WIB</span><span>{{ graph.updated_at|date:'M j, H:i:s' }}</span></div>{% if graph.indexed_files != None %}<div><span class="metric-label">INDEXED FILES</span><span>{{ graph.indexed_files }}</span></div><div><span class="metric-label">NODES / EDGES</span><span>{{ graph.nodes }} / {{ graph.edges }}</span></div>{% endif %}</div>
+<p class="note">Reusable cache ready. Each review reconciles it with its pinned base and head commits; this is not a claim that the latest main is indexed.</p>
+{% elif graph.state == 'updating' %}<p class="note">The graph cache is locked for a build, update or impact query. Commit details appear after it finishes.</p>
+{% elif graph.state == 'missing' or graph.state == 'invalid' %}<p class="note">{% if graph.state == 'invalid' %}No valid reusable snapshot. {% endif %}The next eligible review builds the graph before AI analysis. An operator can prebuild it with <code>warm_code_graph</code>; no review or GitHub comments are created.</p>
+{% elif graph.state == 'disabled' %}<p class="note">Graph analysis is not enabled for this repository. Ask the owner to configure it before its first graph-assisted review.</p>
+{% else %}<p class="note">Cannot verify the graph cache. Check its read-only dashboard mount; this does not mean the graph is missing.</p>{% endif %}
+</article>{% endfor %}</div>
+</section>{% endif %}
