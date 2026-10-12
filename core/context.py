@@ -219,13 +219,37 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
         files = github.pages(f"/pulls/{job.pr.number}/files")
         if len(files) != pr.get("changed_files"):
             raise IntegrationError("The pull request file list is incomplete.")
+        rename_base = None
         for file in files:
             filename = _path(file["filename"])
             patch = file.get("patch")
+            previous = _path(file["previous_filename"]) if file["status"] == "renamed" else None
+            source = None
+            rename_only = False
             if not patch:
-                raise IntegrationError(
+                missing_diff = (
                     "A changed file has no reviewable diff; approval requires complete evidence."
                 )
+                if not previous or any(
+                    type(file.get(key)) is not int or file[key] != 0
+                    for key in ("additions", "deletions", "changes")
+                ):
+                    raise IntegrationError(missing_diff)
+                if rename_base is None:
+                    base_sha = pr["base"]["sha"]
+                    if not re.fullmatch(r"[a-fA-F0-9]{40,64}", base_sha):
+                        raise IntegrationError("Invalid source commit.")
+                    # PR diffs originate at the merge base, not today's target-branch tip.
+                    comparison = github.get(f"/compare/{base_sha}...{job.head_sha}")
+                    rename_base = comparison["merge_base_commit"]["sha"]
+                    if not re.fullmatch(r"[a-fA-F0-9]{40,64}", rename_base):
+                        raise IntegrationError("Invalid source commit.")
+                source = _source(github, filename, job.head_sha)
+                before = _source(github, previous, rename_base)
+                if before["content"] != source["content"]:
+                    raise IntegrationError(missing_diff)
+                patch = ""
+                rename_only = True
             for prefix, count_key in (("+", "additions"), ("-", "deletions")):
                 if (
                     count_key in file
@@ -240,8 +264,13 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
                 "patch": patch,
                 "valid_lines": valid_lines(patch),
             }
+            if previous:
+                entry["previous_filename"] = previous
+            if rename_only:
+                entry["rename_only"] = True
+                entry["rename_verified_base_sha"] = rename_base
             if file["status"] != "removed":
-                source = _source(github, filename, job.head_sha)
+                source = source or _source(github, filename, job.head_sha)
                 entry["content"] = source["content"]
                 result["sources"].append(source)
             result["files"].append(entry)

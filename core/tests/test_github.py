@@ -292,6 +292,72 @@ class ContextTests(TestCase):
         self.assertTrue(result["complete"], result["reason"])
         self.assertEqual(len(result["docs"]), 175)
 
+    def rename_fixture(self, **overrides):
+        github, job = self.fixture()
+        file = {
+            "filename": "app.py",
+            "previous_filename": "old/app.py",
+            "status": "renamed",
+            "additions": 0,
+            "deletions": 0,
+            "changes": 0,
+            **overrides,
+        }
+        github.pages.side_effect = lambda path, **kw: [file] if "/files" in path else []
+        original = github.get.side_effect
+        github.get.side_effect = lambda path: (
+            {"merge_base_commit": {"sha": "c" * 40}}
+            if path.startswith("/compare/")
+            else original(path)
+        )
+        return github, job
+
+    def test_unchanged_rename_without_patch_is_complete_and_has_no_inline_lines(self):
+        github, job = self.rename_fixture()
+        result = build_context(github, job)
+        self.assertTrue(result["complete"], result["reason"])
+        entry = result["files"][0]
+        self.assertEqual(entry["previous_filename"], "old/app.py")
+        self.assertTrue(entry["rename_only"])
+        self.assertEqual(entry["patch"], "")
+        self.assertEqual(entry["valid_lines"], [])
+        self.assertEqual(entry["content"], "new")
+        github.get.assert_any_call("/contents/old/app.py?ref=" + "c" * 40)
+        github.get.assert_any_call("/contents/app.py?ref=" + "a" * 40)
+
+    def test_patchless_rename_with_different_content_is_blocked(self):
+        github, job = self.rename_fixture()
+        original = github.get.side_effect
+        github.get.side_effect = lambda path: (
+            {"type": "file", "encoding": "base64", "content": base64.b64encode(b"old").decode()}
+            if path.startswith("/contents/old/")
+            else original(path)
+        )
+        result = build_context(github, job)
+        self.assertFalse(result["complete"])
+        self.assertIn("no reviewable diff", result["reason"])
+
+    def test_patchless_non_rename_or_incomplete_metadata_stays_blocked(self):
+        for metadata in (
+            {"status": "modified"},
+            {"additions": 1},
+            {"changes": None},
+            {"previous_filename": None},
+            {"previous_filename": "../app.py"},
+        ):
+            with self.subTest(metadata=metadata):
+                github, job = self.rename_fixture(**metadata)
+                self.assertFalse(build_context(github, job)["complete"])
+
+    def test_edited_rename_retains_both_paths_and_real_diff(self):
+        github, job = self.rename_fixture(
+            additions=1, deletions=1, changes=2, patch="@@ -1 +1 @@\n-old\n+new"
+        )
+        result = build_context(github, job)
+        self.assertTrue(result["complete"], result["reason"])
+        self.assertEqual(result["files"][0]["previous_filename"], "old/app.py")
+        self.assertNotIn("rename_only", result["files"][0])
+
     def test_size_limit_prevents_clearance(self):
         github, job = self.fixture()
         with patch("core.context.MAX_CONTEXT_BYTES", 20):
