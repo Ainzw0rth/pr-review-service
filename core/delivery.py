@@ -41,6 +41,8 @@ def safe_error(exc):
     if message in {
         "GitHub request unavailable or malformed.",
         "GitHub returned malformed data.",
+        "GitHub discussion context unavailable.",
+        "GitHub did not confirm discussion resolution.",
         "Required checks changed during review",
         "GitHub PR author could not be verified.",
         "GitHub auto-merge is enabled on this PR; disable it before automatic approval.",
@@ -218,7 +220,7 @@ def verify_inputs(github, job, context, result):
     if "threads" in context:
         from .context import review_thread, threads
         from .models import Receipt
-        from .publication import _reply_body, marker, thread_replies
+        from .publication import _reply_body, marker, resolution_confirmed, thread_replies
 
         assessed = thread_replies(result, context)
         original_ids = {t["id"] for t in context["threads"]}
@@ -230,10 +232,19 @@ def verify_inputs(github, job, context, result):
             resolved_by_job = Receipt.objects.filter(
                 job=job, key=f"resolve:{original['id']}"
             ).exists()
+            if (
+                latest["isResolved"]
+                and not resolved_by_job
+                and resolution_confirmed(github, job, original, reply, latest)
+            ):
+                Receipt.objects.get_or_create(
+                    job=job, key=f"resolve:{original['id']}", defaults={"remote_id": original["id"]}
+                )
+                resolved_by_job = True
             if latest["isResolved"] != resolved_by_job:
                 changed()
             root = original["comments"][0]["databaseId"]
-            expected = f"**Automated review · Auto Reviewer**\n\n{_reply_body(job, reply, latest.get('viewerCanResolve'))}\n\n{marker(job, f'reply:{root}')}"
+            expected = f"**Automated review · Auto Reviewer**\n\n{_reply_body(job, reply, latest.get('viewerCanResolve') or resolved_by_job)}\n\n{marker(job, f'reply:{root}')}"
             filtered = [
                 c
                 for c in latest["comments"]

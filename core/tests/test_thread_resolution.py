@@ -1,4 +1,5 @@
 import copy
+from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 
@@ -86,6 +87,78 @@ class ThreadResolutionTests(TestCase):
 
     def run_publish(self, gh, job, result, context):
         return publish(gh, job, result, context, {"passed": True, "summary": "Pass"})
+
+    def test_resolution_applied_but_response_lost_is_reconciled(self):
+        from core.github import IntegrationError
+
+        job, gh, result, context, thread, mutations = self.setup_thread()
+        original = gh.graphql
+
+        def graphql(query, variables):
+            response = original(query, variables)
+            if "mutation" in query:
+                thread["resolvedBy"] = {"login": "louis"}
+                raise IntegrationError("GitHub discussion context unavailable.")
+            return response
+
+        gh.graphql = graphql
+        self.run_publish(gh, job, result, context)
+        self.assertEqual(len(mutations), 1)
+        self.assertTrue(Receipt.objects.filter(job=job, key="resolve:PRRT_one").exists())
+
+    def test_retry_recovers_missing_resolution_receipt_without_permission_note_mismatch(self):
+        from core.delivery import verify_inputs
+
+        job, gh, result, context, thread, mutations = self.setup_thread()
+        self.run_publish(gh, job, result, context)
+        Receipt.objects.filter(job=job, key="resolve:PRRT_one").delete()
+        thread["resolvedBy"] = {"login": "louis"}
+        thread["viewerCanResolve"] = False  # GitHub reports false after resolution.
+        with patch("core.context.threads", return_value=[]):
+            verify_inputs(gh, job, context, result)
+            verify_inputs(gh, job, context, result)
+        self.assertTrue(Receipt.objects.filter(job=job, key="resolve:PRRT_one").exists())
+        self.assertEqual(len(mutations), 1)
+
+    def test_resolution_reconciliation_rejects_changed_discussion(self):
+        from core.context import review_thread
+        from core.publication import resolution_confirmed
+
+        job, gh, result, context, thread, mutations = self.setup_thread()
+        self.run_publish(gh, job, result, context)
+        thread["resolvedBy"] = {"login": "louis"}
+        fresh = review_thread(gh, thread["id"])
+        self.assertTrue(
+            resolution_confirmed(gh, job, context["threads"][0], result["replies"][0], fresh)
+        )
+        fresh["comments"][0]["body"] = "Changed by developer"
+        self.assertFalse(
+            resolution_confirmed(gh, job, context["threads"][0], result["replies"][0], fresh)
+        )
+        fresh = review_thread(gh, thread["id"])
+        fresh["resolvedBy"] = {"login": "someone-else"}
+        self.assertFalse(
+            resolution_confirmed(gh, job, context["threads"][0], result["replies"][0], fresh)
+        )
+
+    def test_failed_resolution_that_remains_open_has_no_success_receipt(self):
+        from core.delivery import safe_error
+        from core.github import IntegrationError
+
+        job, gh, result, context, thread, mutations = self.setup_thread()
+        original = gh.graphql
+
+        def graphql(query, variables):
+            if "mutation" in query:
+                raise IntegrationError("GitHub discussion context unavailable.")
+            return original(query, variables)
+
+        gh.graphql = graphql
+        with self.assertRaises(IntegrationError) as error:
+            self.run_publish(gh, job, result, context)
+        self.assertEqual(safe_error(error.exception), "GitHub discussion context unavailable.")
+        self.assertFalse(Receipt.objects.filter(job=job, key="resolve:PRRT_one").exists())
+        self.assertFalse(thread["isResolved"])
 
     def test_fixed_human_thread_gets_explanation_and_resolution_receipt(self):
         job, gh, result, context, thread, mutations = self.setup_thread()

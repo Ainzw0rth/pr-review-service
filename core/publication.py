@@ -9,6 +9,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.delivery import checkpoint_state, safe_error, update_cursor
+from core.github import IntegrationError
 from core.models import ExpectedLabel, Job, Receipt
 from core.workflow import canonical_cycle, current
 
@@ -259,6 +260,45 @@ def _fresh_thread(github, job, original, reply):
     return fresh
 
 
+def resolution_confirmed(github, job, original, reply, fresh):
+    """Reconcile an ambiguous mutation only against this attempt's unchanged reply."""
+    pr = fresh.get("pullRequest", {})
+    if (
+        not reply["resolve"]
+        or not fresh.get("isResolved")
+        or fresh.get("id") != original["id"]
+        or pr.get("number") != job.pr.number
+        or pr.get("headRefOid") != job.head_sha
+        or pr.get("repository", {}).get("nameWithOwner", "").casefold()
+        != job.pr.repository.full_name.casefold()
+        or (fresh.get("resolvedBy") or {}).get("login", "").casefold()
+        != github.identity().casefold()
+    ):
+        return False
+    root = original["comments"][0]["databaseId"]
+    receipt = Receipt.objects.filter(job=job, key=f"reply:{root}").first()
+    if not receipt:
+        return False
+    body = f"**Automated review · Auto Reviewer**\n\n{_reply_body(job, reply, True)}\n\n{marker(job, f'reply:{root}')}"
+    own = [
+        c
+        for c in fresh["comments"]
+        if str(c.get("databaseId")) == receipt.remote_id
+        and c.get("body") == body
+        and (c.get("author") or {}).get("login", "").casefold() == github.identity().casefold()
+    ]
+
+    def values(comments):
+        return [
+            (c.get("databaseId"), c.get("body"), c.get("updatedAt"), c.get("author"))
+            for c in comments
+        ]
+
+    return len(own) == 1 and values([c for c in fresh["comments"] if c not in own]) == values(
+        original["comments"]
+    )
+
+
 def publish_threads(github, job, replies):
     # Preflight all discussions before publication, then check each again at write time.
     for thread, reply in replies:
@@ -293,10 +333,18 @@ def publish_threads(github, job, replies):
         if fresh["isResolved"] or not fresh.get("viewerCanResolve"):
             continue
         guard(github, job)
-        data = github.graphql(RESOLVE_THREAD, {"id": thread["id"]})
-        resolved = (data.get("resolveReviewThread") or {}).get("thread") or {}
-        if resolved.get("id") != thread["id"] or resolved.get("isResolved") is not True:
-            raise ValueError("GitHub did not confirm discussion resolution")
+        try:
+            data = github.graphql(RESOLVE_THREAD, {"id": thread["id"]})
+            resolved = (data.get("resolveReviewThread") or {}).get("thread") or {}
+            if resolved.get("id") != thread["id"] or resolved.get("isResolved") is not True:
+                raise IntegrationError("GitHub did not confirm discussion resolution.")
+        except IntegrationError:
+            from .context import review_thread
+
+            fresh = review_thread(github, thread["id"])
+            if not resolution_confirmed(github, job, thread, reply, fresh):
+                raise
+            guard(github, job)
         Receipt.objects.get_or_create(
             job=job, key=f"resolve:{thread['id']}", defaults={"remote_id": thread["id"]}
         )

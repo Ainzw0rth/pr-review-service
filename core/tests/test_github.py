@@ -292,6 +292,52 @@ class ContextTests(TestCase):
         self.assertTrue(result["complete"], result["reason"])
         self.assertEqual(len(result["docs"]), 175)
 
+    def test_added_text_without_api_patch_reconstructs_complete_diff(self):
+        github, job = self.fixture()
+        github.pages.side_effect = lambda path, **kw: (
+            [
+                {
+                    "filename": "app.py",
+                    "status": "added",
+                    "additions": 0,
+                    "deletions": 0,
+                    "changes": 0,
+                }
+            ]
+            if "/files" in path
+            else []
+        )
+        result = build_context(github, job)
+        self.assertTrue(result["complete"], result["reason"])
+        self.assertEqual(result["files"][0]["patch"], "@@ -0,0 +1,1 @@\n+new\n")
+        self.assertEqual(result["files"][0]["valid_lines"], [1])
+        self.assertTrue(result["files"][0]["patch_reconstructed"])
+
+    def test_added_patchless_binary_is_not_accepted_as_text(self):
+        github, job = self.fixture()
+        github.pages.side_effect = lambda path, **kw: (
+            [
+                {
+                    "filename": "app.py",
+                    "status": "added",
+                    "additions": 0,
+                    "deletions": 0,
+                    "changes": 0,
+                }
+            ]
+            if "/files" in path
+            else []
+        )
+        original = github.get.side_effect
+        github.get.side_effect = lambda path: (
+            {"type": "file", "encoding": "base64", "content": base64.b64encode(b"a\0b").decode()}
+            if "/contents/" in path
+            else original(path)
+        )
+        result = build_context(github, job)
+        self.assertFalse(result["complete"])
+        self.assertIn("not reviewable text", result["reason"])
+
     def rename_fixture(self, **overrides):
         github, job = self.fixture()
         file = {

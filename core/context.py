@@ -54,7 +54,7 @@ def failure_reason(context):
     return "Review context is incomplete or unavailable; no model review was started."
 
 
-THREAD_FIELDS = """id isResolved viewerCanResolve isOutdated path line comments(first:100) {
+THREAD_FIELDS = """id isResolved resolvedBy { login } viewerCanResolve isOutdated path line comments(first:100) {
  nodes { id databaseId body updatedAt author { login } } pageInfo { hasNextPage endCursor }
 }"""
 THREAD_QUERY = """query($owner:String!,$name:String!,$number:Int!,$cursor:String) {
@@ -226,7 +226,23 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
             previous = _path(file["previous_filename"]) if file["status"] == "renamed" else None
             source = None
             rename_only = False
-            if not patch:
+            patch_reconstructed = False
+            if not patch and file["status"] == "added":
+                # GitHub may omit added-text patches and report zero line counts.
+                # The entire pinned new file is the diff; never trust those zero counts.
+                source = _source(github, filename, job.head_sha)
+                if "\0" in source["content"]:
+                    raise IntegrationError("A required source file is not reviewable text.")
+                lines = source["content"].split("\n") if source["content"] else []
+                if source["content"].endswith("\n"):
+                    lines.pop()
+                patch = (
+                    (f"@@ -0,0 +1,{len(lines)} @@\n" + "".join("+" + line + "\n" for line in lines))
+                    if lines
+                    else ""
+                )
+                patch_reconstructed = True
+            if not patch and not patch_reconstructed:
                 missing_diff = (
                     "A changed file has no reviewable diff; approval requires complete evidence."
                 )
@@ -252,7 +268,8 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
                 rename_only = True
             for prefix, count_key in (("+", "additions"), ("-", "deletions")):
                 if (
-                    count_key in file
+                    not patch_reconstructed
+                    and count_key in file
                     and sum(row.startswith(prefix) for row in patch.splitlines()) != file[count_key]
                 ):
                     raise IntegrationError(
@@ -264,6 +281,8 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
                 "patch": patch,
                 "valid_lines": valid_lines(patch),
             }
+            if patch_reconstructed:
+                entry["patch_reconstructed"] = True
             if previous:
                 entry["previous_filename"] = previous
             if rename_only:
