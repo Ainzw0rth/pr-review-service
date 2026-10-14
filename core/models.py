@@ -1,7 +1,7 @@
 import uuid
 
 from django.conf import settings
-from django.core.validators import RegexValidator
+from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
@@ -105,6 +105,13 @@ class Repository(models.Model):
         max_length=10,
         default="squash",
         choices=[("squash", "Squash merge"), ("merge", "Merge commit"), ("rebase", "Rebase merge")],
+    )
+    related_item_limit = models.PositiveIntegerField(
+        default=50,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+        help_text="Maximum related issues and PRs per review; blank means no item limit.",
     )
     enabled = models.BooleanField(default=True)
     github_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")

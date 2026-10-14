@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -18,9 +19,26 @@ from .retries import is_retry_owner
 def revision(repositories):
     return hashlib.sha256(
         json.dumps(
-            [(r.pk, r.auto_approve, r.auto_merge, r.merge_method) for r in repositories]
+            [
+                (r.pk, r.auto_approve, r.auto_merge, r.merge_method, r.related_item_limit)
+                for r in repositories
+            ]
         ).encode()
     ).hexdigest()[:16]
+
+
+def related_limit(data, repo):
+    if data.get(f"related_unlimited_{repo.pk}") == "on":
+        return None
+    key = f"related_item_limit_{repo.pk}"
+    if key not in data:
+        return repo.related_item_limit
+    value = data[key].strip()
+    if not re.fullmatch(r"[0-9]{1,10}", value) or not 1 <= int(value) <= 2147483647:
+        raise ValueError(
+            "Related-item limit must be a positive whole number, or select No item limit."
+        )
+    return int(value)
 
 
 @login_required
@@ -41,7 +59,7 @@ def service_settings(request):
             elif any(
                 request.POST.get(f"{field}_{repo.pk}", "") not in ("", "on")
                 for repo in repositories
-                for field in ("auto_approve", "auto_merge")
+                for field in ("auto_approve", "auto_merge", "related_unlimited")
             ):
                 error = "Invalid toggle value."
                 status = 400
@@ -60,18 +78,32 @@ def service_settings(request):
                 error = "Automatic merging requires automatic approval for the same repository."
                 status = 400
             else:
-                for repo in repositories:
-                    repo.auto_approve = request.POST.get(f"auto_approve_{repo.pk}") == "on"
-                    repo.auto_merge = request.POST.get(f"auto_merge_{repo.pk}") == "on"
-                    repo.merge_method = request.POST.get(
-                        f"merge_method_{repo.pk}", repo.merge_method
+                try:
+                    limits = {repo.pk: related_limit(request.POST, repo) for repo in repositories}
+                except ValueError as exc:
+                    error = str(exc)
+                    status = 400
+                else:
+                    for repo in repositories:
+                        repo.auto_approve = request.POST.get(f"auto_approve_{repo.pk}") == "on"
+                        repo.auto_merge = request.POST.get(f"auto_merge_{repo.pk}") == "on"
+                        repo.merge_method = request.POST.get(
+                            f"merge_method_{repo.pk}", repo.merge_method
+                        )
+                        repo.related_item_limit = limits[repo.pk]
+                        repo.save(
+                            update_fields=[
+                                "auto_approve",
+                                "auto_merge",
+                                "merge_method",
+                                "related_item_limit",
+                            ]
+                        )
+                    messages.success(
+                        request,
+                        "Settings saved. Evidence limits apply when collection starts. Approval and merge policies apply as described below.",
                     )
-                    repo.save(update_fields=["auto_approve", "auto_merge", "merge_method"])
-                messages.success(
-                    request,
-                    "Settings saved. Enabling applies to new jobs; disabling prevents approvals and merges not yet submitted.",
-                )
-                return redirect("service_settings")
+                    return redirect("service_settings")
     return render(
         request,
         "core/settings.html",

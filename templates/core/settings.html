@@ -1,7 +1,7 @@
 {% extends 'core/base.html' %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">OWNER WORKSPACE / SERVICE BEHAVIOR</p><h1>Review policy.<br><em>Your call.</em></h1><p class="lede">Control what happens after a successful review. Automatic approval and merging are separate, opt-in settings.</p></div></section>
+<section class="page-heading"><div><p class="eyebrow">OWNER WORKSPACE / SERVICE BEHAVIOR</p><h1>Review policy.<br><em>Your call.</em></h1><p class="lede">Control evidence gathering and what happens after a successful review. Automatic approval and merging are separate, opt-in settings.</p></div></section>
 {% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
 <form method="post">{% csrf_token %}<input type="hidden" name="version" value="{{ version }}">
 <section class="panel"><p class="eyebrow">01 / GITHUB APPROVALS</p><h2>Automatically approve passing PRs</h2><p class="note">When enabled, a complete review with passing required CI and no blocking findings submits a formal GitHub APPROVE review for the exact commit. Approval alone does not merge.</p>
@@ -18,5 +18,13 @@
 <select id="method-{{ repo.pk }}" name="merge_method_{{ repo.pk }}"><option value="squash" {% if repo.merge_method == 'squash' %}selected{% endif %}>Squash merge</option><option value="merge" {% if repo.merge_method == 'merge' %}selected{% endif %}>Merge commit</option><option value="rebase" {% if repo.merge_method == 'rebase' %}selected{% endif %}>Rebase merge</option></select>
 {% endfor %}
 <p class="note">Applies only to new jobs, not old approvals. No GitHub auto-merge scheduling or branch deletion. One merge attempt after publication; blocked or uncertain attempts need manual inspection. Disabling prevents requests not yet submitted, but cannot undo a merge or recall an in-flight request.</p>
+</section>
+<section class="panel"><p class="eyebrow">03 / REVIEW EVIDENCE</p><h2>Related issues and pull requests</h2>
+<p class="note">Includes direct references and links discovered in directly linked issue discussions. This limits issues and PRs—not changed files, documents or graph-selected source files. Default: 50.</p>
+{% for repo in repositories %}
+<div class="approval-setting related-setting"><div><label for="related-{{ repo.pk }}">{{ repo.full_name }}</label><p class="note" id="related-help-{{ repo.pk }}">Maximum related items. Ignored when No item limit is selected.</p><input id="related-{{ repo.pk }}" type="number" min="1" max="2147483647" step="1" name="related_item_limit_{{ repo.pk }}" value="{{ repo.related_item_limit|default_if_none:50 }}" aria-describedby="related-help-{{ repo.pk }}"></div>
+<div class="related-unlimited"><span>No item limit</span><label class="setting-switch"><input type="checkbox" role="switch" name="related_unlimited_{{ repo.pk }}" {% if repo.related_item_limit == None %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">No item limit for {{ repo.full_name }}</span></label></div></div>
+{% endfor %}
+<p class="note">Applies when evidence collection starts, including queued reviews. Running collections keep their captured limit. No item limit removes only this count cap: the context-size and API safeguards remain. It does not enable recursive scanning of every issue.</p>
 </section><div class="workflow-toolbar"><p>Owner-only settings · model order lives in Workflow.</p><button type="submit">Save settings</button></div></form>
 {% endblock %}

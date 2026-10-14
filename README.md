@@ -728,6 +728,20 @@ normal 90-day job cleanup. Disabled by default; no historical backfill or test a
 ### Owner Settings: formal GitHub auto-approval
 
 The owner-only **Settings** tab (`/settings/`) controls auto-approval per repository.
+
+The **Review evidence** section controls the related-issue/PR count per repository.
+Default is **50** (previously hard-coded at 25). Choose a positive whole number or
+**No item limit** to remove this count cap. This does not limit changed files,
+documents or graph-selected source. The collector expands references in directly
+linked issues, not recursively through every dependency. Context byte-size and API
+safeguards still apply in unlimited mode. The configured value is captured when
+collection starts, so queued jobs use the latest value and running collections keep
+their original value. Saving this setting does not retry failed reviews.
+
+Deployment of this setting requires migration `0016_related_item_limit`. Drain the
+worker and back up the database before applying it; the schema-compatible deploy
+script intentionally refuses unapplied migrations. Existing repositories receive 50.
+
 It is **off by default**, separate from the Workflow model-order editor.
 
 - Off: passing reviews retain the existing approved-label workflow; no formal approval.

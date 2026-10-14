@@ -11,7 +11,6 @@ from urllib.parse import quote
 from .github import MAX_PAGES, IntegrationError
 
 MAX_CONTEXT_BYTES = 32 * 1024 * 1024  # Memory safeguard, not a file/document count cap.
-MAX_RELATED = 25
 SAFE_FAILURES = frozenset(
     {
         "Code graph unavailable or incomplete; no model review was started.",
@@ -188,6 +187,7 @@ def _references(text, full_name):
 def build_context(github, job, progress=None, cancelled=lambda: False):
     progress = progress or (lambda *args, **kwargs: None)
     repo = job.pr.repository
+    related_limit = repo.related_item_limit
     result = {
         "complete": False,
         "reason": "",
@@ -309,7 +309,7 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
                 if task.get("issue"):
                     references.add(task["issue"])
         references.discard(job.pr.number)
-        if len(references) > MAX_RELATED:
+        if related_limit is not None and len(references) > related_limit:
             raise IntegrationError("Too many linked issues or pull requests for complete review.")
         processed = {job.pr.number}
         # Expand only issues directly linked by the PR/confirmed task map. Reading a
@@ -317,7 +317,7 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
         direct_references = frozenset(references)
         progress("related")
         while references - processed:
-            if len(processed | references) > MAX_RELATED + 1:
+            if related_limit is not None and len(processed | references) > related_limit + 1:
                 raise IntegrationError(
                     "Too many linked issues or pull requests for complete review."
                 )

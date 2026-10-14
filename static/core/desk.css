@@ -262,3 +262,6 @@ nav a[aria-current="page"] { text-decoration-thickness:2px; text-underline-offse
   .graph-track { grid-template-columns:1fr; margin:20px 0; }
   .graph-track li { border-top:0; border-left:2px solid var(--line); padding:10px 12px; }
 }
+
+.related-unlimited { display:flex; align-items:center; gap:12px; font-size:10px; flex-shrink:0; }
+@media(max-width:600px) { .related-setting { flex-direction:column; align-items:stretch; gap:16px; } .related-setting .related-unlimited { justify-content:space-between; } }

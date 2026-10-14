@@ -156,6 +156,7 @@ class ContextTests(TestCase):
     def fixture(self):
         repo = SimpleNamespace(
             full_name="acme/app",
+            related_item_limit=50,
             instructions="",
             sheet_config={},
             sheet_credential=None,
@@ -404,8 +405,31 @@ class ContextTests(TestCase):
         self.assertEqual(result["files"][0]["previous_filename"], "old/app.py")
         self.assertNotIn("rename_only", result["files"][0])
 
+    def test_related_limit_controls_direct_and_expanded_references(self):
+        for expanded in (False, True):
+            for limit, complete in ((25, False), (50, True), (None, True)):
+                with self.subTest(expanded=expanded, limit=limit):
+                    github, job = self.fixture()
+                    job.pr.repository.related_item_limit = limit
+                    links = " ".join(f"#{n}" for n in range(3, 33))
+                    github.pull.return_value["body"] = "#2" if expanded else links
+                    original = github.get.side_effect
+
+                    def get(path):
+                        if path.startswith("/issues/"):
+                            n = int(path.rsplit("/", 1)[1])
+                            return {"number": n, "title": "Task", "body": links if n == 2 else ""}
+                        return original(path)
+
+                    github.get.side_effect = get
+                    result = build_context(github, job)
+                    self.assertEqual(result["complete"], complete, result["reason"])
+                    if complete:
+                        self.assertEqual(len(result["issues"]), 31 if expanded else 30)
+
     def test_size_limit_prevents_clearance(self):
         github, job = self.fixture()
+        job.pr.repository.related_item_limit = None
         with patch("core.context.MAX_CONTEXT_BYTES", 20):
             self.assertFalse(build_context(github, job)["complete"])
 
