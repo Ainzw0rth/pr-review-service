@@ -19,7 +19,7 @@ from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .forms import InvitationForm
-from .models import AccessLink, Job, LoginAttempt, Membership
+from .models import AccessLink, Job, LoginAttempt, Membership, PRAssignee
 
 
 def issue_access_link(*, organization=None, user=None, hours=24):
@@ -145,7 +145,16 @@ def dashboard(request):
     from .quota import cards
 
     jobs = visible_jobs(request.user)
-    actors = jobs.exclude(actor="").order_by("actor").values_list("actor", flat=True).distinct()
+    # Account renames can leave old names on PR snapshots not yet refreshed.
+    latest_assignees = {}
+    for person in (
+        PRAssignee.objects.filter(pr__jobs__in=jobs)
+        .order_by("-pr__assignees_synced_at", "login")
+        .values("github_id", "login")
+        .distinct()
+    ):
+        latest_assignees.setdefault(person["github_id"], person)
+    assignees = sorted(latest_assignees.values(), key=lambda person: person["login"].casefold())
     counts = dict(jobs.values_list("status").annotate(total=Count("id")))
     status = request.GET.get("status", "")
     if status in Job.Status.values:
@@ -155,10 +164,19 @@ def dashboard(request):
     query = request.GET.get("q", "").strip()[:100]
     if query:
         jobs = jobs.filter(pr__repository__full_name__icontains=query)
-    actor = request.GET.get("actor", "").strip()[:150]
-    if actor:
-        jobs = jobs.filter(actor=actor)
-    page = Paginator(jobs.order_by("-created_at"), 30).get_page(request.GET.get("page"))
+    assignee = request.GET.get("assignee", "").strip()[:100]
+    if assignee == "unassigned":
+        jobs = jobs.filter(pr__assignees__isnull=True, pr__assignees_synced_at__isnull=False)
+    elif assignee == "unknown":
+        jobs = jobs.filter(pr__assignees_synced_at__isnull=True)
+    elif assignee:
+        if assignee.isascii() and assignee.isdigit() and 0 < int(assignee) < 2**63:
+            jobs = jobs.filter(pr__assignees__github_id=int(assignee))
+        else:
+            jobs = jobs.none()
+    page = Paginator(jobs.prefetch_related("pr__assignees").order_by("-created_at"), 30).get_page(
+        request.GET.get("page")
+    )
     return render(
         request,
         "core/dashboard_results.html"
@@ -173,8 +191,11 @@ def dashboard(request):
             "status": status,
             "query": query,
             "statuses": Job.Status.choices,
-            "actor": actor,
-            "actors": actors,
+            "assignee": assignee,
+            "assignees": assignees,
+            "unknown_assignee": bool(assignee)
+            and assignee not in {"unknown", "unassigned"}
+            and assignee not in {str(person["github_id"]) for person in assignees},
             "running": counts.get("running", 0),
             "waiting": counts.get("queued", 0) + counts.get("quota", 0),
             "attention": counts.get("attention", 0) + counts.get("failed", 0),

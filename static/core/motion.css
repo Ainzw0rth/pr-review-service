@@ -1,0 +1,16 @@
+/* Shared, restrained motion. Never animate layout on live polling updates. */
+:root { --motion-fast:160ms; --motion-normal:260ms; --ease-out:cubic-bezier(.22,1,.36,1); }
+@media (prefers-reduced-motion:no-preference) {
+  :is(a,button,input,select,textarea,summary,.button,.panel,.quota-card,.graph-card,.status,tbody tr) {
+    transition:background-color var(--motion-fast) ease,color var(--motion-fast) ease,border-color var(--motion-fast) ease,box-shadow var(--motion-normal) var(--ease-out);
+  }
+  :is(button,.button,.attempt) { transition:background-color var(--motion-fast) ease,color var(--motion-fast) ease,box-shadow var(--motion-normal) var(--ease-out),translate var(--motion-fast) var(--ease-out); }
+  :is(button,.button,.attempt):active:not(:disabled) { translate:0 1px; }
+  .masthead .brand-mark { transition:transform var(--motion-normal) var(--ease-out); }
+  .masthead .brand:hover .brand-mark { transform:translate(1px,-1px); }
+  .motion-enter { animation:desk-enter 420ms var(--ease-out) both; animation-delay:var(--entry-delay,0ms); }
+  @keyframes desk-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+}
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+}

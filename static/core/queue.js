@@ -27,7 +27,17 @@
       const queue = fragment.content.querySelector('[data-queue-results]');
       const graph = fragment.content.querySelector('[data-graph-results]');
       if (!queue || !graph) throw Error('Invalid dashboard fragment');
-      if (results.innerHTML !== queue.innerHTML) results.innerHTML = queue.innerHTML;
+      if (results.innerHTML !== queue.innerHTML) {
+        results.innerHTML = queue.innerHTML;
+        if (!background && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          results.animate([{opacity:.4, transform:'translateY(4px)'}, {opacity:1, transform:'translateY(0)'}], {duration:220, easing:'ease-out'});
+        }
+      }
+      const choices = fragment.content.querySelector('[data-assignee-options]');
+      const assignee = form.querySelector('[name=assignee]');
+      if (choices && assignee && document.activeElement !== assignee && assignee.innerHTML !== choices.innerHTML) {
+        assignee.innerHTML = choices.innerHTML;
+      }
       const graphResults = document.querySelector('[data-graph-results]');
       if (graphResults && graphResults.innerHTML !== graph.innerHTML) graphResults.innerHTML = graph.innerHTML;
       const table = results.querySelector('.table-scroll');

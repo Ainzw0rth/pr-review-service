@@ -63,6 +63,20 @@ class WorkflowTests(TestCase):
         }
         return workflow.reconcile(event, snapshot, canonical=canonical)
 
+    def test_assignment_events_sync_metadata_without_creating_review(self):
+        snapshot = self.snapshot()
+        snapshot["assignees"] = [{"id": 42, "login": "alice"}]
+        self.reconcile(self.event("labeled"), snapshot)
+        job = Job.objects.get()
+        self.assertEqual(job.pr.assignees.get().login, "alice")
+        snapshot["assignees"] = []
+        self.reconcile(self.event("unassigned"), snapshot)
+        self.assertFalse(job.pr.assignees.exists())
+        job.refresh_from_db()
+        self.assertEqual(job.status, "queued")
+        self.assertEqual(job.actor, "dev")
+        self.assertEqual(Job.objects.count(), 1)
+
     def test_trigger_requires_both_conditions(self):
         self.reconcile(self.event("labeled"), self.snapshot(requested=False))
         self.assertFalse(Job.objects.exists())

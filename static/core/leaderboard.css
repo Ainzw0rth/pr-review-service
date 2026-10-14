@@ -1,0 +1,84 @@
+.leader-period { display:grid; justify-items:end; gap:14px; }
+.period-switch { gap:4px; padding:4px; background:var(--stone); border:1px solid var(--line); border-radius:10px; }
+.period-switch a { min-height:36px; display:grid; place-items:center; padding:6px 18px; border-radius:6px; text-decoration:none; }
+.period-switch a[aria-current] { background:var(--panel); color:var(--ink); box-shadow:0 1px 3px #22222012; }
+.leader-overview { display:grid; grid-template-columns:minmax(230px,1fr) minmax(0,2.2fr); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; margin:12px 0 48px; }
+.leader-total { background:var(--ink); color:var(--paper); padding:32px; display:flex; flex-direction:column; align-items:flex-start; }
+.leader-total .section-number { color:#c7c3b8; margin:0; }
+.leader-total strong { font-size:clamp(64px,8vw,104px); font-weight:400; line-height:1.1; letter-spacing:-6px; margin:32px 0 20px; font-variant-numeric:tabular-nums; }
+.leader-total > span { font-size:11px; }
+.leader-total > p:last-child { font-size:9px; color:#c7c3b8; margin:24px 0 0; line-height:2; }
+.leader-chart { padding:28px 32px; min-width:0; background:var(--panel); }
+.leader-chart .section-heading { align-items:flex-start; }
+.leader-chart .section-number { margin:0; }
+.leader-chart h2 { font-size:16px; margin:12px 0 24px; }
+.chart-peak { font-size:24px; text-align:right; line-height:1.4; }
+.chart-peak small { display:block; font-size:8px; color:var(--muted); letter-spacing:1px; white-space:nowrap; }
+.daily-chart { height:136px; display:flex; align-items:stretch; gap:clamp(1px,.3vw,4px); border-bottom:1px solid var(--line); background:repeating-linear-gradient(to top,transparent 0,transparent calc(33.333% - 1px),var(--line) calc(33.333% - 1px),var(--line) 33.333%); }
+.daily-column { flex:1; display:flex; align-items:flex-end; position:relative; min-width:0; }
+.daily-bar { display:block; width:100%; height:var(--bar-height); min-height:3px; background:#797660; border-radius:2px 2px 0 0; transform-origin:bottom; }
+.daily-zero { background:var(--line); }
+.daily-column:hover .daily-bar { background:var(--ink); }
+.chart-axis { display:flex; justify-content:space-between; gap:12px; font-size:8px; color:var(--muted); padding-top:10px; }
+.chart-data { margin-top:16px; font-size:9px; color:var(--muted); }
+.chart-data summary { cursor:pointer; width:fit-content; min-height:30px; }
+.chart-data-scroll { max-height:240px; overflow:auto; margin-top:8px; }
+.chart-data td,.chart-data th { padding:9px 12px; }
+.leader-ranking > .section-heading { margin-bottom:24px; }
+.leader-ranking .count { white-space:nowrap; }
+.leader-ranking h2 { font-size:25px; margin-bottom:0; }
+.ranking-header,.rank-row { display:grid; grid-template-columns:52px minmax(170px,1fr) minmax(140px,1.4fr); align-items:center; gap:24px; padding:0 24px; }
+.ranking-header { color:var(--muted); font-size:8px; letter-spacing:1.2px; padding-bottom:14px; }
+.ranking-header > :last-child { text-align:right; }
+.ranking-list { list-style:none; margin:0; padding:0; border-top:1px solid var(--line); }
+.rank-row { min-height:96px; border-bottom:1px solid var(--line); }
+.rank-first { background:var(--stone); border-radius:var(--radius) var(--radius) 0 0; }
+.rank-row:hover { background:#eae6dc; }
+.rank-number { font-size:18px; color:var(--muted); letter-spacing:-1px; }
+.rank-first .rank-number { color:var(--ink); }
+.rank-person { display:flex; align-items:center; gap:16px; min-width:0; text-decoration:none; font-size:12px; }
+.rank-person > span:last-child { overflow-wrap:anywhere; }
+.rank-person small { display:block; font-size:8px; color:var(--muted); margin-top:5px; }
+.rank-measure { display:flex; gap:24px; align-items:center; }
+.rank-measure strong { width:3ch; text-align:right; font-weight:400; font-size:25px; font-variant-numeric:tabular-nums; }
+.rank-track { height:8px; flex:1; background:#ddd8cd; border-radius:3px; overflow:hidden; }
+.rank-track span { display:block; width:var(--bar-width); height:100%; background:#85816a; border-radius:3px; transform-origin:left; }
+.rank-first .rank-track span { background:var(--ink); }
+.leader-footnote { display:grid; grid-template-columns:1fr 1fr; gap:36px; padding-top:20px; color:var(--muted); font-size:9px; line-height:2; }
+.leader-footnote strong { color:var(--ink); font-weight:500; }
+.leader-empty { padding:56px 24px; text-align:center; border:1px dashed var(--line); border-radius:var(--radius); }
+.leader-empty > span { font-size:36px; color:var(--muted); }
+.leader-empty p { color:var(--muted); }
+@media (prefers-reduced-motion:no-preference) {
+  .rank-row { animation:desk-enter 480ms var(--ease-out) both; animation-delay:var(--reveal-delay); transition:background-color var(--motion-fast) ease; }
+  .rank-track span { animation:bar-reveal 850ms var(--ease-out) both; animation-delay:calc(100ms + var(--reveal-delay)); }
+  .daily-bar { animation:bar-rise 750ms var(--ease-out) both; animation-delay:120ms; transition:background-color var(--motion-fast) ease; }
+  @keyframes bar-reveal { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+  @keyframes bar-rise { from { transform:scaleY(0); } to { transform:scaleY(1); } }
+}
+@media (max-width:800px) {
+  .leader-overview { grid-template-columns:1fr; }
+  .leader-total { display:grid; grid-template-columns:1fr auto; gap:12px 24px; }
+  .leader-total strong { grid-column:2; grid-row:1 / span 3; margin:0; align-self:center; font-size:68px; }
+  .leader-total > p:last-child { margin:0; }
+  .ranking-header,.rank-row { grid-template-columns:30px minmax(130px,1fr) minmax(90px,1fr); gap:16px; padding-left:16px; padding-right:16px; }
+  .rank-person { gap:10px; font-size:10px; }
+  .rank-measure { gap:12px; }
+}
+@media (max-width:540px) {
+  .leader-period { justify-items:start; }
+  .leader-ranking h2 { font-size:21px; }
+  .leader-ranking .count { font-size:8px; }
+  .leader-chart,.leader-total { padding:24px 20px; }
+  .leader-chart h2 { font-size:13px; letter-spacing:-.5px; }
+  .chart-axis > :nth-child(2) { display:none; }
+  .ranking-header,.rank-row { grid-template-columns:24px minmax(0,1fr) 60px; gap:12px; padding-left:10px; padding-right:10px; }
+  .ranking-header > :last-child { font-size:7px; }
+  .rank-person .avatar-large { width:36px; height:36px; flex-basis:36px; }
+  .rank-person { gap:8px; }
+  .rank-measure { flex-direction:column-reverse; gap:6px; align-items:stretch; padding:16px 0; }
+  .rank-track { flex:none; height:4px; }
+  .rank-measure strong { width:auto; font-size:22px; }
+  .leader-footnote { grid-template-columns:1fr; gap:0; }
+  .rank-number { font-size:14px; }
+}

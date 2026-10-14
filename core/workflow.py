@@ -190,6 +190,9 @@ def reconcile(event, snapshot, *, canonical):
                 head_sha=pr.head_sha,
                 actor=canonical.get("actor") or actor,
             )
+    from .assignees import sync_assignees
+
+    sync_assignees(pr, snapshot)
     pr.save()
     event.processed_at = timezone.now()
     event.payload = {}  # Do not retain PR text as dashboard/history data.

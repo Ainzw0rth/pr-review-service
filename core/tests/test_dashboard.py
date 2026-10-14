@@ -24,7 +24,7 @@ class DashboardTests(TestCase):
         self.visible.save()
         self.hidden.status = "running"
         self.hidden.save()
-        response = self.client.get("/", {"partial": "1", "actor": "developer"})
+        response = self.client.get("/", {"partial": "1", "assignee": "unknown"})
         self.assertContains(response, 'data-running="1"')
         self.assertContains(response, 'data-completed="0"')
         self.assertNotContains(response, "private/secret-project")
@@ -278,14 +278,16 @@ class DashboardTests(TestCase):
         self.assertEqual(flow["models"][0]["attempts"][0]["state"], "refused")
         self.assertNotContains(response, "req_private")
 
-    def test_requester_filter_is_scoped_and_combines_with_status(self):
-        self.visible.actor = "alice"
-        self.visible.save()
+    def test_assignee_filter_is_scoped_and_combines_with_status(self):
+        from core.assignees import sync_assignees
+
+        sync_assignees(self.visible.pr, {"assignees": [{"id": 42, "login": "alice"}]})
+        sync_assignees(self.hidden.pr, {"assignees": [{"id": 43, "login": "private-person"}]})
         self.client.force_login(self.user)
-        response = self.client.get("/", {"actor": "alice", "status": self.visible.status})
+        response = self.client.get("/", {"assignee": "42", "status": self.visible.status})
         self.assertEqual(list(response.context["page"]), [self.visible])
-        self.assertEqual(list(self.client.get("/", {"actor": "nobody"}).context["page"]), [])
-        self.assertEqual(list(response.context["actors"]), ["alice"])
+        self.assertEqual(list(self.client.get("/", {"assignee": "43"}).context["page"]), [])
+        self.assertEqual(list(response.context["assignees"]), [{"github_id": 42, "login": "alice"}])
 
     def test_cli_progress_exposes_only_bounded_operational_counts(self):
         from core.models import ModelAttempt, Provider

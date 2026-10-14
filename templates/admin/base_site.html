@@ -1,5 +1,5 @@
 {% extends 'admin/base.html' %}{% load static %}
 {% block dark-mode-vars %}{% endblock %}
-{% block responsive %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/admin.css' %}"><link rel="icon" href="{% static 'core/icon.svg' %}" type="image/svg+xml">{% endblock %}
+{% block responsive %}{{ block.super }}<link rel="stylesheet" href="{% static 'core/admin.css' %}"><link rel="icon" href="{% static 'core/icon.svg' %}" type="image/svg+xml"><link rel="stylesheet" href="{% static 'core/motion.css' %}"><script src="{% static 'core/motion.js' %}" defer></script>{% endblock %}
 {% block branding %}<a class="admin-brand" href="{% url 'dashboard' %}"><span aria-hidden="true">↗</span><div>AUTO REVIEWER<small>PLATFORM ADMINISTRATION</small></div></a>{% endblock %}
 {% block userlinks %}<a href="{% url 'dashboard' %}">Review queue</a> / <a href="{% url 'admin:password_change' %}">Password</a> / <form id="logout-form" method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form>{% endblock %}

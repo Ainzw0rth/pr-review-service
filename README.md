@@ -905,3 +905,38 @@ docker run --rm --network none --read-only --cap-drop ALL \
 ```
 
 Upstream: [code-review-graph](https://github.com/tirth8205/code-review-graph/tree/v2.3.9).
+
+### Assignees and leaderboard
+
+The queue's **Assignee** column/filter uses GitHub PR assignees, not the PR author or
+person requesting a review. Job details retain **Triggered by** for the audit trail.
+Assignment changes are synced from fresh GitHub snapshots when PR webhooks arrive.
+Multiple assignees are supported; unknown historical assignments display **Not synced
+yet**, never a guessed owner.
+
+The member-visible **Leaderboard** tab is organization-scoped, with 30/90-day windows
+and Jakarta dates. A PR counts once per window after a completed review with a finished
+GitHub delivery checkpoint. Failed, partial and superseded attempts do not count.
+Passing reviews and requests for changes both count. Every current assignee receives
+credit for a shared PR, so individual totals can exceed the unique team total. The daily
+chart places each PR on its first completed review date **within the selected window**.
+Counts reflect current synced assignments, not an immutable historical attribution or a
+quality score. Unassigned and not-yet-synced PRs remain in the total, outside the ranking.
+History remains subject to the existing 90-day retention policy.
+
+Deployment requires `0017_pr_assignees`: drain the worker, back up the database, stop
+old writers, then migrate before starting the new services. Backfill retained PRs once:
+
+```sh
+docker compose exec -T web python manage.py sync_pr_assignees
+```
+
+This command reads GitHub and writes only local assignment metadata; it never requests
+a review, publishes comments, changes labels or merges. It resumes unsynced PRs after an
+error. `--repository owner/repo` restricts scope; `--refresh` also refreshes known
+assignments. If a webhook syncs assignments during a backfill fetch, the command keeps
+the newer local snapshot instead of overwriting it.
+
+Shared UI motion uses native CSS and small browser animations, with no new dependency.
+Reduced-motion preferences disable transitions/animations. Live polling does not replay
+page entrances; GitHub avatar failures fall back to initials.

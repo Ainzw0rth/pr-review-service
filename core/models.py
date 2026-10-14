@@ -155,6 +155,7 @@ class PullRequest(models.Model):
     labels = models.JSONField(default=list)
     generation = models.PositiveIntegerField(default=0)
     canonical_trigger = models.CharField(max_length=100, blank=True)
+    assignees_synced_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -163,6 +164,22 @@ class PullRequest(models.Model):
     @property
     def url(self):
         return f"https://github.com/{self.repository.full_name}/pull/{self.number}"
+
+
+class PRAssignee(models.Model):
+    pr = models.ForeignKey(PullRequest, on_delete=models.CASCADE, related_name="assignees")
+    github_id = models.PositiveBigIntegerField()
+    login = models.CharField(max_length=100)
+
+    class Meta:
+        ordering = ["login"]
+        constraints = [
+            models.UniqueConstraint(fields=["pr", "github_id"], name="unique_pr_assignee")
+        ]
+
+    @property
+    def avatar_url(self):
+        return f"https://avatars.githubusercontent.com/u/{self.github_id}?s=96"
 
 
 class Job(models.Model):
