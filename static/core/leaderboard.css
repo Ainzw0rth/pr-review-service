@@ -82,3 +82,5 @@
   .leader-footnote { grid-template-columns:1fr; gap:0; }
   .rank-number { font-size:14px; }
 }
+
+.ranking-switch { width:fit-content; max-width:100%; margin-bottom:24px; }

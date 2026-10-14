@@ -8,6 +8,7 @@
   <div><label for="q">Repository</label><input type="search" name="q" id="q" placeholder="Find a repository…" value="{{ query }}" autocomplete="off"></div>
   <div><label for="status">Status</label><select name="status" id="status"><option value="">All statuses</option>{% for value,label in statuses %}<option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
   <div><label for="assignee">Assignee</label><select name="assignee" id="assignee">{% include 'core/assignee_options.html' %}</select></div>
+  <div><label for="actor">Requested by</label><select name="actor" id="actor">{% include 'core/requester_options.html' %}</select></div>
   <a class="filter-clear" href="{% url 'dashboard' %}" data-clear-filters>Reset ↺</a>
   <noscript><button type="submit">Apply selection</button></noscript>
 </form>

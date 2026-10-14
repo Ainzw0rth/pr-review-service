@@ -940,3 +940,12 @@ the newer local snapshot instead of overwriting it.
 Shared UI motion uses native CSS and small browser animations, with no new dependency.
 Reduced-motion preferences disable transitions/animations. Live polling does not replay
 page entrances; GitHub avatar failures fall back to initials.
+
+The queue also retains **Requested by**, with an independent, automatically applied
+filter; it can be combined with Assignee, repository and status. The leaderboard's
+**Assignees / Requestors** switch preserves the selected 30/90-day window. Requestors
+come from the recorded review trigger (`Job.actor`), not the PR author. Each requestor
+gets one count per reviewed PR per window, even after repeated reviews; multiple
+requestors on the same PR each get credit. Unassigned PRs therefore still appear in
+requestor rankings. Missing requestors are not inferred. Both views use the same
+completed-publication requirement and organization access boundaries.

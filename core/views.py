@@ -145,6 +145,10 @@ def dashboard(request):
     from .quota import cards
 
     jobs = visible_jobs(request.user)
+    actors = list(
+        jobs.exclude(actor="").order_by("actor").values_list("actor", flat=True).distinct()
+    )
+    actor = request.GET.get("actor", "").strip()[:100]
     # Account renames can leave old names on PR snapshots not yet refreshed.
     latest_assignees = {}
     for person in (
@@ -174,6 +178,8 @@ def dashboard(request):
             jobs = jobs.filter(pr__assignees__github_id=int(assignee))
         else:
             jobs = jobs.none()
+    if actor:
+        jobs = jobs.filter(actor__iexact=actor)
     page = Paginator(jobs.prefetch_related("pr__assignees").order_by("-created_at"), 30).get_page(
         request.GET.get("page")
     )
@@ -191,6 +197,8 @@ def dashboard(request):
             "status": status,
             "query": query,
             "statuses": Job.Status.choices,
+            "actor": actor,
+            "actors": actors,
             "assignee": assignee,
             "assignees": assignees,
             "unknown_assignee": bool(assignee)

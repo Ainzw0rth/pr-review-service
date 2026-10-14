@@ -1,0 +1,1 @@
+<option value="">Everyone</option>{% for name in actors %}<option value="{{ name }}" {% if name == actor %}selected{% endif %}>{{ name }}</option>{% endfor %}{% if actor and actor not in actors %}<option value="{{ actor }}" selected>{{ actor }}</option>{% endif %}

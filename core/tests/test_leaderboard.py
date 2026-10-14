@@ -208,3 +208,53 @@ class LeaderboardTests(TestCase):
         self.assertEqual(str(response.context["days"][-1]["date"]), "2026-10-15")
         self.assertEqual(response.context["days"][-1]["count"], 1)
         self.assertEqual(response.context["days"][-2]["count"], 0)
+
+    def test_requester_ranking_includes_unassigned_and_deduplicates_per_person(self):
+        self.completed()
+        self.completed(generation=2)
+        other = self.completed(generation=3)
+        other.actor = "other-person"
+        other.save()
+        case = self.completed(generation=4)
+        case.actor = "TRIGGER-PERSON"
+        case.save()
+        response = self.client.get("/leaderboard/", {"group": "requester", "period": "30"})
+        self.assertEqual(response.context["total"], 1)
+        self.assertEqual(len(response.context["leaders"]), 2)
+        self.assertEqual([r["count"] for r in response.context["leaders"]], [1, 1])
+        self.assertContains(response, "Requestors")
+        self.assertContains(response, "group=requester")
+        self.assertContains(response, "?actor=")
+        self.assertEqual(self.client.get("/leaderboard/").context["leaders"], [])
+
+    def test_requester_filter_combines_with_assignee_and_remains_scoped(self):
+        self.assign()
+        self.completed()
+        response = self.client.get("/", {"actor": "trigger-person", "assignee": "42"})
+        self.assertEqual(response.context["page"].paginator.count, 1)
+        self.assertContains(response, "Requested by")
+        self.assertEqual(
+            self.client.get("/", {"actor": "other-person", "assignee": "42"})
+            .context["page"]
+            .paginator.count,
+            0,
+        )
+        Membership.objects.all().delete()
+        response = self.client.get("/", {"actor": "trigger-person"})
+        self.assertEqual(response.context["actors"], [])
+        self.assertEqual(response.context["page"].paginator.count, 0)
+        self.assertEqual(
+            self.client.get("/leaderboard/", {"group": "requester"}).context["leaders"], []
+        )
+
+    def test_missing_requester_not_guessed_and_invalid_group_defaults_to_assignee(self):
+        job = self.completed()
+        job.actor = ""
+        job.save()
+        response = self.client.get("/leaderboard/", {"group": "requester"})
+        self.assertEqual(response.context["total"], 1)
+        self.assertEqual(response.context["unknown"], 1)
+        self.assertEqual(response.context["leaders"], [])
+        self.assertEqual(
+            self.client.get("/leaderboard/", {"group": "invalid"}).context["group"], "assignee"
+        )

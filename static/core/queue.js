@@ -33,10 +33,12 @@
           results.animate([{opacity:.4, transform:'translateY(4px)'}, {opacity:1, transform:'translateY(0)'}], {duration:220, easing:'ease-out'});
         }
       }
-      const choices = fragment.content.querySelector('[data-assignee-options]');
-      const assignee = form.querySelector('[name=assignee]');
-      if (choices && assignee && document.activeElement !== assignee && assignee.innerHTML !== choices.innerHTML) {
-        assignee.innerHTML = choices.innerHTML;
+      for (const [name, attribute] of [['assignee', 'assignee'], ['actor', 'requester']]) {
+        const choices = fragment.content.querySelector(`[data-${attribute}-options]`);
+        const field = form.querySelector(`[name=${name}]`);
+        if (choices && field && document.activeElement !== field && field.innerHTML !== choices.innerHTML) {
+          field.innerHTML = choices.innerHTML;
+        }
       }
       const graphResults = document.querySelector('[data-graph-results]');
       if (graphResults && graphResults.innerHTML !== graph.innerHTML) graphResults.innerHTML = graph.innerHTML;

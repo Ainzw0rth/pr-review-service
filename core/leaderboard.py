@@ -1,7 +1,9 @@
 """Tenant-scoped activity metrics, not a score for code quality."""
 
+import re
 from collections import Counter
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Min
@@ -19,19 +21,19 @@ from .views import visible_jobs
 @require_GET
 def leaderboard(request):
     period = 30 if request.GET.get("period") == "30" else 90
+    group = "requester" if request.GET.get("group") == "requester" else "assignee"
     today = timezone.localdate()
     start = today - timedelta(days=period - 1)
     # A complete delivery receipt prevents CI-only stops and partial publications
     # from counting. Multiple reviews of one PR count once within this window.
+    completed = visible_jobs(request.user).filter(
+        status="completed",
+        review_checkpoint__stage="done",
+        finished_at__date__gte=start,
+        finished_at__date__lte=today,
+    )
     reviewed = dict(
-        visible_jobs(request.user)
-        .filter(
-            status="completed",
-            review_checkpoint__stage="done",
-            finished_at__date__gte=start,
-            finished_at__date__lte=today,
-        )
-        .order_by()
+        completed.order_by()
         .values("pr_id")
         .annotate(first_review=Min("finished_at"))
         .values_list("pr_id", "first_review")
@@ -62,6 +64,33 @@ def leaderboard(request):
             ):
                 row.update(login=user.login, synced_at=pr.assignees_synced_at)
             row["count"] += 1
+    if group == "requester":
+        people = {}
+        attributed = set()
+        for pr_id, actor in (
+            completed.exclude(actor="").order_by("actor").values_list("pr_id", "actor").distinct()
+        ):
+            key = actor.casefold()
+            row = people.setdefault(
+                key,
+                {
+                    "login": actor,
+                    "count": 0,
+                    "prs": set(),
+                    "avatar": f"https://github.com/{actor}.png?size=96"
+                    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*(?:\[bot\])?", actor)
+                    else "",
+                    "queue_query": urlencode({"actor": actor}),
+                },
+            )
+            row["prs"].add(pr_id)
+            row["count"] = len(row["prs"])
+            attributed.add(pr_id)
+        unknown = len(reviewed.keys() - attributed)
+        unassigned = 0
+    else:
+        for row in people.values():
+            row["queue_query"] = urlencode({"assignee": row["id"]})
     leaders = sorted(people.values(), key=lambda row: (-row["count"], row["login"].casefold()))
     maximum = leaders[0]["count"] if leaders else 1
     rank = 0
@@ -83,6 +112,7 @@ def leaderboard(request):
         request,
         "core/leaderboard.html",
         {
+            "group": group,
             "leaders": leaders,
             "total": len(reviewed),
             "period": period,
