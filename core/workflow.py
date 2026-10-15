@@ -72,7 +72,11 @@ def canonical_cycle(repo, timeline, snapshot):
         trigger = action == "review_requested" or (
             action == "labeled" and item["label"]["name"] == repo.review_label
         )
-        if not was_eligible and now_eligible:
+        # Submitting a review can consume the request without a corresponding
+        # review_request_removed timeline event. A later explicit re-request is
+        # therefore fresh intent even if replay still thinks requested=True.
+        # Its issue-event ID deduplicates webhook deliveries as usual.
+        if now_eligible and (not was_eligible or action == "review_requested"):
             human_entry = human and trigger
             if human_entry:
                 key = str(item["id"])

@@ -217,10 +217,14 @@ Events: Pull requests
 Ingress verifies raw-body HMAC, repository identity and delivery ID. It stores only control
 metadata; raw PR descriptions are not retained in the event inbox. Processing uses GitHub's
 canonical issue timeline, not arrival order, to identify a review cycle.
+The reviewer request and `on review` label can be applied in either order. Once both
+conditions are met, a human trigger queues one review. Explicit re-requests also work
+after GitHub implicitly consumes an earlier request when a review is submitted.
+Duplicate deliveries do not create extra jobs; pushes alone still do not trigger reviews.
 
 Review content is posted through Louis's account and visibly marked automated. Formal `APPROVE`
 is never submitted. Formal request-changes is permitted; GitHub can remove the outstanding
-review request, so developers may need to request Louis again before retoggling.
+review request, so developers may need to request Louis again when requesting another review (before or after retoggling).
 
 ### Models and authentication
 

@@ -235,3 +235,98 @@ class WorkflowTests(TestCase):
         ]
         state = workflow.canonical_cycle(self.repo, timeline, self.snapshot())
         self.assertFalse(state["eligible"])
+
+    def test_label_first_after_formal_review_then_rerequest_starts_once(self):
+        # GitHub consumes a review request on submission without emitting a
+        # review_request_removed issue event. Replay still sees requested=True.
+        timeline = [self.timeline(1, "labeled"), self.timeline(2, "review_requested")]
+        self.reconcile(
+            self.event("review_requested"),
+            self.snapshot(),
+            workflow.canonical_cycle(self.repo, timeline, self.snapshot()),
+        )
+        Job.objects.update(status="completed")
+        timeline += [self.timeline(3, "labeled", "feedback"), self.timeline(4, "unlabeled")]
+        feedback = self.snapshot(labels=["feedback"], requested=False)
+        self.reconcile(
+            self.event("unlabeled", feedback),
+            feedback,
+            workflow.canonical_cycle(self.repo, timeline, feedback),
+        )
+        timeline += [self.timeline(5, "unlabeled", "feedback"), self.timeline(6, "labeled")]
+        labeled = self.snapshot(sha="b" * 40, requested=False)
+        self.reconcile(
+            self.event("labeled", labeled),
+            labeled,
+            workflow.canonical_cycle(self.repo, timeline, labeled),
+        )
+        self.assertEqual(Job.objects.count(), 1)
+        timeline.append(self.timeline(7, "review_requested"))
+        ready = self.snapshot(sha="b" * 40)
+        canonical = workflow.canonical_cycle(self.repo, timeline, ready)
+        self.assertEqual(canonical["key"], "7")
+        self.reconcile(self.event("review_requested", ready), ready, canonical)
+        self.reconcile(self.event("review_requested", ready), ready, canonical)
+        self.assertEqual(Job.objects.count(), 2)
+        newest = Job.objects.latest("generation")
+        self.assertEqual((newest.status, newest.head_sha), ("queued", "b" * 40))
+
+    def test_initial_orders_work_when_deliveries_processed_separately(self):
+        for index, order in enumerate(
+            (["labeled", "review_requested"], ["review_requested", "labeled"])
+        ):
+            with self.subTest(order=order):
+                Job.objects.all().delete()
+                from core.models import PullRequest
+
+                PullRequest.objects.all().delete()
+                first = self.snapshot(
+                    requested=order[0] == "review_requested",
+                    labels=[] if order[0] == "review_requested" else ["on review"],
+                )
+                timeline = [self.timeline(10 * index + 1, order[0])]
+                self.reconcile(
+                    self.event(order[0], first),
+                    first,
+                    workflow.canonical_cycle(self.repo, timeline, first),
+                )
+                self.assertFalse(Job.objects.exists())
+                timeline.append(self.timeline(10 * index + 2, order[1]))
+                ready = self.snapshot()
+                canonical = workflow.canonical_cycle(self.repo, timeline, ready)
+                self.reconcile(self.event(order[1], ready), ready, canonical)
+                self.reconcile(self.event(order[0], first), ready, canonical)
+                self.assertEqual(Job.objects.count(), 1)
+                self.assertEqual(Job.objects.get().status, "queued")
+
+    def test_explicit_rerequest_without_removal_event_is_new_human_cycle(self):
+        timeline = [
+            self.timeline(1, "review_requested"),
+            self.timeline(2, "labeled"),
+            self.timeline(3, "review_requested"),
+        ]
+        canonical = workflow.canonical_cycle(self.repo, timeline, self.snapshot())
+        self.assertEqual(canonical["key"], "3")
+        self.assertTrue(canonical["eligible"])
+        timeline[-1]["actor"]["type"] = "Bot"
+        self.assertFalse(workflow.canonical_cycle(self.repo, timeline, self.snapshot())["eligible"])
+
+    def test_rerequest_before_label_after_review_starts_on_label(self):
+        timeline = [
+            self.timeline(1, "review_requested"),
+            self.timeline(2, "labeled"),
+            self.timeline(3, "labeled", "feedback"),
+            self.timeline(4, "unlabeled"),
+            self.timeline(5, "review_requested"),
+        ]
+        feedback = self.snapshot(labels=["feedback"])
+        self.reconcile(
+            self.event("review_requested", feedback),
+            feedback,
+            workflow.canonical_cycle(self.repo, timeline, feedback),
+        )
+        self.assertFalse(Job.objects.exists())
+        timeline += [self.timeline(6, "unlabeled", "feedback"), self.timeline(7, "labeled")]
+        canonical = workflow.canonical_cycle(self.repo, timeline, self.snapshot())
+        self.reconcile(self.event("labeled"), self.snapshot(), canonical)
+        self.assertEqual(Job.objects.count(), 1)
