@@ -9,4 +9,4 @@ COPY . .
 RUN mkdir -p /app/var /app/staticfiles && chown -R app:app /app/var /app/staticfiles && DJANGO_SECRET_KEY=build-only-static-key python manage.py collectstatic --noinput
 USER 10001:10001
 EXPOSE 8040
-CMD ["gunicorn", "reviewdesk.wsgi:application", "--bind=0.0.0.0:8040", "--workers=2", "--threads=2", "--timeout=60", "--access-logfile=/dev/null"]
+CMD ["gunicorn", "reviewdesk.wsgi:application", "--bind=0.0.0.0:8040", "--workers=2", "--threads=2", "--timeout=60", "--access-logfile=/dev/null", "--no-control-socket"]
