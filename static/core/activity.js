@@ -11,7 +11,7 @@
   let paused = false, stopped = false, busy = false, latest = 0;
   let transcriptMode = "cli", terminalEvents = [];
   const cliKinds = new Set(["cli_output_text","cli_output_tool","cli_output_done","cli_output_failed","cli_output_status"]);
-  const labels = {pending:'Waiting', unused:'Not used', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', failed:'Review failed', skipped:'Skipped · quota', incomplete:'Incomplete evidence', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
+  const labels = {pending:'Waiting', unused:'Not used', not_needed:'Not needed', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', failed:'Review failed', skipped:'Skipped · quota', incomplete:'Incomplete evidence', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
   const jakartaFormat = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
@@ -60,7 +60,7 @@
           for (const [key,label] of Object.entries(labels)) totals.append(element('dt','',label),element('dd','',show(attempt.usage.totals[key])));
           usage.append(totals,element('p','node-detail','Provider-reported tokens. Claude input excludes separately reported cache tokens; Codex cache reads are part of input. Not subscription charges.'));
           if (attempt.usage.passes.length > 1) {
-            attempt.usage.passes.forEach((pass,index) => usage.append(element('p','node-detail',`${index ? 'Recovery' : 'Initial'}: input ${show(pass.input_tokens)} · output ${show(pass.output_tokens)} · cache read ${show(pass.cached_input_tokens)}`)));
+            attempt.usage.passes.forEach((pass,index) => usage.append(element('p','node-detail',`${pass.phase ? (pass.phase === 'intent' ? 'Intent' : 'Review') + ' · ' + (pass.recovery_pass ? 'Recovery' : 'Initial') : index ? 'Recovery' : 'Initial'}: input ${show(pass.input_tokens)} · output ${show(pass.output_tokens)} · cache read ${show(pass.cached_input_tokens)}`)));
           }
           row.append(usage);
         }
@@ -89,10 +89,10 @@
   function renderFlow(flow) {
     const fragment = document.createDocumentFragment();
     const sections = [
-      ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph'].includes(n.id)),false],
+      ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id)),false],
       ['02','Verify the change','Checks run against this exact commit.',flow.stages.filter(n => ['checks','tests'].includes(n.id)),false],
       ['03','Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models,true],
-      ['04','Deliver the review','Results belong on GitHub, not in this dashboard.',flow.stages.filter(n => ['publication','sheet'].includes(n.id)),false],
+      ['04','Deliver the review','Results belong on GitHub, not in this dashboard.',flow.stages.filter(n => ['publication','pr_summary','inline_findings','discussion_replies','related_pr_comments','related_issue_comments','labels','sheet'].includes(n.id)),false],
     ];
     for (const [number,title,description,nodes,model] of sections) {
       const section = element('section','flow-lane');

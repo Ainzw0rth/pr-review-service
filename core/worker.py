@@ -134,11 +134,27 @@ def run_job(job):
             )
 
             cli_state = {}
+            phase = "intent" if job.workflow_revision == "v2" else "review"
+            phase_reports = {}
 
             def save_diagnostics(data):
                 from .activity import cli_progress
+                from .usage import usage_counters
 
                 cli_progress(progress, data, cli_state)
+                if job.workflow_revision == "v2":
+                    passes = data.get("usage_passes")
+                    if not isinstance(passes, list) or not passes:
+                        passes = [data]
+                    phase_reports[phase] = [usage_counters(p) for p in passes[:2]]
+                    data = {
+                        **data,
+                        "phase": phase,
+                        "phase_usage": [
+                            {"phase": name, "passes": values}
+                            for name, values in phase_reports.items()
+                        ],
+                    }
                 Job.objects.filter(pk=job.pk, status="running").update(provider_diagnostics=data)
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
 
@@ -148,18 +164,47 @@ def run_job(job):
                 record(job, code, detail=text, source=provider.name)
 
             try:
+                review_context = context
+                if job.workflow_revision == "v2":
+                    from .review_v2 import intent_context, validate_actions, validate_intent
+
+                    progress("intent_started")
+                    save_diagnostics({})
+                    intent = review(
+                        provider,
+                        intent_context(context),
+                        progress.cancelled,
+                        on_response=save_diagnostics,
+                        on_activity=save_activity,
+                        task="intent",
+                    )
+                    try:
+                        validate_intent(intent, context)
+                    except (ProviderError, ValueError, KeyError, TypeError):
+                        raise ProviderError("invalid", detail="output_invalid") from None
+                    progress("intent_ready")
+                    guard(github, job)
+                    phase = "review"
+                    cli_state.clear()
+                    save_diagnostics({})
+                    review_context = {**context, "intent": intent}
                 progress("model")
                 result = review(
                     provider,
-                    context,
+                    review_context,
                     progress.cancelled,
                     on_response=save_diagnostics,
                     on_activity=save_activity,
+                    **({"task": "review_v2"} if job.workflow_revision == "v2" else {}),
                 )
                 try:
+                    if job.workflow_revision == "v2":
+                        validate_actions(result, review_context)
                     thread_replies(result, context)
-                except (ValueError, KeyError, TypeError):
+                except (ProviderError, ValueError, KeyError, TypeError):
                     raise ProviderError("invalid", detail="output_invalid") from None
+                if job.workflow_revision == "v2":
+                    context["intent"] = intent
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(
                     status="success", finished_at=timezone.now()
                 )

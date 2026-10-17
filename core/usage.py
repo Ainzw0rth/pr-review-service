@@ -21,6 +21,33 @@ def usage_counters(usage):
 
 
 def public_usage(diagnostics):
+    phases = diagnostics.get("phase_usage")
+    if isinstance(phases, list) and phases:
+        passes = []
+        for phase in phases[:2]:
+            if not isinstance(phase, dict) or phase.get("phase") not in {"intent", "review"}:
+                continue
+            values = phase.get("passes")
+            for index, value in enumerate(values[:2] if isinstance(values, list) else []):
+                passes.append(
+                    {**usage_counters(value), "phase": phase["phase"], "recovery_pass": index}
+                )
+        totals = {
+            key: sum(p[key] for p in passes) if passes and all(key in p for p in passes) else None
+            for key in FIELDS
+        }
+        return {
+            "totals": totals,
+            "passes": [
+                {
+                    **{key: p.get(key) for key in FIELDS},
+                    "phase": p["phase"],
+                    "recovery_pass": p["recovery_pass"],
+                }
+                for p in passes
+            ],
+            "session_count": len(passes),
+        }
     passes = diagnostics.get("usage_passes")
     if not isinstance(passes, list) or not passes:
         passes = [diagnostics]

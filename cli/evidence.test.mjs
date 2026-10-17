@@ -1,6 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {artifacts,readEvidence,missingEvidence} from './evidence.mjs';
+import {artifacts,readEvidence,missingEvidence,evidenceManifest,toolRead} from './evidence.mjs';
+
+test('compact index preserves evidence identities, inline text and aliases',()=>{
+ const file={path:'a.py',content:'x'.repeat(1500)};
+ const entries=artifacts({pr:{title:'Fix "login"\nflow'},files:[file],sources:[file],issues:[]});
+ const {index,inline,coverage}=evidenceManifest(entries);
+ assert.deepEqual(index.columns,['id','title','characters','alias_of']);
+ assert.deepEqual(index.rows.map(row=>row[0]),['pr','files_0','sources_0']);
+ assert.equal(index.rows[2][3],'files_0');
+ assert.equal(inline.pr,JSON.stringify({title:'Fix "login"\nflow'}));
+ assert.deepEqual(missingEvidence(entries,coverage),['files_0','sources_0']);
+ readEvidence(entries,coverage,{reads:[{id:'files_0'}]});
+ assert.deepEqual(missingEvidence(entries,coverage),[]);
+ const legacy=entries.map(item=>({id:item.id,title:item.title,characters:item.text.length,...(item.canonical_id?{alias_of:item.canonical_id}:{})}));
+ assert.ok(JSON.stringify(index).length<JSON.stringify(legacy).length);
+});
+
+test('continuation hints reconstruct the full original evidence without granting early coverage',()=>{
+ const entries=artifacts({source:'quoted "text"\n'.repeat(5000)}),coverage={};
+ let read={id:'source'},content='';
+ while(read){
+   const result=readEvidence(entries,coverage,{reads:[read]})[0];
+   content+=result.content;
+   read=result.next_read;
+   if(read) assert.deepEqual(missingEvidence(entries,coverage),['source']);
+ }
+ assert.equal(content,entries[0].text);
+ assert.deepEqual(missingEvidence(entries,coverage),[]);
+});
+
+test('invalid batches return actionable errors without partial coverage or echoed input',()=>{
+ const entries=artifacts({source:'abc'}),coverage={};
+ const result=toolRead(entries,coverage,{reads:[{id:'source'},{id:'/auth/private-token'}]});
+ assert.equal(result.isError,true);
+ const error=JSON.parse(result.content[0].text).error;
+ assert.equal(error.code,'UNKNOWN_ARTIFACT');
+ assert.ok(error.hint.includes('manifest'));
+ assert.ok(!JSON.stringify(result).includes('private-token'));
+ assert.deepEqual(coverage,{});
+ for(const args of [{reads:[{id:'source',filter:'invented'}]},{reads:[null]},{reads:[{id:'source'}],invented:true}]) {
+   assert.equal(toolRead(entries,coverage,args).isError,true);
+   assert.deepEqual(coverage,{});
+ }
+ const success=toolRead(entries,coverage,{reads:[{id:'source'}]});
+ assert.equal(success.isError,undefined);
+ assert.equal(JSON.parse(success.content[0].text)[0].content,'"abc"');
+});
 test('evidence round-trip and complete-range accounting',()=>{
  const entries=artifacts({sources:[{path:'a.py',content:'secret project source'}]});
  const coverage={};

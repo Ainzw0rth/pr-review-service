@@ -20,31 +20,63 @@ export function missingEvidence(entries, coverage) {
     return !(ranges?.length===1 && ranges[0][0]===0 && ranges[0][1]===item.text.length);
   }).map(item=>item.id);
 }
+export function evidenceManifest(entries) {
+  const inline={},coverage={};
+  const rows=entries.map(item=>{
+    if(!item.canonical_id && item.text.length<=1000){
+      inline[item.id]=item.text;
+      coverage[item.id]=[[0,item.text.length]];
+    }
+    return [item.id,item.title,item.text.length,item.canonical_id||null];
+  });
+  return {index:{columns:['id','title','characters','alias_of'],rows},inline,coverage};
+}
+
+class EvidenceError extends Error {
+  constructor(code,message,hint){super(message);this.code=code;this.hint=hint;}
+}
+
 export function readEvidence(entries, coverage, args) {
-  if(!args || !Array.isArray(args.reads) || !args.reads.length || args.reads.length>12)throw Error('Provide 1–12 reads.');
-  let total=0;
-  for(const read of args.reads){const item=entries.find(x=>x.id===read.id);if(item)total+=Math.min(read.length??20000,Math.max(0,item.text.length-(read.offset??0)));}
-  if(total>60000)throw Error('Batch exceeds 60000 characters; split the reads.');
-  return args.reads.map(read=>{
+  if(!args || typeof args!=='object' || Array.isArray(args) || Object.keys(args).some(key=>key!=='reads') || !Array.isArray(args.reads) || !args.reads.length || args.reads.length>12)
+    throw new EvidenceError('INVALID_READS','Provide 1–12 reads.','Use {reads:[{id:"manifest ID",offset:0,length:20000}]}; no other fields.');
+  // Validate the entire batch before updating coverage: failed calls deliver no evidence.
+  const batch=args.reads.map(read=>{
+    if(!read || typeof read!=='object' || Array.isArray(read) || Object.keys(read).some(key=>!['id','offset','length'].includes(key)))
+      throw new EvidenceError('INVALID_READ','Invalid read object.','Each read accepts only id, offset and length.');
     const item=entries.find(x=>x.id===read.id);
-    const offset=read.offset??0;
-    const length=read.length??20000;
-    if(!item||!Number.isInteger(offset)||offset<0||offset>item.text.length||!Number.isInteger(length)||length<1||length>20000)throw Error('Invalid evidence range.');
-    const end=Math.min(offset+length,item.text.length);
+    if(!item)throw new EvidenceError('UNKNOWN_ARTIFACT','Unknown evidence ID.','Use an exact ID from the evidence manifest; paths and URLs are not accepted.');
+    const offset=read.offset===undefined?0:read.offset;
+    const length=read.length===undefined?20000:read.length;
+    if(!Number.isInteger(offset)||offset<0||offset>item.text.length||!Number.isInteger(length)||length<1||length>20000)
+      throw new EvidenceError('INVALID_RANGE','Invalid evidence range.','Use offset from 0 to characters, and length from 1 to 20000; follow next_read when present.');
+    return {item,offset,end:Math.min(offset+length,item.text.length)};
+  });
+  if(batch.reduce((total,read)=>total+read.end-read.offset,0)>60000)
+    throw new EvidenceError('BATCH_TOO_LARGE','Batch exceeds 60000 characters.','Split the batch or reduce lengths; maximum 12 reads and 60000 content characters per call.');
+  return batch.map(({item,offset,end})=>{
     const key=item.canonical_id||item.id;
     const ranges=[...(coverage[key]||[]),[offset,end]].sort((a,b)=>a[0]-b[0]);
     const merged=[];
     for(const range of ranges){const last=merged.at(-1);if(last&&range[0]<=last[1])last[1]=Math.max(last[1],range[1]);else merged.push([...range]);}
     coverage[key]=merged;
-    return {id:item.id,offset,next_offset:end,eof:end===item.text.length,content:item.text.slice(offset,end)};
+    return {id:item.id,offset,next_offset:end,eof:end===item.text.length,content:item.text.slice(offset,end),...(end<item.text.length?{next_read:{id:item.id,offset:end,length:Math.min(20000,item.text.length-end)}}:{})};
   });
+}
+
+export function toolRead(entries,coverage,args) {
+  try {
+    return {content:[{type:'text',text:JSON.stringify(readEvidence(entries,coverage,args))}]};
+  } catch(error) {
+    if(!(error instanceof EvidenceError))throw error;
+    return {isError:true,content:[{type:'text',text:JSON.stringify({error:{code:error.code,message:error.message,hint:error.hint}})}]};
+  }
 }
 if(process.argv[1]?.endsWith('/evidence.mjs')) {
   const entries=artifacts(JSON.parse(await readFile('/tmp/review/context.json','utf8')));
   let coverage={};
   try{coverage=JSON.parse(await readFile('/tmp/review/coverage.json','utf8'));}catch{}
   const send=value=>process.stdout.write(JSON.stringify(value)+'\n');
-  const tool={name:'read_evidence',annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},description:'Read exact ranges of commit-pinned PR evidence by manifest ID. Read every artifact fully before completing the review; use next_offset until eof. Batch up to 12 reads per call, at most 60000 content characters total.',inputSchema:{type:'object',properties:{reads:{type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{id:{type:'string'},offset:{type:'integer',minimum:0},length:{type:'integer',minimum:1,maximum:20000}},required:['id'],additionalProperties:false}}},required:['reads'],additionalProperties:false}};
+  const tool={name:'read_evidence',annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},description:'Read exact ranges of commit-pinned PR evidence by manifest ID. Read every artifact fully before completing the review; follow next_read until eof. Batch up to 12 reads per call, at most 60000 content characters total. Errors include a code and corrective hint; failed batches grant no coverage.',inputSchema:{type:'object',properties:{reads:{type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{id:{type:'string'},offset:{type:'integer',minimum:0},length:{type:'integer',minimum:1,maximum:20000}},required:['id'],additionalProperties:false}}},required:['reads'],additionalProperties:false}};
   for await(const line of createInterface({input:process.stdin,crlfDelay:Infinity})) {
     let request;
     try{
@@ -56,9 +88,8 @@ if(process.argv[1]?.endsWith('/evidence.mjs')) {
       else if(request.method==='tools/list')result={tools:[tool]};
       else if(request.method==='ping')result={};
       else if(request.method==='tools/call'&&request.params?.name==='read_evidence'){
-        const values=readEvidence(entries,coverage,request.params.arguments);
-        await writeFile('/tmp/review/coverage.json',JSON.stringify(coverage),{mode:0o600});
-        result={content:[{type:'text',text:JSON.stringify(values)}]};
+        result=toolRead(entries,coverage,request.params.arguments);
+        if(!result.isError)await writeFile('/tmp/review/coverage.json',JSON.stringify(coverage),{mode:0o600});
       }else throw Error('Unsupported evidence operation');
       send({jsonrpc:'2.0',id:request.id,result});
     }catch(error){if(request?.id!==undefined)send({jsonrpc:'2.0',id:request.id,error:{code:-32602,message:error.message}});}

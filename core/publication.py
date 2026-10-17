@@ -14,6 +14,19 @@ from core.models import ExpectedLabel, Job, Receipt
 from core.workflow import canonical_cycle, current
 
 
+def _progress(job, category, status, count=None):
+    """Never restart a category already confirmed by this attempt."""
+    if job.workflow_revision != "v2":
+        return
+    if job.activity.filter(code__in=[f"{category}_done", f"{category}_unused"]).exists():
+        return
+    if status == "started" and job.activity.filter(code=f"{category}_started").exists():
+        return
+    from core.activity import record
+
+    record(job, f"{category}_{status}", count=count)
+
+
 class LabelCleanupError(Exception):
     """Review delivered, but final workflow labels could not be normalized."""
 
@@ -174,6 +187,15 @@ def thread_replies(result, context):
         thread = roots.get(reply["comment_id"])
         if not thread or thread["id"] in assessed or type(reply.get("resolve")) is not bool:
             raise ValueError("Unknown or duplicate discussion assessment")
+        if "action" in reply:
+            if (
+                reply["action"] not in {"reply", "not_needed"}
+                or not isinstance(reply.get("reason"), str)
+                or not reply["reason"].strip()
+                or type(reply.get("blocking")) is not bool
+                or (reply["action"] == "not_needed" and reply["resolve"])
+            ):
+                raise ValueError("Invalid discussion action")
         if reply["resolve"] and (not result["complete"] or not context.get("complete")):
             raise ValueError("Incomplete evidence cannot resolve a discussion")
         assessed.add(thread["id"])
@@ -219,7 +241,7 @@ def _fresh_thread(github, job, original, reply):
         ]
 
     comments = fresh["comments"]
-    if not receipt:
+    if not receipt and reply.get("action") != "not_needed":
         body = _reply_body(job, reply, fresh.get("viewerCanResolve"))
         expected = (
             f"**Automated review · Auto Reviewer**\n\n{body}\n\n{marker(job, f'reply:{root}')}"
@@ -305,7 +327,7 @@ def publish_threads(github, job, replies):
         _fresh_thread(github, job, thread, reply)
     for thread, reply in replies:
         fresh = _fresh_thread(github, job, thread, reply)
-        if fresh["isResolved"]:
+        if fresh["isResolved"] or reply.get("action") == "not_needed":
             continue
         root = thread["comments"][0]["databaseId"]
         body = _reply_body(job, reply, fresh.get("viewerCanResolve"))
@@ -367,7 +389,11 @@ def publish(github, job, result, context, checks):
         ]
         return _publish_review(github, job, inline, state["blocked"], state["baseline"])
     # Allowed targets are established by trusted context retrieval, not the model.
-    related = {p["number"] for p in context.get("related_prs", [])}
+    related_prs = _related_targets(job, context.get("related_prs", []))
+    related_issues = (
+        _related_targets(job, context.get("issues", [])) if job.workflow_revision == "v2" else set()
+    )
+    related = related_prs | related_issues
     replies = thread_replies(result, context)
     for comment in result["related_comments"]:
         if comment["number"] not in related or comment["number"] == number:
@@ -378,19 +404,32 @@ def publish(github, job, result, context, checks):
             "valid_lines", []
         ):
             raise ValueError("Finding is not on a changed line")
+    if any(reply.get("action", "reply") == "reply" for _, reply in replies):
+        _progress(job, "discussion", "started")
     publish_threads(github, job, replies)
-    for comment in result["related_comments"]:
-        target = comment["number"]
-        if target not in related or target == number:
-            raise ValueError("Unknown related PR target")
-        once(
-            github,
-            job,
-            f"related:{target}",
-            comment["body"],
-            f"/issues/{target}/comments",
-            f"/issues/{target}/comments",
-        )
+    count = Receipt.objects.filter(
+        job=job,
+        key__in=[f"reply:{thread['comments'][0]['databaseId']}" for thread, _ in replies],
+    ).count()
+    _progress(job, "discussion", "done" if count else "unused", count)
+    for category, targets in (("related_pr", related_prs), ("related_issue", related_issues)):
+        comments = [c for c in result["related_comments"] if c["number"] in targets]
+        if comments:
+            _progress(job, category, "started")
+        for comment in comments:
+            target = comment["number"]
+            once(
+                github,
+                job,
+                f"related:{target}",
+                comment["body"],
+                f"/issues/{target}/comments",
+                f"/issues/{target}/comments",
+            )
+        count = Receipt.objects.filter(
+            job=job, key__in=[f"related:{c['number']}" for c in comments]
+        ).count()
+        _progress(job, category, "done" if count else "unused", count)
     # Findings are posted as one commit-pinned review, with summary as the review body.
     files = {f["filename"]: f for f in context.get("files", [])}
     inline = []
@@ -411,6 +450,7 @@ def publish(github, job, result, context, checks):
         or not result["complete"]
         or not checks["passed"]
         or any(f["severity"] == "blocking" for f in result["findings"])
+        or any(reply.get("blocking", False) for _, reply in replies)
     )
     body = f"Commit: `{job.head_sha}`\n\n{result['summary']}\n\nChecks: {checks['summary']}\n\n"
     body += (
@@ -419,7 +459,9 @@ def publish(github, job, result, context, checks):
         else "No blocking findings. Formal GitHub approval follows the repository auto-approve setting. Merging follows the separate opt-in auto-merge setting; repository merge rules still apply."
     )
     # Use issue summary first: preserves reviewer request while thread replies publish.
+    _progress(job, "summary", "started")
     once(github, job, "summary", body, f"/issues/{number}/comments", f"/issues/{number}/comments")
+    _progress(job, "summary", "done", 1)
     _, baseline_timeline = _guard_state(github, job)
     update_cursor(
         job,
@@ -429,6 +471,26 @@ def publish(github, job, result, context, checks):
         label_transitions=[],
     )
     return _publish_review(github, job, inline, blocked, baseline_timeline)
+
+
+def _related_targets(job, items):
+    """Context retrieval enrolls same-repository targets; reject conflicting metadata."""
+    from urllib.parse import urlparse
+
+    targets = set()
+    repo = job.pr.repository.full_name.casefold()
+    for item in items:
+        number = item["number"]
+        if type(number) is not int or number <= 0:
+            raise ValueError("Invalid related target")
+        repository = item.get("repository") or (item.get("base") or {}).get("repo") or {}
+        if repository.get("full_name", repo).casefold() != repo:
+            raise ValueError("Unknown related repository")
+        if item.get("repository_url"):
+            if urlparse(item["repository_url"]).path.casefold() != f"/repos/{repo}":
+                raise ValueError("Unknown related repository")
+        targets.add(number)
+    return targets
 
 
 def review_event(job, blocked):
@@ -476,6 +538,10 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
         event = "COMMENT"
     update_cursor(job, stage or "review", review_event=event)
     needs_review = bool(inline or blocked or event == "APPROVE")
+    if inline:
+        _progress(job, "inline", "started")
+    else:
+        _progress(job, "inline", "unused", 0)
     if stage == "labels" and needs_review and not existing:
         raise StaleReview("Published review is no longer available")
     if not existing and needs_review:
@@ -525,6 +591,9 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
         Receipt.objects.get_or_create(
             job=job, key="review", defaults={"remote_id": str(existing["id"])}
         )
+
+    if inline and Receipt.objects.filter(job=job, key="review").exclude(remote_id="").exists():
+        _progress(job, "inline", "done", len(inline))
 
     if event == "APPROVE" and Receipt.objects.filter(job=job, key="review").exists():
         record = remember(github, job, tag)
@@ -656,6 +725,7 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
 
         if not check_required(github, job.pr.repository, job.head_sha)["passed"]:
             raise ValueError("Required checks changed during review")
+    _progress(job, "labels", "started")
     transition(
         github,
         job.pr.repository,
@@ -665,4 +735,5 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
         record_transition,
     )
     terminal_guard()
+    _progress(job, "labels", "done", len(own_transitions))
     return "feedback" if blocked else "ready"

@@ -246,7 +246,16 @@ def _wire_schema(value):
         return {
             key: _wire_schema(item)
             for key, item in value.items()
-            if key not in {"minLength", "maxLength", "minimum", "maximum", "maxItems"}
+            if key
+            not in {
+                "minLength",
+                "maxLength",
+                "minimum",
+                "maximum",
+                "minItems",
+                "maxItems",
+                "uniqueItems",
+            }
         }
     if isinstance(value, list):
         return [_wire_schema(item) for item in value]
@@ -392,9 +401,20 @@ def response_diagnostics(status, headers, data):
     return result
 
 
-def review(provider, context, cancelled, *, on_response=None, on_activity=None):
+def review_contract(task="review"):
+    if task == "review":
+        return SCHEMA, SYSTEM, validate_result
+    if task not in {"intent", "review_v2"}:
+        raise ProviderError("invalid", detail="output_invalid")
+    from .review_v2 import contract
+
+    return contract(task)
+
+
+def review(provider, context, cancelled, *, on_response=None, on_activity=None, task="review"):
     if cancelled():
         raise ReviewCancelled()
+    output_schema, system, validator = review_contract(task)
     if (
         provider.kind not in {"openai", "anthropic", "claude_cli", "codex_cli"}
         or not provider.model
@@ -413,7 +433,12 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None):
         from .cli import review_cli
 
         return review_cli(
-            provider, context, cancelled, on_response=on_response, on_activity=on_activity
+            provider,
+            context,
+            cancelled,
+            on_response=on_response,
+            on_activity=on_activity,
+            **({"task": task} if task != "review" else {}),
         )
     try:
         credential = decrypt(provider.credential.encrypted_value)
@@ -428,13 +453,13 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None):
         ImproperlyConfigured,
     ):
         raise ProviderError("auth") from None
-    schema = _wire_schema(SCHEMA)
+    schema = _wire_schema(output_schema)
     if provider.kind == "openai":
         url = "https://api.openai.com/v1/responses"
         headers = {"Authorization": f"Bearer {credential}"}
         payload = {
             "model": provider.model,
-            "instructions": SYSTEM,
+            "instructions": system,
             "input": encoded,
             "store": False,
             "max_output_tokens": 16000,
@@ -452,7 +477,7 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None):
         headers = {"x-api-key": credential, "anthropic-version": "2023-06-01"}
         payload = {
             "model": provider.model,
-            "system": SYSTEM,
+            "system": system,
             "max_tokens": 16000,
             "messages": [{"role": "user", "content": encoded}],
             "output_config": {"format": {"type": "json_schema", "schema": schema}},
@@ -514,6 +539,6 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None):
     except (ValueError, KeyError, TypeError, RecursionError):
         raise ProviderError("invalid", detail="output_invalid") from None
     try:
-        return validate_result(result)
+        return validator(result)
     except ProviderError:
         raise ProviderError("invalid", detail="output_invalid") from None

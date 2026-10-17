@@ -16,16 +16,17 @@ from .providers import (
     REFUSAL_CATEGORIES,
     ProviderError,
     ReviewCancelled,
-    validate_result,
+    review_contract,
 )
 
 
 class CLIStream:
-    def __init__(self, kind, context=None, on_activity=None):
+    def __init__(self, kind, context=None, on_activity=None, *, task="review"):
         from .transcript import Transcript
 
         self.transcript = Transcript(kind, context or {}, on_activity)
         self.kind = kind
+        self.validator = review_contract(task)[2]
         self.diagnostics = {"transport": kind, "events_received": 0, "last_event": "starting"}
         self.output = None
         self.complete = False
@@ -233,7 +234,7 @@ class CLIStream:
             raise ProviderError("invalid", detail="cli_protocol")
         try:
             value = json.loads(self.output) if isinstance(self.output, str) else self.output
-            return validate_result(value)
+            return self.validator(value)
         except (ValueError, TypeError, RecursionError, ProviderError):
             raise ProviderError("invalid", detail="output_invalid") from None
 
@@ -268,7 +269,7 @@ def container_arguments(kind, name, image, volume):
     ]
 
 
-def review_cli(provider, context, cancelled, *, on_response=None, on_activity=None):
+def review_cli(provider, context, cancelled, *, on_response=None, on_activity=None, task="review"):
     recovery = None
     usage_passes = []
     for recovery_pass in range(2):
@@ -295,6 +296,7 @@ def review_cli(provider, context, cancelled, *, on_response=None, on_activity=No
                 on_response=report,
                 on_activity=on_activity,
                 recovery=recovery,
+                **({"task": task} if task != "review" else {}),
             )
         except ProviderError as exc:
             if exc.detail != "cli_coverage" or recovery_pass == 1:
@@ -311,9 +313,16 @@ def review_cli(provider, context, cancelled, *, on_response=None, on_activity=No
 
 
 def _review_cli_once(
-    provider, context, cancelled, *, on_response=None, on_activity=None, recovery=None
+    provider,
+    context,
+    cancelled,
+    *,
+    on_response=None,
+    on_activity=None,
+    recovery=None,
+    task="review",
 ):
-    from .providers import SCHEMA, SYSTEM, _wire_schema
+    from .providers import _wire_schema
     from .runner import RunnerError, _docker
 
     if cancelled():
@@ -326,7 +335,8 @@ def _review_cli_once(
     )
     name = "pr-review-cli-" + uuid.uuid4().hex
     args = container_arguments(provider.kind, name, image, volume)
-    parser = CLIStream(provider.kind, context, on_activity)
+    schema, system, _ = review_contract(task)
+    parser = CLIStream(provider.kind, context, on_activity, task=task)
     process = None
     created = False
     try:
@@ -342,8 +352,8 @@ def _review_cli_once(
                 "model": provider.model,
                 "effort": getattr(provider, "effort", ""),
                 "context": context,
-                "schema": _wire_schema(SCHEMA),
-                "system": SYSTEM,
+                "schema": _wire_schema(schema),
+                "system": system,
                 "recovery": recovery,
             }
         )

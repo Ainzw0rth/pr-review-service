@@ -40,6 +40,9 @@ class DashboardTests(TestCase):
     def test_graph_setup_is_scoped_even_without_jobs_and_pending_node_is_visible(self):
         from core.flow import snapshot
 
+        pr = self.visible.pr
+        self.visible.delete()
+        self.visible = Job.objects.create(pr=pr, generation=1, head_sha="a" * 40, actor="developer")
         self.client.force_login(self.user)
         stages = snapshot(self.visible, [])["stages"]
         graph = next(stage for stage in stages if stage["id"] == "graph")
@@ -53,10 +56,14 @@ class DashboardTests(TestCase):
         Membership.objects.filter(user=self.user).delete()
         self.assertNotContains(self.client.get("/"), "Dependency graphs.")
 
+    @override_settings(GRAPH_REPOSITORIES=["visible/project"])
     def test_graph_phase_reports_build_metrics_and_interrupted_state(self):
         from core.activity import record
         from core.flow import snapshot
 
+        pr = self.visible.pr
+        self.visible.delete()
+        self.visible = Job.objects.create(pr=pr, generation=1, head_sha="a" * 40, actor="developer")
         self.visible.status = "running"
         for code, count in [
             ("graph_started", None),
@@ -274,7 +281,7 @@ class DashboardTests(TestCase):
         self.assertEqual(stages["files"]["count"], 24)
         self.assertEqual(stages["docs"]["count"], 27)
         self.assertEqual(stages["checks"]["state"], "done")
-        self.assertEqual(stages["publication"]["state"], "pending")
+        self.assertEqual(stages["pr_summary"]["state"], "pending")
         self.assertEqual(flow["models"][0]["attempts"][0]["state"], "refused")
         self.assertNotContains(response, "req_private")
 

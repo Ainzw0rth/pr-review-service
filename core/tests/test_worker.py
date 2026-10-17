@@ -30,14 +30,17 @@ class WorkerTests(WorkflowTests):
             order=1,
         )
 
-    def run_case(self, effect):
+    def run_case(self, effect, *, v2=False, context=None):
         self.reconcile(self.event("labeled"), self.snapshot())
         job = workflow.claim()
-        gh = FakeGitHub(self.snapshot())
+        if not v2:
+            job.workflow_revision = "v1.1"
+            job.save(update_fields=["workflow_revision"])
+        gh = FakeGitHub(context["pr"] if context and "pr" in context else self.snapshot())
         with ExitStack() as stack:
             stack.enter_context(patch("core.github.GitHub", return_value=gh))
             stack.enter_context(
-                patch("core.context.build_context", return_value={"complete": True})
+                patch("core.context.build_context", return_value=context or {"complete": True})
             )
             stack.enter_context(
                 patch(

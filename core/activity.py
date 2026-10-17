@@ -38,6 +38,8 @@ MESSAGES = {
     "cli_receiving": "CLI output activity received; contents remain private.",
     "cli_reconnecting": "CLI connection interrupted; native client reconnecting.",
     "cli_completed": "CLI finished its response; validating review output.",
+    "intent_started": "Synthesizing grounded intent from collected evidence.",
+    "intent_ready": "Structured intent validated; evidence remains private.",
     "model": "Calling the selected model; awaiting provider response.",
     "unavailable": "Provider unavailable; checking the next configured connection.",
     "quota": "Provider quota exhausted; waiting for the next availability check.",
@@ -63,6 +65,20 @@ MESSAGES = {
     "journal_attention": "Private journal capture needs administrator attention; review outcome unchanged.",
     "ended": "Worker attempt ended; see the current job status.",
 }
+
+
+for _prefix, _title in {
+    "summary": "PR summary",
+    "inline": "Inline findings",
+    "discussion": "Discussion replies",
+    "related_pr": "Related-PR comments",
+    "related_issue": "Related-issue comments",
+    "labels": "Workflow labels",
+}.items():
+    MESSAGES[f"{_prefix}_started"] = f"{_title}: checking saved receipts and GitHub delivery."
+    MESSAGES[f"{_prefix}_done"] = f"{_title}: delivery confirmed"
+    if _prefix not in {"summary", "labels"}:
+        MESSAGES[f"{_prefix}_unused"] = f"{_title}: assessed; no write needed"
 
 
 def cli_progress(progress, data, state):

@@ -1,10 +1,9 @@
 """Read-only progress projection. Never turn planned work into claimed work."""
 
-from django.conf import settings
-
 from .models import Provider
 from .providers import REFUSAL_CATEGORIES, failure_description
 from .usage import public_usage
+from .workflow_schema import LEGACY_STEPS
 
 
 def next_action(job, attempt, attempts, plan):
@@ -56,17 +55,21 @@ def snapshot(job, events):
     if any(event.code == "delivery_resume" for event in events):
         events = all_events
     codes = {event.code for event in events}
+    planned = job.workflow_steps if job.workflow_revision else None
+
+    def includes(key, legacy):
+        return key in planned if planned is not None else legacy
 
     def count(code):
         return next((event.count for event in reversed(events) if event.code == code), None)
 
-    def node(key, title, start, done, *, unit=None, detail=""):
+    def node(key, title, start, done, *, unit=None, detail="", count_code=None):
         entered = next((e for e in events if e.code in start), None)
         finished = next((e for e in events if e.code in done), None)
         state = "done" if finished else "running" if entered else "pending"
         if state == "running" and job.status != "running":
             state = "cancelled" if job.status in ("cancelled", "superseded") else "attention"
-        value = count(key) if unit else None
+        value = count(count_code or key) if unit else None
         return {
             "id": key,
             "title": title,
@@ -111,11 +114,7 @@ def snapshot(job, events):
             detail="Evidence for this commit",
         ),
     ]
-    if "graph_started" in codes or (
-        job.status in {"queued", "running", "quota"}
-        and "context_ready" not in codes
-        and job.pr.repository.full_name in settings.GRAPH_REPOSITORIES
-    ):
+    if includes("graph", "graph_started" in codes):
         builds = [event for event in events if event.code in {"graph_full", "graph_incremental"}]
         graph_detail = "Build or update base/head graphs; load impacted source"
         if builds:
@@ -147,6 +146,36 @@ def snapshot(job, events):
                 detail=graph_detail,
             ),
         )
+    if includes("intent", False):
+        # Each provider runs its own phase; older success cannot finish a later start.
+        intent_events = [
+            event for event in events if event.code in {"intent_started", "intent_ready"}
+        ]
+        intent = node(
+            "intent",
+            "Grounded intent",
+            {"intent_started"},
+            {"intent_ready"},
+            detail="Requirements, inferred intent & unknowns from fetched evidence",
+        )
+        latest_start = next(
+            (event for event in reversed(intent_events) if event.code == "intent_started"), None
+        )
+        if latest_start:
+            intent["started_at"] = latest_start.created_at
+        if intent_events and intent_events[-1].code == "intent_ready":
+            intent["finished_at"] = intent_events[-1].created_at
+        if intent_events and intent_events[-1].code == "intent_started":
+            intent["state"] = (
+                "running"
+                if job.status == "running"
+                else "cancelled"
+                if job.status in {"cancelled", "superseded"}
+                else "attention"
+            )
+            intent["started_at"] = intent_events[-1].created_at
+            intent["finished_at"] = None
+        stages.insert(next(i for i, stage in enumerate(stages) if stage["id"] == "checks"), intent)
     latest_ci = next(
         (
             event
@@ -164,7 +193,7 @@ def snapshot(job, events):
         stages[-1]["detail"] = "Missing, pending or unsuccessful"
     elif latest_ci and latest_ci.code == "checks_waiting":
         stages[-1]["detail"] = "Waiting for CI before AI review"
-    if job.pr.repository.test_command or "tests" in codes:
+    if includes("tests", bool(codes & {"tests", "tests_passed", "tests_failed"})):
         tests = node(
             "tests",
             "Isolated tests",
@@ -184,13 +213,45 @@ def snapshot(job, events):
             detail="Comments, threads & workflow labels",
         )
     )
-    if job.pr.repository.sheet_config:
+    for key, title, prefix in [
+        ("pr_summary", "PR summary", "summary"),
+        ("inline_findings", "Inline findings", "inline"),
+        ("discussion_replies", "Discussion replies", "discussion"),
+        ("related_pr_comments", "Related-PR comments", "related_pr"),
+        ("related_issue_comments", "Related-issue comments", "related_issue"),
+        ("labels", "Workflow labels", "labels"),
+    ]:
+        if not includes(key, False):
+            continue
+        done_code, unused_code = f"{prefix}_done", f"{prefix}_unused"
+        stage = node(
+            key,
+            title,
+            {f"{prefix}_started"},
+            {done_code, unused_code},
+            unit="confirmed writes",
+            count_code=done_code,
+            detail="Recorded delivery confirmations; content stays on GitHub",
+        )
+        confirmed = [event for event in events if event.code in {done_code, unused_code}]
+        if confirmed:
+            # Confirmed receipts survive retries; starts alone never regress them.
+            latest = confirmed[-1]
+            stage["state"] = "not_needed" if latest.code == unused_code else "done"
+            stage["count"] = latest.count
+            stage["finished_at"] = latest.created_at
+        stages.append(stage)
+    if includes("sheet", bool(codes & {"sheet", "sheet_attention"})):
         sheet = node("sheet", "Timeline", {"sheet"}, set(), detail="Optional issue-status sync")
         if "sheet_attention" in codes:
             sheet["state"] = "attention"
         elif "sheet" in codes and "ended" in codes and job.status == "completed":
             sheet["state"] = "done"
         stages.append(sheet)
+
+    by_id = {stage["id"]: stage for stage in stages}
+    order = planned if planned is not None else LEGACY_STEPS
+    stages = [by_id[key] for key in order if key in by_id]
 
     attempts = list(job.model_attempts.order_by("id"))
     legacy = not attempts and "model" in {e.code for e in all_events}
@@ -301,6 +362,7 @@ def snapshot(job, events):
     if not attempts and not legacy and "context_failed" in codes:
         model_detail = "No model was called. Evidence gathering failed before AI review; see the operational note."
     return {
+        "revision": job.workflow_revision or None,
         "stages": stages,
         "models": groups,
         "legacy": legacy,

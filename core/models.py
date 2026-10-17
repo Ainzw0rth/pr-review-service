@@ -210,6 +210,8 @@ class Job(models.Model):
         choices=[("squash", "Squash merge"), ("merge", "Merge commit"), ("rebase", "Rebase merge")],
     )
     workflow_version = models.CharField(max_length=16, blank=True, default="")
+    workflow_revision = models.CharField(max_length=16, blank=True, default="", editable=False)
+    workflow_steps = models.JSONField(default=list, blank=True, editable=False)
     retry_of = models.OneToOneField(
         "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="dashboard_retry"
     )
@@ -222,6 +224,9 @@ class Job(models.Model):
 
     def save(self, *args, **kwargs):
         if self._state.adding:
+            from .workflow_schema import snapshot as workflow_snapshot
+
+            self.workflow_revision, self.workflow_steps = workflow_snapshot(self.pr.repository)
             self.auto_approve, self.auto_merge, self.merge_method = Repository.objects.values_list(
                 "auto_approve", "auto_merge", "merge_method"
             ).get(pk=self.pr.repository_id)

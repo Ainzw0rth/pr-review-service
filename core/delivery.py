@@ -105,6 +105,8 @@ def deliver(github, job, publisher, progress):
                     json.dumps(data["context"], sort_keys=True).encode()
                 ).hexdigest(),
             }
+            if "intent" in data["context"]:
+                record["intent"] = data["context"]["intent"]
             checkpoint.encrypted_payload = encrypt(json.dumps(record))
             checkpoint.stage = "done"
             checkpoint.save(update_fields=["encrypted_payload", "stage"])
@@ -249,7 +251,8 @@ def verify_inputs(github, job, context, result):
                 c
                 for c in latest["comments"]
                 if not (
-                    c.get("body") == expected
+                    reply.get("action", "reply") == "reply"
+                    and c.get("body") == expected
                     and (c.get("author") or {}).get("login", "").casefold() == actor
                 )
             ]

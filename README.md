@@ -687,7 +687,7 @@ and other superusers cannot read or modify it.
   snapshots its model order, model IDs, connection references and effort. Already
   queued/running jobs and quota retries retain their snapshot. A new review retry
   gets the latest configuration; a delivery-only retry does not call a model.
-- Workflow versions appear in job details. Snapshots contain credential references,
+- Model configuration hashes appear in job details. Snapshots contain credential references,
   never secret values; rotating credentials still takes effect when used.
 - **Test saved connection** explicitly queues a small, possibly quota-consuming
   structured-response probe. The serial worker runs it only when no review is
@@ -699,6 +699,80 @@ Deployment requires migration `0012` and rebuilding both app and CLI images (eff
 configuration is passed to the CLI wrapper). Use the drain/idle/backup/migrate
 procedure for schema changes. Migration freezes existing job configurations before
 workflow edits become available. This page does not change CI or publication guards.
+
+### Per-attempt workflow history
+
+Each new `Job` (review attempt) stores `workflow_revision` (currently `v2`) and
+`workflow_steps` (an ordered JSON list of planned stage IDs) on its database row.
+Optional graph, isolated-test and timeline stages are selected at creation. The
+dashboard uses this saved list rather than current repository settings, so later
+stage additions or configuration changes do not rewrite an old attempt's diagram.
+Stage states still come from that attempt's recorded activity, never its plan alone.
+
+The revision appears above the diagram and in attempt details. The existing
+`workflow_version` field remains the separate model-configuration hash. A fresh
+review retry captures the current revision and plan; a delivery-only retry reuses
+the original row. Migration `0018` leaves existing rows unversioned, displayed as
+**Legacy / version unknown**. Legacy optional stages require recorded activity;
+current settings cannot invent them retrospectively.
+
+When changing review steps or behavior, bump `REVISION` in
+`core/workflow_schema.py`, update its snapshot builder and the dashboard renderer,
+and keep historical stage IDs/renderers supported. Do not expand `LEGACY_STEPS`.
+This is workflow identity and planned diagram history, not executable-code
+versioning: queued/resumed attempts still run the deployed worker, and stage
+labels/descriptions use deployed renderers. Repository commands and integration
+settings are not frozen by this stage list. Use the drain/idle/backup/migrate
+deployment procedure; this change does not preserve old worker implementations.
+
+Revision `v1.1` improves the CLI reviewer's evidence interface using AXI-inspired
+compact indexing, contextual continuation hints and structured corrective errors.
+The manifest uses a shared columns/rows schema instead of repeating field names;
+small evidence remains inline and identical artifacts still share coverage. Every
+non-inline artifact must still be read completely, with original JSON content
+unchanged. Partial reads return exact `next_read` arguments. Invalid reads return
+an MCP tool error with a stable code and corrective hint, without echoing supplied
+IDs or granting coverage to any part of a failed batch. No third-party CLI or
+dependency is installed; direct API adapters and GitHub publication are unchanged.
+Rebuild the CLI runner image along with the application to use this interface.
+
+### Workflow v2: grounded intent and optional delivery
+
+Before code review, each selected provider performs a separate structured intent
+pass using the fetched PR body, linked issues/PRs, discussions, task evidence and
+repository instructions. Its brief separates the goal, explicitly stated
+requirements/non-goals, and unresolved unknowns or conflicting evidence. Claims
+reference supplied evidence IDs; inferred goals are marked as inferred. Source
+reference validation prevents invented IDs, not incorrect interpretations: the
+reviewer still receives all original code and requirements evidence alongside
+the brief, and is instructed to verify it rather than trust it as policy.
+
+The second pass returns the review plus an explicit action plan. Every open
+current-PR review thread must still be assessed, but an assessment can choose
+`not_needed` without posting a redundant reply. Such an assessment cannot resolve
+the thread, and blocking concerns still block clearance. Related comments can
+target only same-repository PRs or issues enrolled by context collection. Empty
+optional categories must explicitly say `not_needed`; a missing or contradictory
+plan is invalid output and cannot publish.
+
+The dashboard shows **Grounded intent**, then separate delivery nodes for **PR
+summary**, **Inline findings**, **Discussion replies**, **Related-PR comments**,
+**Related-issue comments**, and **Workflow labels**. Optional categories show
+**Not needed** rather than an unfinished wait. Delivery completion/counts follow
+confirmed receipts and guarded label transitions, not model claims. The diagram
+is operational progress, not private reasoning or guaranteed action order.
+
+Intent and action-plan prose stays in the encrypted review checkpoint, never in
+public activity or node descriptions. Confirmed delivery retries reuse that
+checkpoint without new intent/review calls. Fallback providers run their own
+intent pass, and reported usage distinguishes intent/review plus recovery sessions.
+This adds model time/quota; it does not estimate subscription costs from tokens.
+
+Existing legacy/v1/v1.1 attempts retain their historical schema and diagram. New
+review attempts use v2; delivery-only retries retain the original revision.
+Deploy migration `0018` and rebuild the application and CLI images together using
+the drain/idle/backup/migrate procedure. No live migration or deployment is
+performed by adding these files.
 
 ### Hermes Telegram approval alerts
 
