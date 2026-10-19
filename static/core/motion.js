@@ -16,6 +16,9 @@
     if (img.complete && !img.naturalWidth) img.hidden = true;
   });
   document.addEventListener('click', event => {
+    document.querySelectorAll('.account-menu[open]').forEach(menu => {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
     const summary = event.target.closest('summary');
     if (!summary || reduce.matches) return;
     requestAnimationFrame(() => {
@@ -28,5 +31,10 @@
         );
       }
     });
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const menu = document.querySelector('.account-menu[open]');
+    if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
   });
 })();

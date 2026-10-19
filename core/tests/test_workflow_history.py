@@ -41,7 +41,7 @@ class WorkflowHistoryTests(TestCase):
             old.refresh_from_db()
             newer.refresh_from_db()
             self.assertEqual(old.workflow_revision, "v1.1")
-            self.assertEqual(newer.workflow_revision, "v2.1")
+            self.assertEqual(newer.workflow_revision, "v3")
             self.assertEqual(
                 [n["id"] for n in snapshot(old, [])["stages"]],
                 ["files", "discussion", "docs", "checks", "publication"],
@@ -56,6 +56,10 @@ class WorkflowHistoryTests(TestCase):
                     "intent",
                     "checks",
                     "tests",
+                    "code_review",
+                    "security_review",
+                    "test_review",
+                    "synthesis",
                     "pr_summary",
                     "inline_findings",
                     "discussion_replies",
@@ -98,10 +102,11 @@ class WorkflowHistoryTests(TestCase):
         owner = get_user_model().objects.create_user(username="owner", is_superuser=True)
         self.client.force_login(owner)
         response = self.client.get(f"/jobs/{job.pk}/")
-        self.assertContains(response, "Workflow v2.1")
+        self.assertContains(response, "Workflow revision")
+        self.assertContains(response, "<code>v3</code>", html=True)
         self.assertContains(response, "Model configuration")
         flow = self.client.get(f"/jobs/{job.pk}/activity/").json()["flow"]
-        self.assertEqual(flow["revision"], "v2.1")
+        self.assertEqual(flow["revision"], "v3")
 
     def test_legacy_row_is_not_assigned_a_version_on_save_or_read(self):
         job = self.job()

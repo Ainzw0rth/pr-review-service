@@ -11,6 +11,9 @@
   function select(key) {
     selected = key;
     const m = selectedModel();
+    const panel = $('model-config-panel'), opening = panel.hidden && Boolean(m);
+    panel.hidden = !m;
+    document.querySelector('.workflow-layout').classList.toggle('has-selection',Boolean(m));
     $('model-empty').hidden = Boolean(m); $('model-settings').hidden = !m;
     if (!m) return;
     $('model-name').value = m.name; $('model-kind').value = m.kind; $('model-id').value = m.model; $('model-effort').value = m.effort;
@@ -19,6 +22,8 @@
     $('model-effort').disabled = m.kind !== 'codex_cli';
     $('model-test').disabled = !m.id || dirty || !m.kind.endsWith('_cli');
     probeStatus();
+    if (opening && !reducedMotion.matches) panel.animate([{opacity:0,transform:'translateY(6px)'},{opacity:1,transform:'translateY(0)'}],{duration:180,easing:'ease-out'});
+    if (opening && innerWidth < 900) panel.scrollIntoView({behavior:reducedMotion.matches ? 'auto' : 'smooth',block:'nearest'});
   }
   function probeStatus() {
     const m = selectedModel(); if (!m) return;
@@ -109,7 +114,7 @@
       item.append(button(m.name || 'New model', `Edit ${m.name}`, () => select(m.key)), el('code', m.model || 'Set model ID'));
       if (!m.id) item.append(button('Discard', 'Discard new model', () => { state.models = state.models.filter(row => row !== m); if (selected === m.key) selected = null; mark(); render(); select(selected); }));
       const add = button(m.enabled ? 'In sequence' : 'Add →', `Add ${m.name} to sequence`, () => { m.enabled = true; mark(); render(); });
-      add.disabled = m.enabled; item.append(add); $('model-library').append(item);
+      add.disabled = m.enabled; item.append(add); if (!m.enabled) $('model-library').append(item);
       if (!m.enabled) continue;
       const node = el('li', '', 'workflow-node'); node.draggable = true;
       node.dataset.key = m.key;
@@ -134,6 +139,7 @@
   }
   function hydrate(data) { const selectedIndex = state?.models.findIndex(m => m.key === selected) ?? -1; state = data; state.models.forEach(m => { m.key = `model-${m.id}`; }); selected = state.models[selectedIndex]?.key ?? null; render(); }
   $('model-new').onclick = () => { const m = {id: null, key: `new-${++nextKey}`, name: 'New model', kind: 'codex_cli', model: '', effort: '', enabled: false}; state.models.push(m); selected = m.key; mark(); render(); $('model-name').focus(); };
+  $('model-close').onclick = () => { select(null); document.querySelector('#workflow-chain button, [data-model-library] summary')?.focus({preventScroll:true}); };
   $('model-kind').onchange = () => { $('model-effort').disabled = $('model-kind').value !== 'codex_cli'; if ($('model-effort').disabled) $('model-effort').value = ''; };
   $('model-settings').onsubmit = e => {
     e.preventDefault(); const m = selectedModel();

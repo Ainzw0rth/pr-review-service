@@ -60,6 +60,8 @@ ERROR_REASONS = {
     "output_incomplete": "Provider stopped before producing a complete review. Nothing was published.",
     "response_too_large": "Provider response exceeded the service's response-size limit.",
     "context_limit": "Review context exceeded the service's request-size limit.",
+    "review_incomplete": "A required specialist reported incomplete review coverage. Nothing was published.",
+    "review_timeout": "A review phase exceeded its time budget. Nothing was published.",
 }
 
 VALIDATION_REASONS = {
@@ -419,6 +421,10 @@ def response_diagnostics(status, headers, data):
 def review_contract(task="review"):
     if task == "review":
         return SCHEMA, SYSTEM, validate_result
+    if task in {"review_code", "review_security", "review_tests", "review_synthesis"}:
+        from .review_team import contract
+
+        return contract(task)
     if task not in {"intent", "review_v2"}:
         raise ProviderError("invalid", detail="output_invalid")
     from .review_v2 import contract
@@ -508,6 +514,8 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None, 
         ):
             body = bytearray()
             for chunk in response.iter_bytes():
+                if cancelled():
+                    raise ReviewCancelled()
                 body.extend(chunk)
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise ProviderError("invalid", detail="response_too_large")

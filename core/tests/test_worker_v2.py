@@ -27,6 +27,7 @@ V2_RESULT = {
 
 
 @override_settings(LIVE_WRITES=True)
+@patch("core.workflow_schema.REVISION", "v2.1")
 class WorkerV2Tests(TestCase):
     snapshot = test_workflow.WorkflowTests.snapshot
     event = test_workflow.WorkflowTests.event

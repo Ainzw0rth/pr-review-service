@@ -81,6 +81,25 @@ def snapshot(job, events):
             "finished_at": finished.created_at if finished else None,
         }
 
+    def phase_node(key, title, prefix, detail, phase_events):
+        relevant = [e for e in phase_events if e.code in {f"{prefix}_started", f"{prefix}_ready"}]
+        stage = node(key, title, set(), set(), detail=detail)
+        started = next((e for e in reversed(relevant) if e.code == f"{prefix}_started"), None)
+        if started:
+            stage["started_at"] = started.created_at
+        if relevant:
+            if relevant[-1].code == f"{prefix}_ready":
+                stage.update(state="done", finished_at=relevant[-1].created_at)
+            else:
+                stage["state"] = (
+                    "running"
+                    if job.status == "running"
+                    else "cancelled"
+                    if job.status in {"cancelled", "superseded"}
+                    else "attention"
+                )
+        return stage
+
     context_done = {"context_ready"}
     stages = [
         node(
@@ -148,33 +167,13 @@ def snapshot(job, events):
         )
     if includes("intent", False):
         # Each provider runs its own phase; older success cannot finish a later start.
-        intent_events = [
-            event for event in events if event.code in {"intent_started", "intent_ready"}
-        ]
-        intent = node(
+        intent = phase_node(
             "intent",
             "Grounded intent",
-            {"intent_started"},
-            {"intent_ready"},
-            detail="Requirements, inferred intent & unknowns from fetched evidence",
+            "intent",
+            "Requirements, inferred intent & unknowns from fetched evidence",
+            events,
         )
-        latest_start = next(
-            (event for event in reversed(intent_events) if event.code == "intent_started"), None
-        )
-        if latest_start:
-            intent["started_at"] = latest_start.created_at
-        if intent_events and intent_events[-1].code == "intent_ready":
-            intent["finished_at"] = intent_events[-1].created_at
-        if intent_events and intent_events[-1].code == "intent_started":
-            intent["state"] = (
-                "running"
-                if job.status == "running"
-                else "cancelled"
-                if job.status in {"cancelled", "superseded"}
-                else "attention"
-            )
-            intent["started_at"] = intent_events[-1].created_at
-            intent["finished_at"] = None
         stages.insert(next(i for i, stage in enumerate(stages) if stage["id"] == "checks"), intent)
     latest_ci = next(
         (
@@ -204,6 +203,37 @@ def snapshot(job, events):
         if "tests_failed" in codes:
             tests["state"] = "blocked"
         stages.append(tests)
+    latest_intent = next(
+        (i for i in reversed(range(len(events))) if events[i].code == "intent_started"), 0
+    )
+    for key, title, phase, detail in (
+        (
+            "code_review",
+            "Code reviewer",
+            "code",
+            "Correctness, requirements, performance & integration",
+        ),
+        (
+            "security_review",
+            "Security reviewer",
+            "security",
+            "Authorization, vulnerabilities & trust boundaries",
+        ),
+        (
+            "test_review",
+            "Test reviewer",
+            "tests",
+            "Regression scenarios, edge cases & failure paths",
+        ),
+        (
+            "synthesis",
+            "Review adjudication",
+            "synthesis",
+            "Verify evidence, reconcile findings & retain attribution",
+        ),
+    ):
+        if includes(key, False):
+            stages.append(phase_node(key, title, phase, detail, events[latest_intent:]))
     stages.append(
         node(
             "publication",
@@ -309,7 +339,15 @@ def snapshot(job, events):
         ):
             evidence_read = evidence_total = None
         phase = attempt.diagnostics.get("phase")
-        if not isinstance(phase, str) or phase not in {"intent", "review"}:
+        if not isinstance(phase, str) or phase not in {
+            "intent",
+            "review",
+            "code",
+            "security",
+            "tests",
+            "specialists",
+            "synthesis",
+        }:
             phase = None
         group["attempts"].append(
             {
@@ -361,6 +399,8 @@ def snapshot(job, events):
     model_detail = (
         "Saved analysis reused for delivery; no additional model call."
         if "delivery_resume" in codes
+        else "Grounded intent → independent code, security and test reviews → evidence-backed adjudication. API reviews overlap; subscription CLI sessions run sequentially."
+        if includes("synthesis", False)
         else "Each model extracts intent first, then reviews code after the intent summary is validated."
         if includes("intent", False)
         else "Each attempt shows its recorded failure cause and what happened next."

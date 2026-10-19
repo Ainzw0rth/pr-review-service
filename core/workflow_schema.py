@@ -3,8 +3,9 @@
 from django.conf import settings
 
 # Bump for review-step or behavior changes. Keep old stage IDs/renderers available.
-REVISION = "v2.1"
-GROUNDED_REVISIONS = {"v2", "v2.1"}
+REVISION = "v3"
+TEAM_REVISIONS = {"v3"}
+GROUNDED_REVISIONS = {"v2", "v2.1", *TEAM_REVISIONS}
 
 # Fixed pre-versioning vocabulary: never add future stages to legacy attempts.
 LEGACY_STEPS = ("files", "discussion", "docs", "graph", "checks", "tests", "publication", "sheet")
@@ -17,6 +18,8 @@ def snapshot(repository):
     steps.extend(["intent", "checks"])
     if repository.test_command:
         steps.append("tests")
+    if REVISION in TEAM_REVISIONS:
+        steps.extend(["code_review", "security_review", "test_review", "synthesis"])
     steps.extend(
         [
             "pr_summary",

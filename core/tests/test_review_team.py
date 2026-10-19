@@ -1,0 +1,403 @@
+import copy
+import json
+import shutil
+import subprocess
+import threading
+import time
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import TestCase, skipUnless
+from unittest.mock import patch
+
+import httpx
+
+from core.cli import CLIStream
+from core.providers import ProviderError, ReviewCancelled, review_contract
+from core.tests.test_review_v2 import context, intent, result
+
+
+def report(*, finding=False, complete=True):
+    return {
+        "summary": "Checked affected behavior.",
+        "complete": complete,
+        "coverage": {"reviewed": ["Widget flow and its callers"], "limitations": []},
+        "findings": [
+            {
+                "id": "F1",
+                "path": "widget.py",
+                "line": 3,
+                "severity": "blocking",
+                "scenario": "Existing widget is saved.",
+                "evidence": [{"source": "files_0", "quote": "secret"}],
+                "impact": "Existing widget content is lost.",
+                "fix": "Preserve existing widget content.",
+            }
+        ]
+        if finding
+        else [],
+    }
+
+
+def synthesis(*, findings=False):
+    value = result()
+    value["assessments"] = []
+    value["reviewer_summaries"] = {
+        "code": "Checked requirements and widget behavior.",
+        "security": "Checked widget trust boundaries.",
+        "tests": "Checked regression and failure-path coverage.",
+    }
+    if findings:
+        value["blocking"] = True
+        value["findings"] = [
+            {
+                "path": "widget.py",
+                "line": 3,
+                "body": "Saving an existing widget discards its content. Preserve it.",
+                "severity": "blocking",
+            }
+        ]
+        value["action_plan"]["inline_findings"]["decision"] = "publish"
+        value["assessments"] = [
+            {
+                "finding_id": "code:F1",
+                "decision": "keep",
+                "reason": "Current source confirms content loss.",
+                "finding_index": 0,
+                "evidence": [{"source": "files_0", "quote": "secret"}],
+            }
+        ]
+    return value
+
+
+class TeamContractTests(TestCase):
+    @skipUnless(shutil.which("node"), "CLI artifact serialization requires Node")
+    def test_verbatim_cli_json_excerpts_are_valid_original_evidence(self):
+        from core.review_team import validate_report
+
+        serialized = subprocess.run(
+            [
+                "node",
+                "--input-type=module",
+                "-e",
+                "import {artifacts} from './cli/evidence.mjs'; let raw=''; for await (const chunk of process.stdin) raw+=chunk; console.log(artifacts(JSON.parse(raw)).find(item=>item.id==='files_0').text);",
+            ],
+            input=json.dumps(context()),
+            text=True,
+            capture_output=True,
+            check=True,
+            cwd=Path(__file__).resolve().parents[2],
+        ).stdout.strip()
+        value = report(finding=True)
+        value["findings"][0]["evidence"][0]["quote"] = serialized
+        self.assertEqual(validate_report(value, context()), value)
+
+    def test_all_specialists_and_synthesis_have_validated_transport_contracts(self):
+        for task in ("review_code", "review_security", "review_tests", "review_synthesis"):
+            with self.subTest(task=task):
+                try:
+                    schema, policy, validate = review_contract(task)
+                except ProviderError:
+                    self.fail(f"Required review contract unavailable: {task}")
+                self.assertIn("You have no tools or credentials.", policy)
+                self.assertIn("Return only the requested structured review.", policy)
+                value = synthesis() if task == "review_synthesis" else report()
+                self.assertEqual(validate(value), value)
+                self.assertFalse(schema["additionalProperties"])
+
+    def test_rejects_fabricated_evidence_locations_empty_claims_and_duplicate_ids(self):
+        from core.review_team import validate_report
+
+        mutations = [
+            lambda r: r["findings"][0].update(path="../secret"),
+            lambda r: r["findings"][0].update(line=4),
+            lambda r: r["findings"][0]["evidence"][0].update(source="invented"),
+            lambda r: r["findings"][0]["evidence"][0].update(quote="not in the evidence"),
+            lambda r: r["findings"][0].update(impact=" "),
+            lambda r: r["findings"].append(copy.deepcopy(r["findings"][0])),
+            lambda r: r["coverage"].update(reviewed=[]),
+        ]
+        self.assertEqual(validate_report(report(finding=True), context())["complete"], True)
+        for mutate in mutations:
+            value = report(finding=True)
+            mutate(value)
+            with self.subTest(value=value), self.assertRaises(ProviderError):
+                validate_report(value, context())
+
+    def test_every_candidate_must_be_accounted_for_and_blocks_cannot_be_downgraded(self):
+        from core.review_team import finalize
+
+        reports = {"code": report(finding=True), "security": report(), "tests": report()}
+        mutations = [
+            lambda r: r.update(assessments=[]),
+            lambda r: r["assessments"][0].update(finding_id="invented:F1"),
+            lambda r: r["assessments"].append(copy.deepcopy(r["assessments"][0])),
+            lambda r: r["assessments"][0].update(reason=" "),
+            lambda r: r["assessments"][0].update(finding_index=9),
+            lambda r: r["findings"][0].update(severity="suggestion"),
+            lambda r: r["findings"].append(copy.deepcopy(r["findings"][0])),
+        ]
+        for mutate in mutations:
+            value = synthesis(findings=True)
+            mutate(value)
+            with self.subTest(value=value), self.assertRaises(ProviderError):
+                finalize(value, reports, context())
+
+    def test_duplicate_root_cause_publishes_once_with_both_reviewers_attributed(self):
+        from core.review_team import finalize
+
+        reports = {
+            "code": report(finding=True),
+            "security": report(finding=True),
+            "tests": report(),
+        }
+        value = synthesis(findings=True)
+        value["assessments"].append(
+            {
+                "finding_id": "security:F1",
+                "decision": "merge",
+                "reason": "Same loss.",
+                "finding_index": 0,
+                "evidence": [{"source": "files_0", "quote": "secret"}],
+            }
+        )
+        final = finalize(value, reports, context())
+        self.assertEqual(len(final["findings"]), 1)
+        self.assertTrue(final["blocking"])
+        self.assertIn("Code", final["findings"][0]["body"])
+        self.assertIn("Security", final["findings"][0]["body"])
+        self.assertIn("Test", final["summary"])
+        self.assertNotIn("assessments", final)
+
+    def test_rejection_requires_reason_and_no_published_finding(self):
+        from core.review_team import finalize
+
+        reports = {"code": report(finding=True), "security": report(), "tests": report()}
+        value = synthesis()
+        value["assessments"] = [
+            {
+                "finding_id": "code:F1",
+                "decision": "reject",
+                "reason": "Caller preserves content before saving.",
+                "finding_index": -1,
+                "evidence": [{"source": "files_0", "quote": "secret"}],
+            }
+        ]
+        self.assertFalse(finalize(value, reports, context())["blocking"])
+        value["assessments"][0]["finding_index"] = 0
+        with self.assertRaises(ProviderError):
+            finalize(value, reports, context())
+
+
+class TeamExecutionTests(TestCase):
+    def run_team(self, call, *, kind="codex_cli", cancelled=lambda: False, **kwargs):
+        from core.review_orchestration import run_team
+
+        evidence = {**context(), "intent": intent()}
+        return run_team(SimpleNamespace(kind=kind), evidence, cancelled, call=call, **kwargs)
+
+    def test_cli_roles_are_independent_serial_and_synthesis_retains_original_evidence(self):
+        tasks = []
+        snapshots = []
+
+        def call(provider, evidence, cancelled, **kwargs):
+            tasks.append(kwargs["task"])
+            snapshots.append(copy.deepcopy(evidence))
+            evidence["pr"]["body"] = "mutated"
+            return synthesis() if kwargs["task"] == "review_synthesis" else report()
+
+        final, audit = self.run_team(call)
+        self.assertEqual(
+            tasks, ["review_code", "review_security", "review_tests", "review_synthesis"]
+        )
+        for evidence in snapshots:
+            self.assertEqual(evidence["pr"]["body"], "Must preserve old widgets")
+            self.assertEqual(evidence["intent"], intent())
+        self.assertTrue(all("reviewer_reports" not in c for c in snapshots[:3]))
+        self.assertEqual(set(snapshots[-1]["reviewer_reports"]), {"code", "security", "tests"})
+        self.assertEqual(set(audit["reports"]), {"code", "security", "tests"})
+        self.assertTrue(final["complete"])
+
+    def test_api_roles_overlap_but_all_callbacks_run_on_controller_thread(self):
+        barrier = threading.Barrier(3)
+        controller = threading.get_ident()
+        callbacks = []
+
+        def call(provider, evidence, cancelled, **kwargs):
+            if kwargs["task"] == "review_synthesis":
+                return synthesis()
+            barrier.wait(timeout=3)
+            kwargs["on_response"]({"input_tokens": 10})
+            kwargs["on_activity"]("cli_output_status", "Checking affected flow.")
+            return report()
+
+        self.run_team(
+            call,
+            kind="openai",
+            on_response=lambda phase, data: callbacks.append((phase, threading.get_ident())),
+            on_activity=lambda phase, code, text: callbacks.append((phase, threading.get_ident())),
+        )
+        self.assertTrue(callbacks)
+        self.assertTrue(all(thread == controller for _, thread in callbacks))
+        self.assertEqual(
+            {phase for phase, _ in callbacks}, {"code", "security", "tests", "synthesis"}
+        )
+
+    def test_failed_or_incomplete_required_reviewer_never_reaches_synthesis(self):
+        for failure in (ProviderError("unavailable"), report(complete=False)):
+            tasks = []
+
+            def call(provider, evidence, cancelled, **kwargs):
+                tasks.append(kwargs["task"])
+                if kwargs["task"] == "review_security":
+                    if isinstance(failure, Exception):
+                        raise failure
+                    return failure
+                return report()
+
+            with self.subTest(failure=failure), self.assertRaises(ProviderError):
+                self.run_team(call)
+            self.assertNotIn("review_synthesis", tasks)
+
+    def test_cancellation_after_role_prevents_remaining_cli_calls(self):
+        stopped = False
+        tasks = []
+
+        def call(provider, evidence, cancelled, **kwargs):
+            nonlocal stopped
+            tasks.append(kwargs["task"])
+            stopped = True
+            return report()
+
+        with self.assertRaises(ReviewCancelled):
+            self.run_team(call, cancelled=lambda: stopped)
+        self.assertEqual(tasks, ["review_code"])
+
+    def test_phase_deadline_prevents_clearance_and_exposes_only_safe_error(self):
+        def call(provider, evidence, cancelled, **kwargs):
+            cancelled()
+            return report()
+
+        # First clock read starts a phase; second exceeds its deadline.
+        with patch("core.review_orchestration.time.monotonic", side_effect=[0, 10000]):
+            with self.assertRaises(ProviderError) as caught:
+                self.run_team(call)
+        self.assertEqual(caught.exception.detail, "review_timeout")
+
+    def test_failed_api_reviewer_cancels_and_joins_remaining_reviewers(self):
+        barrier = threading.Barrier(3)
+        exited = set()
+        lock = threading.Lock()
+
+        def call(provider, evidence, cancelled, **kwargs):
+            task = kwargs["task"]
+            barrier.wait(timeout=3)
+            if task == "review_security":
+                raise ProviderError("unavailable")
+            deadline = time.monotonic() + 3
+            while not cancelled() and time.monotonic() < deadline:
+                threading.Event().wait(0.01)
+            if not cancelled():
+                self.fail("Peer reviewer was not cancelled")
+            with lock:
+                exited.add(task)
+            raise ReviewCancelled()
+
+        with self.assertRaises(ProviderError):
+            self.run_team(call, kind="openai")
+        self.assertEqual(exited, {"review_code", "review_tests"})
+
+    def test_peer_quota_and_auth_errors_take_precedence_over_recoverable_failure(self):
+        for fatal in ("quota", "auth"):
+            barrier = threading.Barrier(3)
+
+            def call(provider, evidence, cancelled, **kwargs):
+                barrier.wait(timeout=3)
+                if kwargs["task"] == "review_security":
+                    raise ProviderError("unavailable")
+                # Simulate another in-flight request receiving a terminal account error.
+                threading.Event().wait(0.03)
+                if kwargs["task"] == "review_code":
+                    kwargs["on_response"]({"input_tokens": 10})
+                    raise ProviderError(fatal)
+                raise ReviewCancelled()
+
+            callbacks = []
+            with self.subTest(fatal=fatal), self.assertRaises(ProviderError) as caught:
+                self.run_team(
+                    call, kind="openai", on_response=lambda p, data: callbacks.append((p, data))
+                )
+            self.assertEqual(caught.exception.kind, fatal)
+            self.assertEqual(callbacks[-1], ("code", {"input_tokens": 10}))
+
+
+class TeamTransportTests(TestCase):
+    def test_all_tasks_use_role_contracts_in_both_cli_parsers(self):
+        for kind in ("codex_cli", "claude_cli"):
+            for task in ("review_code", "review_security", "review_tests", "review_synthesis"):
+                value = synthesis() if task == "review_synthesis" else report()
+                with self.subTest(kind=kind, task=task):
+                    parser = CLIStream(kind, task=task)
+                    if kind == "codex_cli":
+                        parser.feed(
+                            {
+                                "type": "item.completed",
+                                "item": {"type": "agent_message", "text": json.dumps(value)},
+                            }
+                        )
+                        parser.feed({"type": "turn.completed"})
+                    else:
+                        parser.feed(
+                            {"type": "result", "subtype": "success", "structured_output": value}
+                        )
+                    self.assertEqual(parser.result(0), value)
+
+    def test_role_and_synthesis_schemas_reach_both_api_adapters(self):
+        from core.providers import review
+
+        real_client = httpx.Client
+        for kind in ("openai", "anthropic"):
+            for task in ("review_code", "review_security", "review_tests", "review_synthesis"):
+                value = synthesis() if task == "review_synthesis" else report()
+                requests = []
+
+                def respond(request):
+                    requests.append(json.loads(request.content))
+                    body = (
+                        {
+                            "status": "completed",
+                            "output": [
+                                {
+                                    "type": "message",
+                                    "content": [{"type": "output_text", "text": json.dumps(value)}],
+                                }
+                            ],
+                        }
+                        if kind == "openai"
+                        else {
+                            "stop_reason": "end_turn",
+                            "content": [{"type": "text", "text": json.dumps(value)}],
+                        }
+                    )
+                    return httpx.Response(200, json=body)
+
+                provider = SimpleNamespace(
+                    kind=kind,
+                    model="configured",
+                    credential=SimpleNamespace(encrypted_value="unused"),
+                )
+                with (
+                    self.subTest(kind=kind, task=task),
+                    patch("core.providers.decrypt", return_value="unused"),
+                    patch(
+                        "core.providers.httpx.Client",
+                        return_value=real_client(transport=httpx.MockTransport(respond)),
+                    ),
+                ):
+                    self.assertEqual(review(provider, context(), lambda: False, task=task), value)
+                schema = (
+                    requests[0]["text"]["format"]["schema"]
+                    if kind == "openai"
+                    else requests[0]["output_config"]["format"]["schema"]
+                )
+                self.assertEqual("assessments" in schema["properties"], task == "review_synthesis")
+                self.assertEqual("coverage" in schema["properties"], task != "review_synthesis")

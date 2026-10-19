@@ -1,7 +1,7 @@
 {% if graph_cards %}<section class="graph-section" aria-labelledby="graph-title">
 <div class="section-heading"><div><p class="section-number">SETUP / REPOSITORY READINESS</p><h2 id="graph-title">Dependency graphs.</h2></div><span class="quiet">LIVE CACHE STATE</span></div>
 <div class="graph-cards">{% for graph in graph_cards %}
-<article class="graph-card graph-{{ graph.state }}">
+<article class="graph-card graph-{{ graph.state }}" data-graph-state="{{ graph.state }}">
 <header><h3>{{ graph.repository }}</h3><span class="graph-badge">{{ graph.label }}</span></header>
 <ol class="graph-track" aria-label="Graph setup steps">
 <li class="complete"><span aria-hidden="true">01</span>Repository connected</li>

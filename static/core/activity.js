@@ -12,7 +12,8 @@
   let transcriptMode = "cli", terminalEvents = [];
   const cliKinds = new Set(["cli_output_text","cli_output_tool","cli_output_done","cli_output_failed","cli_output_status"]);
   const labels = {pending:'Waiting', unused:'Not used', not_needed:'Not needed', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', failed:'Review failed', skipped:'Skipped · quota', incomplete:'Incomplete evidence', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
-  const phaseLabels = {intent:'Extracting intent',review:'Reviewing code'};
+  const phaseNames = {intent:'Intent',review:'Review',code:'Code reviewer',security:'Security reviewer',tests:'Test reviewer',specialists:'Specialist reviews',synthesis:'Adjudication'};
+  const phaseLabels = {intent:'Extracting intent',review:'Reviewing code',code:'Code review',security:'Security review',tests:'Test review',specialists:'Specialist reviews',synthesis:'Adjudicating findings'};
   const stateLabel = (state,phase) => state === 'running' && Object.hasOwn(phaseLabels,phase) ? phaseLabels[phase] : state === 'failed' && phase === 'intent' ? 'Intent failed' : labels[state] || 'Needs attention';
   const jakartaFormat = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -37,6 +38,12 @@
     const node = element('article', `flow-node node-${state}${model ? ' model-node' : ''}`);
     const latestAttempt = model ? data.attempts.at(-1) : null;
     const top = element('div', 'node-topline');
+    if (!model && data.id) {
+      node.dataset.stageId = data.id;
+      node.dataset.state = state;
+      const previous = graph.querySelector(`[data-stage-id="${data.id}"]`);
+      if (previous && previous.dataset.state !== state) top.classList.add('motion-enter');
+    }
     top.append(element('span','node-number',String(index + 1).padStart(2,'0')),element('span',`node-state state-${state}`,stateLabel(state,latestAttempt?.phase)));
     node.append(top);
     if (model) {
@@ -58,6 +65,7 @@
         row.append(line,element('p','try-time',shortTime(attempt.started_at)));
         if (attempt.phase === 'intent') row.append(element('p','try-progress',attempt.state !== 'running' ? 'Phase: Intent extraction.' : attempt.evidence_total > 0 && attempt.evidence_read === attempt.evidence_total ? 'All intent evidence supplied; awaiting a validated intent summary.' : 'Extracting requirements before code review.'));
         else if (attempt.phase === 'review') row.append(element('p','try-progress','Phase: Code review.'));
+        else if (Object.hasOwn(phaseNames,attempt.phase)) row.append(element('p','try-progress',`Phase: ${phaseNames[attempt.phase]}.`));
         if (attempt.recovery_pass === 1) row.append(element('p','try-progress','Evidence recovery pass 1 of 1 · fresh session'));
         if (attempt.events_received !== null && attempt.events_received !== undefined) row.append(element('p','try-progress',`${attempt.events_received} CLI events received`));
         if (attempt.evidence_total !== null && attempt.evidence_total !== undefined) row.append(element('p','try-progress',`${attempt.evidence_read} / ${attempt.evidence_total} evidence items supplied`));
@@ -66,13 +74,14 @@
           usage.dataset.attemptId = String(attempt.id);
           usage.open = Boolean(graph.querySelector(`details[data-attempt-id="${attempt.id}"][open]`));
           usage.append(element('summary','try-label',`Usage · ${attempt.usage.session_count} CLI/API session(s)`));
+          usage.querySelector('summary').dataset.flowFocus = `usage-${attempt.id}`;
           const labels = {input_tokens:'Input',cached_input_tokens:'Cache read',cache_creation_input_tokens:'Cache creation',output_tokens:'Output'};
           const show = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString() : 'Unavailable';
           const totals = element('dl','usage-grid');
           for (const [key,label] of Object.entries(labels)) totals.append(element('dt','',label),element('dd','',show(attempt.usage.totals[key])));
           usage.append(totals,element('p','node-detail','Provider-reported tokens. Claude input excludes separately reported cache tokens; Codex cache reads are part of input. Not subscription charges.'));
           if (attempt.usage.passes.length > 1) {
-            attempt.usage.passes.forEach((pass,index) => usage.append(element('p','node-detail',`${pass.phase ? (pass.phase === 'intent' ? 'Intent' : 'Review') + ' · ' + (pass.recovery_pass ? 'Recovery' : 'Initial') : index ? 'Recovery' : 'Initial'}: input ${show(pass.input_tokens)} · output ${show(pass.output_tokens)} · cache read ${show(pass.cached_input_tokens)}`)));
+            attempt.usage.passes.forEach((pass,index) => usage.append(element('p','node-detail',`${pass.phase ? (phaseNames[pass.phase] || 'Review') + ' · ' + (pass.recovery_pass ? 'Recovery' : 'Initial') : index ? 'Recovery' : 'Initial'}: input ${show(pass.input_tokens)} · output ${show(pass.output_tokens)} · cache read ${show(pass.cached_input_tokens)}`)));
           }
           row.append(usage);
         }
@@ -100,10 +109,74 @@
   }
   function renderFlow(flow) {
     const fragment = document.createDocumentFragment();
+    const focused = graph.contains(document.activeElement) ? document.activeElement.dataset.flowFocus : null;
+    const specialists = flow.stages.filter(n => ['code_review','security_review','test_review','synthesis'].includes(n.id));
+    const sessions = flow.models.flatMap(model => model.attempts.map(attempt => ({model,attempt})));
+    const current = sessions.reduce((latest,row) => !latest || row.attempt.id > latest.attempt.id ? row : latest,null);
+    function overall(nodes) {
+      if (!nodes.length) return 'pending';
+      if (nodes.some(n => n.state === 'blocked')) return 'blocked';
+      if (nodes.some(n => ['running','cancelling'].includes(n.state))) return 'running';
+      if (nodes.every(n => ['done','success','not_needed','unused'].includes(n.state))) return 'done';
+      if (nodes.some(n => ['attention','failed','refused','unavailable','quota','incomplete','interrupted'].includes(n.state))) return 'attention';
+      if (nodes.some(n => n.state === 'cancelled')) return 'cancelled';
+      if (nodes.some(n => ['done','success','not_needed'].includes(n.state))) return panel.dataset.jobState === 'running' ? 'running' : 'attention';
+      return 'pending';
+    }
+    const overview = element('ol','review-progress');
+    const groups = [
+      ['evidence','Evidence',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id))],
+      ['checks','Checks',flow.stages.filter(n => ['checks','tests'].includes(n.id))],
+      ['review','Review',specialists.length ? specialists : current ? [current.attempt] : flow.legacy ? flow.models : []],
+      ['delivery','GitHub',flow.stages.filter(n => ['publication','pr_summary','inline_findings','discussion_replies','related_pr_comments','related_issue_comments','labels','sheet'].includes(n.id))],
+    ];
+    for (const [id,title,nodes] of groups) {
+      const state = overall(nodes);
+      const step = element('li',`progress-step node-${state}`);
+      step.dataset.progressId = id;
+      step.dataset.state = state;
+      const status = element('span','node-state',labels[state] || 'Not started');
+      const previous = graph.querySelector(`[data-progress-id="${id}"]`);
+      if (previous && previous.dataset.state !== state) status.classList.add('motion-enter');
+      step.append(element('span','progress-title',title),status);
+      overview.append(step);
+    }
+    fragment.append(overview);
+    if (current) {
+      const provider = element('p','review-provider');
+      provider.append(element('strong','',current.model.title),document.createTextNode(` · ${stateLabel(current.attempt.state,current.attempt.phase)}`));
+      fragment.append(provider);
+      if (['attention','failed','quota'].includes(panel.dataset.jobState) && current.attempt.failure_reason) {
+        fragment.append(element('p','review-failure',`${current.attempt.failure_reason} ${current.attempt.next_action || ''}`));
+      }
+    }
+    if (specialists.length) {
+      const team = element('section','review-team');
+      team.append(element('h3','','Review team'));
+      const list = element('ul','review-team-list');
+      for (const stage of specialists) {
+        const row = element('li',`review-team-row node-${stage.state}`);
+        row.dataset.stageId = stage.id;
+        row.dataset.state = stage.state;
+        const status = element('span','node-state',labels[stage.state] || 'Not started');
+        const previous = graph.querySelector(`[data-stage-id="${stage.id}"]`);
+        if (previous && previous.dataset.state !== stage.state) status.classList.add('motion-enter');
+        row.append(element('span','',stage.title),status);
+        list.append(row);
+      }
+      team.append(list); fragment.append(team);
+    }
+    const details = element('details','disclosure review-technical');
+    details.dataset.flowDetails = '';
+    details.open = Boolean(graph.querySelector('[data-flow-details]')?.open);
+    const summary = element('summary','','Technical details');
+    summary.dataset.flowFocus = 'technical';
+    summary.append(element('span','disclosure-hint','Evidence, model attempts & delivery'));
+    details.append(summary);
     const sections = [
       ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id)),false],
       ['02','Verify the change','Checks run against this exact commit.',flow.stages.filter(n => ['checks','tests'].includes(n.id)),false],
-      ['03',flow.stages.some(stage => stage.id === 'intent') ? 'AI model sessions' : 'Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models,true],
+      ['03',flow.stages.some(stage => stage.id === 'intent') ? 'AI model sessions' : 'Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models.filter(model => model.attempts.length || flow.legacy),true],
       ['04','Deliver the review','Results belong on GitHub, not in this dashboard.',flow.stages.filter(n => ['publication','pr_summary','inline_findings','discussion_replies','related_pr_comments','related_issue_comments','labels','sheet'].includes(n.id)),false],
     ];
     for (const [number,title,description,nodes,model] of sections) {
@@ -114,10 +187,12 @@
       heading.append(label,element('p','lane-description',description));
       const grid = element('div',`node-track${model ? ' model-track' : ''}`);
       nodes.forEach((node,index) => grid.append(card(node,index,model)));
-      if (!nodes.length) grid.append(element('p','node-detail','No model connection configured.'));
-      section.append(heading,grid); fragment.append(section);
+      if (!nodes.length) grid.append(element('p','node-detail','No model session recorded.'));
+      section.append(heading,grid); details.append(section);
     }
+    fragment.append(details);
     graph.replaceChildren(fragment);
+    if (focused) [...graph.querySelectorAll('[data-flow-focus]')].find(node => node.dataset.flowFocus === focused)?.focus({preventScroll:true});
     panel.querySelector('.flow-legacy').hidden = !flow.legacy;
   }
   function renderTranscript() {

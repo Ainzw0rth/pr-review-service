@@ -92,7 +92,11 @@ flowchart TB
     queue["Persist review attempt<br/>Pin commit SHA and human review cycle"]
     context["Worker collects changed code, docs,<br/>open threads, linked issues and related PRs"]
     ci["Read current-commit CI<br/>Wait while checks run; run optional local tests"]
-    model["Call configured model<br/>Validate structured output and thread assessments"]
+    intent["Configured model: synthesize grounded intent<br/>Validate evidence citations"]
+    code["Code reviewer<br/>Correctness, requirements and integration"]
+    security["Security reviewer<br/>Authorization, vulnerabilities and trust boundaries"]
+    tests["Test reviewer<br/>Regression scenarios and failure paths"]
+    model["Orchestrator<br/>Validate evidence, reconcile and deduplicate findings"]
     guard{"Same commit, eligible cycle<br/>and unchanged discussion?"}
     stale["Stop stale attempt<br/>Human requests a fresh review"]
     publish["Publish concise findings and replies on GitHub<br/>Resolve verified fixes; keep remaining gaps open"]
@@ -105,7 +109,11 @@ flowchart TB
 
     human --> ingress --> eligible
     eligible -->|No| ignore
-    eligible -->|Yes| queue --> context --> ci --> model --> guard
+    eligible -->|Yes| queue --> context --> ci --> intent
+    intent --> code --> model
+    intent --> security --> model
+    intent --> tests --> model
+    model --> guard
     guard -->|No| stale
     guard -->|Yes| publish --> outcome
     outcome -->|No| feedback --> fix --> human
@@ -702,7 +710,7 @@ workflow edits become available. This page does not change CI or publication gua
 
 ### Per-attempt workflow history
 
-Each new `Job` (review attempt) stores `workflow_revision` (currently `v2.1`) and
+Each new `Job` (review attempt) stores `workflow_revision` (currently `v3`) and
 `workflow_steps` (an ordered JSON list of planned stage IDs) on its database row.
 Optional graph, isolated-test and timeline stages are selected at creation. The
 dashboard uses this saved list rather than current repository settings, so later
@@ -774,8 +782,9 @@ checkpoint without new intent/review calls. Fallback providers run their own
 intent pass, and reported usage distinguishes intent/review plus recovery sessions.
 This adds model time/quota; it does not estimate subscription costs from tokens.
 
-Existing legacy/v1/v1.1 attempts retain their historical schema and diagram. New
-review attempts use v2.1; delivery-only retries retain the original revision.
+Existing legacy/v1/v1.1 attempts retain their historical schema and diagram.
+V2/v2.1 attempts retain the two-pass review described here; new attempts now use v3.
+Delivery-only retries retain the original revision.
 Deploy migration `0018` and rebuild the application and CLI images together using
 the drain/idle/backup/migrate procedure. No live migration or deployment is
 performed by adding these files.
@@ -789,6 +798,57 @@ diagnostic reasons; raw responses and source values are never added to diagnosti
 Existing v2 attempts and encrypted delivery checkpoints remain supported. This fix
 needs only the normal schema-compatible application deployment, with no migration
 or CLI-image rebuild. Paused historical jobs are not resumed automatically.
+
+### Workflow v3: specialist reviews and adjudication
+
+After grounded-intent validation, the selected provider runs three fixed, independent
+reviews against the same original commit-pinned evidence and intent:
+
+| Reviewer | Scope |
+| --- | --- |
+| Code | Correctness, requirements compliance, integration, algorithms, realistic performance, races and resource handling |
+| Security | Vulnerabilities, authentication/authorization, injection, secrets, dependency evidence, trust boundaries and resource exhaustion |
+| Test | Concrete missing scenarios, edge cases, regressions, test quality and failure-path coverage |
+
+Direct API specialists run concurrently with a maximum of three calls. Subscription
+CLI specialists run sequentially because sessions share a writable authentication
+volume. Specialists never receive their peers' reports. Each reports coverage and
+limitations, plus structured candidate findings anchored to supplied changed lines.
+Finding citations use exact original-artifact IDs and verbatim source excerpts.
+Unknown artifacts, invented excerpts, duplicate IDs and incomplete required coverage
+fail validation. Citation matching proves source presence, not semantic correctness.
+
+One synthesis pass receives all three reports **and the full original evidence**.
+It must keep, merge or explicitly reject every candidate, with a reason and original
+source citations. Decisions are evidence-based, never majority voting. Every final
+finding must map to retained candidates; retained blocking findings cannot be
+downgraded, and duplicate root causes share one finding with reviewer attribution.
+The final summary includes concise Code, Security and Test perspectives. Existing
+thread assessments, optional action plans, required CI and publication guards remain.
+The Test Reviewer does not replace actual CI or isolated test execution.
+
+New specialist and adjudication phases each have a 15-minute work budget, with
+existing transport cleanup timeouts still applying. Existing context/response size
+limits and API output-token caps remain enforced. CLI evidence recovery is still
+limited to one fresh pass per phase. This means five model phases per successful
+provider attempt (intent, three specialists, synthesis), plus bounded CLI recovery;
+fallback providers rerun the whole sequence. Required specialist failure, incomplete
+coverage or invalid synthesis cannot silently become clearance. Existing quota and
+authentication handling is unchanged; deadline and incomplete-coverage failures try
+the next configured provider.
+
+Specialist reports and adjudication decisions stay in the encrypted delivery
+checkpoint and its final compact audit. Delivery-only retries reuse saved analysis
+without any model calls. The dashboard adds Code reviewer, Security reviewer,
+Test reviewer and Review adjudication nodes, truthful overlapping API progress,
+and allowlisted per-phase token counters. Existing components and reduced-motion
+behavior are reused. Private report content remains off the dashboard.
+
+No new dependency or migration is required. The CLI runner already accepts trusted
+schemas and policies, so only the schema-compatible application deployment is needed;
+saved older attempts retain their historical review path. Implementation checks use
+isolated fixtures, not live model/GitHub calls. Review-quality improvement still
+requires a human-scored comparison against representative previous reviews.
 
 ### Hermes Telegram approval alerts
 

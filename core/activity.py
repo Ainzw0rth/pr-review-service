@@ -80,6 +80,17 @@ for _prefix, _title in {
     if _prefix not in {"summary", "labels"}:
         MESSAGES[f"{_prefix}_unused"] = f"{_title}: assessed; no write needed"
 
+for _phase, _title in {
+    "code": "Code reviewer",
+    "security": "Security reviewer",
+    "tests": "Test reviewer",
+    "synthesis": "Review adjudication",
+}.items():
+    MESSAGES[f"{_phase}_started"] = f"{_title}: examining commit-pinned evidence."
+    MESSAGES[f"{_phase}_ready"] = (
+        f"{_title}: structured assessment validated; content remains private."
+    )
+
 
 def cli_progress(progress, data, state):
     if data.get("transport") not in {"claude_cli", "codex_cli"}:

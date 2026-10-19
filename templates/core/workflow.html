@@ -1,19 +1,31 @@
 {% extends 'core/base.html' %}{% load static %}
 {% block title %}Workflow{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">OWNER WORKSPACE / MODEL ROUTING</p><h1>Your review.<br><em>Your sequence.</em></h1><p class="lede">Choose the first reviewer. Set the fallbacks. Keep the work moving.</p></div><div class="edition">SERIAL EXECUTION<br><span id="workflow-version">Loading configuration…</span></div></section>
+<section class="page-heading"><div><h1>Workflow.</h1><p class="lede">Choose the primary model and its fallbacks.</p></div><span class="quiet" id="workflow-version">Loading configuration…</span></section>
 <form id="workflow-form">{% csrf_token %}<div class="workflow-toolbar"><p id="workflow-status" role="status" aria-live="polite">Loading workflow…</p><button id="workflow-save" type="submit" disabled>Save changes</button></div></form>
-<div class="workflow-layout" id="workflow-editor" hidden>
-<aside class="panel workflow-library"><p class="eyebrow">01 / MODEL LIBRARY</p><h2>Available connections</h2><p class="note">Your configured models—not an exhaustive provider catalog. Drag a model into the sequence or use Add.</p><div id="model-library"></div><button id="model-new" type="button" class="text-button">+ New model</button><p class="note">New release? Enter its exact provider model ID. Availability depends on your subscription and installed CLI. Existing API connections can also be reordered here.</p></aside>
-<section class="workflow-canvas" aria-label="Review sequence"><p class="eyebrow">02 / REVIEW SEQUENCE</p><div class="workflow-terminal">Review eligible → Gather evidence</div><div class="workflow-terminal">Build / update dependency graph<br><span class="muted">Graph-enabled repositories · pinned base + head</span></div><div class="workflow-terminal">Required CI checked</div><ol id="workflow-chain" aria-label="Models in execution order"></ol><div class="workflow-terminal">Valid review → GitHub delivery<br><span class="muted">No valid result → Needs attention</span></div><p class="note">Known exhausted accounts are skipped. Recoverable failures advance to the next model. Authentication and policy failures retain their diagnostic reason. CI and publication guards stay unchanged.</p></section>
-<aside class="panel workflow-settings"><p class="eyebrow">03 / NODE SETTINGS</p><h2>Model configuration</h2><p id="model-empty" class="note">Select a model to edit its settings.</p><form id="model-settings" hidden>
-<label for="model-name">Display name</label><input id="model-name" maxlength="100" required>
-<label for="model-kind">Connection</label><select id="model-kind"><option value="codex_cli">OpenAI · Codex CLI</option><option value="claude_cli">Anthropic · Claude Code CLI</option><option value="openai">OpenAI · API</option><option value="anthropic">Anthropic · API</option></select>
-<label for="model-id">Exact model ID</label><input id="model-id" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]*" required spellcheck="false" autocomplete="off">
-<label for="model-effort">Reasoning effort · Codex CLI</label><select id="model-effort"><option value="">Runner default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select><p class="note">Support varies by model. Claude uses its native default.</p>
-<button type="submit" class="text-button">Update node preview</button><button id="model-test" type="button" class="text-button">Test saved connection</button><p class="note">An explicit test may use quota. Runs when the worker is idle; never posts to GitHub. Save edits before testing.</p><p id="model-probe" role="status" class="note"></p>
-</form></aside></div>
-<p class="note">Save applies only to new jobs. Queued and running jobs retain their saved model order and configuration. Removing a node disables it; history stays intact.</p>
+<div id="workflow-editor" hidden><div class="workflow-layout">
+<section class="workflow-canvas" aria-label="Review sequence">
+  <h2>Model order</h2>
+  <ol id="workflow-chain" aria-label="Models in execution order"></ol>
+  <p class="workflow-team">Code · Security · Tests <span>→ Adjudication → GitHub</span></p>
+  <details class="workflow-library disclosure" data-model-library><summary>Add or enable a model</summary>
+    <div id="model-library"></div><button id="model-new" type="button" class="text-button">+ New model</button>
+    <p class="note">Existing models stay in the library when removed from the order. New API connections require a credential in Administration.</p>
+  </details>
+</section>
+<aside class="panel workflow-settings" id="model-config-panel" hidden>
+  <div class="section-heading"><h2>Edit model</h2><button id="model-close" type="button" class="text-button">Close editor</button></div>
+  <p id="model-empty" hidden>Select a model to edit its settings.</p><form id="model-settings" hidden>
+    <label for="model-name">Display name</label><input id="model-name" maxlength="100" required>
+    <label for="model-kind">Connection</label><select id="model-kind"><option value="codex_cli">OpenAI · Codex CLI</option><option value="claude_cli">Anthropic · Claude Code CLI</option><option value="openai">OpenAI · API</option><option value="anthropic">Anthropic · API</option></select>
+    <label for="model-id">Exact model ID</label><input id="model-id" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]*" required spellcheck="false" autocomplete="off">
+    <label for="model-effort">Reasoning effort · Codex CLI</label><select id="model-effort"><option value="">Runner default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select>
+    <button type="submit" class="text-button">Update node preview</button><button id="model-test" type="button" class="text-button">Test saved connection</button>
+    <p class="note">Testing may use quota, runs only while the worker is idle, and never posts to GitHub. Save before testing.</p><p id="model-probe" role="status" class="note"></p>
+  </form>
+</aside>
+</div></div>
+<details class="disclosure"><summary>How reviews run</summary><p class="note">Evidence and required CI are checked first. Each selected model synthesizes grounded intent, then runs independent Code, Security and Test reviews followed by evidence-backed adjudication. API specialists can overlap; subscription sessions run sequentially.</p><p class="note">Known exhausted accounts are skipped. Recoverable failures advance to the next model. GitHub delivery requires a valid result; CI and publication guards remain in force. Saved model changes apply only to new jobs, not queued or running jobs.</p></details>
 <noscript><p class="notice">Enable JavaScript to edit the workflow.</p></noscript>
 <script src="{% static 'core/workflow.js' %}" defer></script>
 {% endblock %}

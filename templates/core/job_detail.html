@@ -3,30 +3,28 @@
 {% block content %}
 <a class="back-link" href="{% url 'dashboard' %}">← Review queue</a>
 <section class="page-heading job-heading">
-  <div><p class="eyebrow">{{ job.pr.repository.organization.name }} / ATTEMPT {{ job.generation }}</p><h1>PR #{{ job.pr.number }} <em data-job-status>{{ job.get_status_display }}.</em></h1><p class="lede">{{ job.pr.repository.full_name }} <span class="commit-chip">{{ job.head_sha|slice:':8' }}</span></p></div>
+  <div><h1>PR #{{ job.pr.number }} <span data-job-badge class="status status-{{ job.status }}">{{ job.get_status_display }}</span></h1><p class="lede">{{ job.pr.repository.full_name }} · Attempt {{ job.generation }} <span class="commit-chip">{{ job.head_sha|slice:':8' }}</span></p></div>
   <a class="button" href="{{ job.pr.url }}" rel="noreferrer">Open pull request ↗</a>
 </section>
 <section class="retry-controls" data-job-retry-control {% if not retry_available %}hidden{% endif %}><form method="post" action="{% url 'job_retry' job.id %}">{% csrf_token %}<button type="submit" data-retry-label>{% if delivery_retry %}Retry delivery ↻{% else %}Retry review ↻{% endif %}</button></form><p data-retry-explanation>{% if delivery_retry %}Deliver the saved review without another model call. Existing receipts and current GitHub state are rechecked.{% else %}Starts a fresh attempt from the first model. The current commit, reviewer and on review label must still match.{% endif %}</p></section>
+<section class="notice" data-job-note {% if not job.reason %}hidden{% endif %}><h2>Operational note</h2><p>{{ job.reason }}</p></section>
 <section class="activity-panel route-panel" data-activity-url="{% url 'job_activity' job.id %}" aria-labelledby="activity-title">
-  <div class="activity-heading"><div><p class="section-number">LIVE / REVIEW WORKFLOW</p><h2 id="activity-title">The review, step by step.</h2><p class="node-detail">{% if job.workflow_revision %}Workflow {{ job.workflow_revision }}{% else %}Legacy / version unknown{% endif %}</p></div><button type="button" class="activity-pause" aria-pressed="false">Pause updates</button></div>
+  <div class="activity-heading"><h2 id="activity-title">Review progress</h2><button type="button" class="activity-pause" aria-pressed="false">Pause updates</button></div>
   <div class="route-status"><p class="activity-connection" role="status">Connecting to review activity…</p><p class="activity-heartbeat">Waiting for worker information.</p></div>
-  <div class="flow-legend" aria-label="Node states"><span><i class="legend-dot done" aria-hidden="true"></i>Complete</span><span><i class="legend-dot running" aria-hidden="true"></i>In progress</span><span><i class="legend-dot attention" aria-hidden="true"></i>Needs attention</span><span><i class="legend-dot pending" aria-hidden="true"></i>Waiting</span></div>
   <div class="review-flow"><p class="flow-placeholder">Loading recorded workflow…</p></div>
   <p class="flow-legacy" hidden>Historical attempt: per-model attempt records were not available. Only recorded progress is shown; this attempt has not been restarted.</p>
-  <section class="terminal" aria-labelledby="terminal-title">
+  <details class="disclosure activity-tools"><summary>Activity log <span class="disclosure-hint">Public CLI progress &amp; worker events</span></summary><section class="terminal" aria-labelledby="terminal-title">
     <header class="terminal-bar"><h3 id="terminal-title">Live CLI output</h3><div class="terminal-controls"><span>READ ONLY · WIB</span><button type="button" data-terminal-follow aria-pressed="true">Following ↓</button></div></header>
     <div class="terminal-tabs" aria-label="Transcript source"><button type="button" data-terminal-mode="cli" aria-pressed="true">CLI output</button><button type="button" data-terminal-mode="worker" aria-pressed="false">Worker events</button></div>
     <ol class="activity-log" aria-label="Live operational activity" tabindex="0"><li class="activity-empty">Connecting to CLI output…</li></ol>
-    <p class="terminal-caption">Public assistant progress and actual evidence-tool calls, refreshed every 3s. Private reasoning, raw tool results and final review content are excluded. Last 100 events; commentary may be silent.</p>
-  </section>
-  <p class="activity-caption">Live operations, not a reasoning transcript. The heartbeat tracks the worker, not model tokens. Reviews stay on GitHub.</p>
+    <p class="terminal-caption">Public progress only. Private reasoning, raw tool results and findings are excluded. Silence does not mean the worker stopped.</p>
+  </section></details>
   <noscript><p>JavaScript is needed for live nodes. Reload this page for current job status.</p></noscript>
 </section>
-<section class="notice" data-job-note {% if not job.reason %}hidden{% endif %}><h2>Operational note</h2><p>{{ job.reason }}</p></section>
 <details class="attempt-record"><summary>Attempt details <span>Commit, timing & request information</span></summary><div class="detail-grid">
   <section class="panel"><p class="section-number">01 / ATTEMPT RECORD</p><h2>Operational details</h2><dl><dt>Status</dt><dd><span data-job-badge class="status status-{{ job.status }}">{{ job.get_status_display }}</span></dd>{% if position %}<dt>Visible queue position</dt><dd>{{ position }} <span class="muted">(within your workspace)</span></dd>{% endif %}{% if job.retry_of_id %}<dt>Retry of</dt><dd><a href="{% url 'job_detail' job.retry_of_id %}">Previous attempt ↗</a></dd>{% endif %}<dt>Assignees</dt><dd>{% include 'core/assignees.html' with pr=job.pr %}</dd><dt>Triggered by</dt><dd>{{ job.actor }}</dd><dt>Reviewed commit</dt><dd><code>{{ job.head_sha }}</code></dd><dt>Workflow revision</dt><dd>{% if job.workflow_revision %}<code>{{ job.workflow_revision }}</code>{% else %}Legacy / version unknown{% endif %}</dd>{% if job.workflow_version %}<dt>Model configuration</dt><dd><code>{{ job.workflow_version }}</code></dd>{% endif %}<dt>Attempt identifier</dt><dd><code>{{ job.id }}</code></dd><dt>Provider</dt><dd data-job-provider>{{ job.provider.name|default:'Not assigned' }}</dd></dl></section>
   <section class="panel"><p class="section-number">02 / TIMELINE · WIB</p><h2>From request to result</h2><dl><dt>Queued</dt><dd>{{ job.created_at|date:'M j, Y · H:i:s' }}</dd><dt>Started</dt><dd data-job-started>{{ job.started_at|date:'M j, Y · H:i:s'|default:'Not started' }}</dd><dt>Finished</dt><dd data-job-finished>{{ job.finished_at|date:'M j, Y · H:i:s'|default:'Not finished' }}</dd><dt>Next availability check</dt><dd data-job-retry>{{ job.next_retry_at|date:'M j, Y · H:i:s'|default:'Not scheduled' }}</dd></dl></section>
 </div></details>
-<p class="note">Completed means processing finished, not that the PR passed. Findings, questions and the review outcome remain on GitHub. Members can retry eligible jobs within their organization. Workflow configuration remains owner-only.</p>
+<p class="note">Completed means processing finished, not that the PR passed. Open GitHub for the review outcome.</p>
 <script src="{% static 'core/activity.js' %}" defer></script>
 {% endblock %}

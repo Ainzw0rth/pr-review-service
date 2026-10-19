@@ -1,30 +1,30 @@
 {% extends 'core/base.html' %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-<section class="page-heading"><div><p class="eyebrow">OWNER WORKSPACE / SERVICE BEHAVIOR</p><h1>Review policy.<br><em>Your call.</em></h1><p class="lede">Control evidence gathering and what happens after a successful review. Automatic approval and merging are separate, opt-in settings.</p></div></section>
+<section class="page-heading"><div><h1>Settings.</h1><p class="lede">Review policy by repository. Automatic approval and merging are separate opt-ins.</p></div></section>
 {% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
-<form method="post">{% csrf_token %}<input type="hidden" name="version" value="{{ version }}">
-<section class="panel"><p class="eyebrow">01 / GITHUB APPROVALS</p><h2>Automatically approve passing PRs</h2><p class="note">When enabled, a complete review with passing required CI and no blocking findings submits a formal GitHub APPROVE review for the exact commit. Approval alone does not merge.</p>
-{% for repo in repositories %}<div class="approval-setting"><div><label for="approve-{{ repo.pk }}">{{ repo.full_name }}</label><p class="note">{% if repo.enabled %}Monitored repository{% else %}Repository currently disabled{% endif %}</p></div><label class="setting-switch"><input id="approve-{{ repo.pk }}" type="checkbox" role="switch" name="auto_approve_{{ repo.pk }}" {% if repo.auto_approve %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">Automatically approve passing PRs for {{ repo.full_name }}</span></label></div>{% empty %}<p>No repositories configured.</p>{% endfor %}
-<p class="note">Off by default. Enabling applies to new jobs; queued jobs keep their original policy. Disabling prevents approvals not yet submitted—it does not revoke existing valid approvals.</p>
-<p class="note">New commits invalidate the service’s approval and clear its approved label. Human reviews are not dismissed. Cleanup runs on webhooks, with periodic recovery; GitHub permissions must allow review dismissal. Enable GitHub’s stale-approval branch rule if you also need repository-enforced protection without waiting for the service.</p>
-<p class="note">The connected GitHub account cannot approve its own PRs. Those attempts need another reviewer. Existing approval requirements and merge rules still apply.</p>
-</section>
-<section class="panel"><p class="eyebrow">02 / GITHUB MERGING</p><h2>Automatically merge approved PRs</h2>
-<p class="note">Off by default. Requires automatic approval above. After the service formally approves and finishes publishing, merge only the reviewed commit with passing CI and a clean GitHub merge state. Conflicts or missing requirements leave the PR open with a reason on its job.</p>
+<form method="post" class="policy-form">{% csrf_token %}<input type="hidden" name="version" value="{{ version }}">
 {% for repo in repositories %}
-<div class="approval-setting"><div><label for="merge-{{ repo.pk }}">{{ repo.full_name }}</label><p class="note">Opt-in · merging changes the target branch</p></div><label class="setting-switch"><input id="merge-{{ repo.pk }}" type="checkbox" role="switch" name="auto_merge_{{ repo.pk }}" {% if repo.auto_merge %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">Automatically merge approved PRs for {{ repo.full_name }}</span></label></div>
-<label for="method-{{ repo.pk }}">Merge method · {{ repo.full_name }}</label>
-<select id="method-{{ repo.pk }}" name="merge_method_{{ repo.pk }}"><option value="squash" {% if repo.merge_method == 'squash' %}selected{% endif %}>Squash merge</option><option value="merge" {% if repo.merge_method == 'merge' %}selected{% endif %}>Merge commit</option><option value="rebase" {% if repo.merge_method == 'rebase' %}selected{% endif %}>Rebase merge</option></select>
-{% endfor %}
-<p class="note">Applies only to new jobs, not old approvals. No GitHub auto-merge scheduling or branch deletion. One merge attempt after publication; blocked or uncertain attempts need manual inspection. Disabling prevents requests not yet submitted, but cannot undo a merge or recall an in-flight request.</p>
+<section class="panel policy-repository" aria-labelledby="repository-{{ repo.pk }}">
+  <div class="section-heading"><h2 id="repository-{{ repo.pk }}">{{ repo.full_name }}</h2>{% if not repo.enabled %}<span class="status">Monitoring disabled</span>{% endif %}</div>
+  <div class="approval-setting"><div><label for="approve-{{ repo.pk }}">Automatically approve passing PRs</label><p class="note" id="approve-help-{{ repo.pk }}">Formal GitHub approval after a complete review and passing required CI. Does not merge.</p></div><label class="setting-switch"><input id="approve-{{ repo.pk }}" type="checkbox" role="switch" name="auto_approve_{{ repo.pk }}" aria-describedby="approve-help-{{ repo.pk }}" {% if repo.auto_approve %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">Automatically approve passing PRs for {{ repo.full_name }}</span></label></div>
+  <div class="approval-setting"><div><label for="merge-{{ repo.pk }}">Automatically merge approved PRs</label><p class="note" id="merge-help-{{ repo.pk }}">Requires automatic approval. Uses {{ repo.get_merge_method_display|lower }} for the reviewed commit only. Disabling cannot undo a merge or cancel an in-flight request.</p></div><label class="setting-switch"><input id="merge-{{ repo.pk }}" type="checkbox" role="switch" name="auto_merge_{{ repo.pk }}" aria-describedby="merge-help-{{ repo.pk }}" {% if repo.auto_merge %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">Automatically merge approved PRs for {{ repo.full_name }}</span></label></div>
+  <details class="disclosure repository-options"><summary>Advanced options <span class="disclosure-hint">Merge method &amp; evidence limits</span></summary>
+    <div class="policy-options">
+      <div><label for="method-{{ repo.pk }}">Merge method</label><select id="method-{{ repo.pk }}" name="merge_method_{{ repo.pk }}"><option value="squash" {% if repo.merge_method == 'squash' %}selected{% endif %}>Squash merge</option><option value="merge" {% if repo.merge_method == 'merge' %}selected{% endif %}>Merge commit</option><option value="rebase" {% if repo.merge_method == 'rebase' %}selected{% endif %}>Rebase merge</option></select></div>
+      <div><label for="related-{{ repo.pk }}">Maximum related issues and PRs</label><input id="related-{{ repo.pk }}" type="number" min="1" max="2147483647" step="1" name="related_item_limit_{{ repo.pk }}" value="{{ repo.related_item_limit|default_if_none:50 }}" aria-describedby="related-help-{{ repo.pk }}"><p class="helptext" id="related-help-{{ repo.pk }}">Direct links plus one hop from linked issues. Does not limit changed files, documents or graph-selected source.</p></div>
+    </div>
+    <div class="related-unlimited"><label for="unlimited-{{ repo.pk }}">No related-item limit</label><label class="setting-switch"><input id="unlimited-{{ repo.pk }}" type="checkbox" role="switch" name="related_unlimited_{{ repo.pk }}" {% if repo.related_item_limit == None %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">No item limit for {{ repo.full_name }}</span></label></div>
+  </details>
 </section>
-<section class="panel"><p class="eyebrow">03 / REVIEW EVIDENCE</p><h2>Related issues and pull requests</h2>
-<p class="note">Includes direct references and links discovered in directly linked issue discussions. This limits issues and PRs—not changed files, documents or graph-selected source files. Default: 50.</p>
-{% for repo in repositories %}
-<div class="approval-setting related-setting"><div><label for="related-{{ repo.pk }}">{{ repo.full_name }}</label><p class="note" id="related-help-{{ repo.pk }}">Maximum related items. Ignored when No item limit is selected.</p><input id="related-{{ repo.pk }}" type="number" min="1" max="2147483647" step="1" name="related_item_limit_{{ repo.pk }}" value="{{ repo.related_item_limit|default_if_none:50 }}" aria-describedby="related-help-{{ repo.pk }}"></div>
-<div class="related-unlimited"><span>No item limit</span><label class="setting-switch"><input type="checkbox" role="switch" name="related_unlimited_{{ repo.pk }}" {% if repo.related_item_limit == None %}checked{% endif %}><span aria-hidden="true"></span><span class="sr-only">No item limit for {{ repo.full_name }}</span></label></div></div>
-{% endfor %}
-<p class="note">Applies when evidence collection starts, including queued reviews. Running collections keep their captured limit. No item limit removes only this count cap: the context-size and API safeguards remain. It does not enable recursive scanning of every issue.</p>
-</section><div class="workflow-toolbar"><p>Owner-only settings · model order lives in Workflow.</p><button type="submit">Save settings</button></div></form>
+{% empty %}<p class="empty">No repositories configured.</p>{% endfor %}
+<div class="workflow-toolbar"><p>Changes apply to the policies shown above.</p><button type="submit">Save settings</button></div>
+</form>
+<details class="disclosure"><summary>Policy details</summary>
+<h3>Approval</h3><p class="note">Off by default. Enabling applies to new jobs; queued jobs keep their original policy. Disabling prevents approvals not yet submitted, but does not revoke existing valid approvals. The connected GitHub account cannot approve its own PRs; those attempts need another reviewer.</p>
+<p class="note">New commits invalidate the service’s approval and clear its approved label. Human reviews are not dismissed. Cleanup runs on webhooks with periodic recovery and needs GitHub review-dismissal permissions. Enable GitHub’s stale-approval branch rule for repository-enforced protection without waiting for the service.</p>
+<h3>Merging</h3><p class="note">Off by default. Requires the service’s formal approval, complete publication, passing CI and a clean GitHub merge state. Conflicts or missing requirements leave the PR open with a reason on its job. New settings do not apply to old approvals. There is one merge attempt after publication, no GitHub auto-merge scheduling and no branch deletion. Blocked or uncertain attempts need manual inspection.</p>
+<h3>Evidence</h3><p class="note">Default related-item limit: 50. Changes apply when evidence collection starts, including queued reviews. Running collections keep their captured limit. No item limit removes only this count cap; context-size and API safeguards remain. It does not enable recursive scanning of every issue.</p>
+<p class="note">Owner-only settings. Model order is managed in Workflow.</p>
+</details>
 {% endblock %}

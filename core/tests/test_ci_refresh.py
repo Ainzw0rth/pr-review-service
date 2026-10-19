@@ -8,8 +8,9 @@ from core.flow import snapshot
 from core.github import check_required
 from core.tests import test_worker as worker_tests
 from core.tests.test_publication import FakeGitHub
+from core.tests.test_review_team import report
 from core.tests.test_v2_transport import INTENT
-from core.tests.test_worker_v2 import V2_RESULT
+from core.tests.test_worker_team import team_result
 from core.worker import run_job
 
 
@@ -91,7 +92,16 @@ class CIRefreshTests(TestCase):
             patch("core.github.GitHub", return_value=gh),
             patch("core.context.build_context", return_value=context),
             patch("core.github.check_required", side_effect=check),
-            patch("core.providers.review", side_effect=[INTENT, V2_RESULT]) as review,
+            patch(
+                "core.providers.review",
+                side_effect=lambda *args, **kwargs: (
+                    INTENT
+                    if kwargs["task"] == "intent"
+                    else team_result()
+                    if kwargs["task"] == "review_synthesis"
+                    else report()
+                ),
+            ) as review,
             patch("core.runner.run_tests", return_value=local_tests),
             patch("core.sheets.sync_status"),
             patch("core.worker.time.sleep"),
@@ -108,9 +118,10 @@ class CIRefreshTests(TestCase):
             ]
         )
         self.assertEqual(job.status, "completed")
-        self.assertEqual(
-            [call.kwargs["task"] for call in review.call_args_list], ["intent", "review_v2"]
-        )
+        tasks = [call.kwargs["task"] for call in review.call_args_list]
+        self.assertEqual(tasks[0], "intent")
+        self.assertCountEqual(tasks[1:4], ["review_code", "review_security", "review_tests"])
+        self.assertEqual(tasks[4], "review_synthesis")
         self.assertTrue(review.call_args.args[1]["checks"]["passed"])
         self.assertIn({"name": "approved"}, gh.snapshot["labels"])
         self.assertIn("checks_waiting", list(job.activity.values_list("code", flat=True)))

@@ -70,7 +70,7 @@ class WorkflowV2Tests(TestCase):
                 self.assertIsNone(value["phase"])
 
     def test_new_jobs_snapshot_explicit_v2_steps(self):
-        self.assertEqual(self.job.workflow_revision, "v2.1")
+        self.assertEqual(self.job.workflow_revision, "v3")
         self.assertEqual(
             list(self.stages()),
             [
@@ -79,6 +79,10 @@ class WorkflowV2Tests(TestCase):
                 "docs",
                 "intent",
                 "checks",
+                "code_review",
+                "security_review",
+                "test_review",
+                "synthesis",
                 "pr_summary",
                 "inline_findings",
                 "discussion_replies",
@@ -88,6 +92,23 @@ class WorkflowV2Tests(TestCase):
             ],
         )
         self.assertTrue(all(stage["state"] == "pending" for stage in self.stages().values()))
+
+    def test_specialist_stages_show_overlap_and_latest_provider_progress(self):
+        record(self.job, "intent_started")
+        record(self.job, "intent_ready")
+        record(self.job, "code_started")
+        record(self.job, "security_started")
+        record(self.job, "tests_started")
+        self.assertEqual(self.stages()["code_review"]["state"], "running")
+        self.assertEqual(self.stages()["security_review"]["state"], "running")
+        record(self.job, "code_ready")
+        self.assertEqual(self.stages()["code_review"]["state"], "done")
+        self.assertEqual(self.stages()["synthesis"]["state"], "pending")
+        record(self.job, "intent_started")
+        self.assertEqual(self.stages()["code_review"]["state"], "pending")
+        record(self.job, "code_started")
+        self.job.status = "attention"
+        self.assertEqual(self.stages()["code_review"]["state"], "attention")
 
     def test_delivery_not_needed_is_explicit_and_safe(self):
         for prefix, key in [

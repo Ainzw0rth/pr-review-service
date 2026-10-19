@@ -24,8 +24,15 @@ def public_usage(diagnostics):
     phases = diagnostics.get("phase_usage")
     if isinstance(phases, list) and phases:
         passes = []
-        for phase in phases[:2]:
-            if not isinstance(phase, dict) or phase.get("phase") not in {"intent", "review"}:
+        for phase in phases[:6]:
+            if not isinstance(phase, dict) or phase.get("phase") not in {
+                "intent",
+                "review",
+                "code",
+                "security",
+                "tests",
+                "synthesis",
+            }:
                 continue
             values = phase.get("passes")
             for index, value in enumerate(values[:2] if isinstance(values, list) else []):

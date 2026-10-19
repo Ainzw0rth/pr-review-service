@@ -107,6 +107,8 @@ def deliver(github, job, publisher, progress):
             }
             if "intent" in data["context"]:
                 record["intent"] = data["context"]["intent"]
+            if "review_team" in data["context"]:
+                record["review_team"] = data["context"]["review_team"]
             checkpoint.encrypted_payload = encrypt(json.dumps(record))
             checkpoint.stage = "done"
             checkpoint.save(update_fields=["encrypted_payload", "stage"])

@@ -4,6 +4,24 @@
   const results = document.querySelector('[data-queue-results]');
   const state = document.querySelector('[data-filter-state]');
   let timer, controller, pendingInput = false;
+  const health = document.querySelector('[data-service-health]');
+  function healthSummary() {
+    if (!health) return;
+    const waiting = health.querySelectorAll('[data-quota-state="exhausted"]').length;
+    const unknown = health.querySelectorAll('[data-quota-state="unknown"]').length;
+    const issues = health.querySelectorAll('[data-graph-state="invalid"],[data-graph-state="unavailable"]').length;
+    const summary = health.querySelector('[data-health-summary]');
+    summary.textContent = [waiting ? `${waiting} account${waiting === 1 ? '' : 's'} waiting` : unknown ? 'Quota status unavailable' : 'Accounts available', issues ? `${issues} graph status${issues === 1 ? '' : 'es'} need checking` : 'Repository readiness'].join(' · ');
+    summary.classList.toggle('health-attention', Boolean(waiting || issues));
+  }
+  if (health) {
+    healthSummary();
+    new MutationObserver(healthSummary).observe(health.querySelector('[data-health-content]'), {childList:true,subtree:true});
+  }
+  function peopleSummary() {
+    const active = ['assignee','actor'].filter(name => form.elements[name].value).length;
+    form.querySelector('.filter-more summary').textContent = active ? `People filters · ${active} active` : 'People filters';
+  }
   const jakartaTime = new Intl.DateTimeFormat('en-GB', {timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
   async function update(url, history = true, background = false) {
     if (background && (controller || pendingInput || document.hidden || results.contains(document.activeElement))) return;
@@ -47,9 +65,10 @@
       const counts = results.querySelector('[data-queue-counts]');
       for (const metric of document.querySelectorAll('[data-queue-metric]')) {
         const value = counts?.dataset[metric.dataset.queueMetric];
-        if (/^\d+$/.test(value || '')) metric.textContent = value.padStart(2, '0');
+        if (/^\d+$/.test(value || '')) metric.textContent = value;
       }
       if (history) window.history.replaceState(null, '', visible);
+      peopleSummary();
       state.textContent = `Live · updated ${jakartaTime.format(new Date())} WIB · every 5s`;
     } catch {
       if (controller === current) state.textContent = 'Connection interrupted · showing previous data; retrying automatically.';
@@ -70,6 +89,7 @@
   results.addEventListener('click', e => {const link=e.target.closest('.pagination a'); if (!link || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return; e.preventDefault(); update(link.href);});
   window.addEventListener('popstate', () => {clearTimeout(timer); pendingInput=false; const params=new URL(location.href).searchParams; for(const field of form.querySelectorAll('[name]')) field.value=params.get(field.name)||''; update(location.href,false);});
   const refresh = () => update(location.href, false, true);
+  peopleSummary();
   setInterval(refresh, 5000);
   document.addEventListener('visibilitychange', refresh);
 })();

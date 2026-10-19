@@ -18,7 +18,7 @@ from core.publication import (
     thread_replies,
 )
 from core.workflow import finish
-from core.workflow_schema import GROUNDED_REVISIONS
+from core.workflow_schema import GROUNDED_REVISIONS, TEAM_REVISIONS
 
 
 def run_job(job):
@@ -36,6 +36,7 @@ def run_job(job):
     diagnostic = "Review incomplete. Check connections and required checks; request a new review."
     progress = Progress(job)
     grounded = job.workflow_revision in GROUNDED_REVISIONS
+    team = job.workflow_revision in TEAM_REVISIONS
     progress.start()
     try:
         progress("starting")
@@ -151,7 +152,11 @@ def run_job(job):
                     phase_reports[phase] = [usage_counters(p) for p in passes[:2]]
                     data = {
                         **data,
-                        "phase": phase,
+                        "phase": "specialists"
+                        if team
+                        and not provider.kind.endswith("_cli")
+                        and phase in {"code", "security", "tests"}
+                        else phase,
                         "phase_usage": [
                             {"phase": name, "passes": values}
                             for name, values in phase_reports.items()
@@ -163,7 +168,20 @@ def run_job(job):
             def save_activity(code, text):
                 from .activity import record
 
-                record(job, code, detail=text, source=provider.name)
+                source = f"{provider.name[:80]} / {phase}" if team else provider.name
+                record(job, code, detail=text, source=source)
+
+            def team_response(name, data):
+                nonlocal phase
+                if phase != name:
+                    cli_state.clear()
+                phase = name
+                save_diagnostics(data)
+
+            def team_activity(name, code, text):
+                nonlocal phase
+                phase = name
+                save_activity(code, text)
 
             try:
                 review_context = context
@@ -190,19 +208,33 @@ def run_job(job):
                         ) from None
                     progress("intent_ready")
                     guard(github, job)
-                    phase = "review"
-                    cli_state.clear()
-                    save_diagnostics({})
+                    if not team:
+                        phase = "review"
+                        cli_state.clear()
+                        save_diagnostics({})
                     review_context = {**context, "intent": intent}
                 progress("model")
-                result = review(
-                    provider,
-                    review_context,
-                    progress.cancelled,
-                    on_response=save_diagnostics,
-                    on_activity=save_activity,
-                    **({"task": "review_v2"} if grounded else {}),
-                )
+                if team:
+                    from .review_orchestration import run_team
+
+                    result, audit = run_team(
+                        provider,
+                        review_context,
+                        progress.cancelled,
+                        call=review,
+                        on_response=team_response,
+                        on_activity=team_activity,
+                        progress=progress,
+                    )
+                else:
+                    result = review(
+                        provider,
+                        review_context,
+                        progress.cancelled,
+                        on_response=save_diagnostics,
+                        on_activity=save_activity,
+                        **({"task": "review_v2"} if grounded else {}),
+                    )
                 try:
                     if grounded:
                         validate_actions(result, review_context)
@@ -211,6 +243,8 @@ def run_job(job):
                     raise ProviderError("invalid", detail="output_invalid") from None
                 if grounded:
                     context["intent"] = intent
+                if team:
+                    context["review_team"] = audit
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(
                     status="success", finished_at=timezone.now()
                 )
@@ -235,6 +269,8 @@ def run_job(job):
                     "cli_memory",
                     "context_too_large",
                     "model_not_found",
+                    "review_timeout",
+                    "review_incomplete",
                 }
                 state = (
                     "incomplete"
