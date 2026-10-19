@@ -61,6 +61,13 @@ class WorkerTeamTests(TestCase):
             [p["phase"] for p in usage["passes"]],
             ["intent", "code", "security", "tests", "synthesis"],
         )
+        timeline = job.model_attempts.get().diagnostics["phase_timeline"]
+        self.assertEqual(
+            {p["phase"] for p in timeline}, {"intent", "code", "security", "tests", "synthesis"}
+        )
+        self.assertTrue(
+            all(p["state"] == "done" and p["started_at"] and p["finished_at"] for p in timeline)
+        )
         public_events = json.dumps(list(job.activity.values("code", "detail")))
         self.assertNotIn("Checked affected behavior", public_events)
         self.assertNotIn("Fix login", public_events)
@@ -133,17 +140,34 @@ class WorkerTeamTests(TestCase):
         self.assertEqual(len(reviews[0]["comments"]), 1)
         self.assertIn("Security", reviews[0]["comments"][0]["body"])
 
-    def test_incomplete_specialists_never_publish_or_clear(self):
+    def test_incomplete_assessment_publishes_feedback_never_approval_merge_or_resolution(self):
+        self.repo.auto_approve = True
+        self.repo.auto_merge = True
+        self.repo.save()
+
         def call(provider, evidence, cancelled, **kwargs):
             if kwargs["task"] == "review_tests":
                 return report(complete=False)
             return self.complete(provider, evidence, cancelled, **kwargs)
 
         job, gh, model = self.run_v2(call)
-        self.assertEqual(job.status, "attention", job.reason)
-        self.assertEqual(gh.writes, [])
-        self.assertFalse(hasattr(job, "review_checkpoint"))
-        self.assertNotIn("review_synthesis", [c.kwargs["task"] for c in model.call_args_list])
+        self.assertEqual(job.status, "completed", job.reason)
+        self.assertIn("review_synthesis", [c.kwargs["task"] for c in model.call_args_list])
+        self.assertEqual({c.args[0].pk for c in model.call_args_list}, {self.first.pk})
+        self.assertIn({"name": "feedback"}, gh.snapshot["labels"])
+        self.assertFalse(
+            any(
+                data.get("event") == "APPROVE" or path.endswith("/merge")
+                for path, data in gh.writes
+            )
+        )
+        saved = json.loads(decrypt(job.review_checkpoint.encrypted_payload))
+        self.assertFalse(saved["result"]["complete"])
+        self.assertTrue(saved["result"]["blocking"])
+        self.assertIn("Incomplete review", saved["result"]["summary"])
+        self.assertFalse(saved["review_team"]["reports"]["tests"]["complete"])
+        self.assertTrue(all(not reply["resolve"] for reply in saved["result"]["replies"]))
+        self.assertTrue(job.activity.filter(code="tests_incomplete").exists())
 
     def test_cli_cancellation_between_specialists_cannot_publish(self):
         self.first.kind = "codex_cli"

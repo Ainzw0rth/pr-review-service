@@ -11,7 +11,7 @@
 <section class="activity-panel route-panel" data-activity-url="{% url 'job_activity' job.id %}" aria-labelledby="activity-title">
   <div class="activity-heading"><h2 id="activity-title">Review progress</h2><button type="button" class="activity-pause" aria-pressed="false">Pause updates</button></div>
   <div class="route-status"><p class="activity-connection" role="status">Connecting to review activity…</p><p class="activity-heartbeat">Waiting for worker information.</p></div>
-  <div class="review-flow"><p class="flow-placeholder">Loading recorded workflow…</p></div>
+  <div class="review-flow"><p class="flow-placeholder">Loading evidence, checks, review sessions and GitHub delivery…</p></div>
   <p class="flow-legacy" hidden>Historical attempt: per-model attempt records were not available. Only recorded progress is shown; this attempt has not been restarted.</p>
   <details class="disclosure activity-tools"><summary>Activity log <span class="disclosure-hint">Public CLI progress &amp; worker events</span></summary><section class="terminal" aria-labelledby="terminal-title">
     <header class="terminal-bar"><h3 id="terminal-title">Live CLI output</h3><div class="terminal-controls"><span>READ ONLY · WIB</span><button type="button" data-terminal-follow aria-pressed="true">Following ↓</button></div></header>
@@ -19,7 +19,7 @@
     <ol class="activity-log" aria-label="Live operational activity" tabindex="0"><li class="activity-empty">Connecting to CLI output…</li></ol>
     <p class="terminal-caption">Public progress only. Private reasoning, raw tool results and findings are excluded. Silence does not mean the worker stopped.</p>
   </section></details>
-  <noscript><p>JavaScript is needed for live nodes. Reload this page for current job status.</p></noscript>
+  <noscript><p>JavaScript is needed for expandable progress cards and live sessions. Reload this page for current job status.</p></noscript>
 </section>
 <details class="attempt-record"><summary>Attempt details <span>Commit, timing & request information</span></summary><div class="detail-grid">
   <section class="panel"><p class="section-number">01 / ATTEMPT RECORD</p><h2>Operational details</h2><dl><dt>Status</dt><dd><span data-job-badge class="status status-{{ job.status }}">{{ job.get_status_display }}</span></dd>{% if position %}<dt>Visible queue position</dt><dd>{{ position }} <span class="muted">(within your workspace)</span></dd>{% endif %}{% if job.retry_of_id %}<dt>Retry of</dt><dd><a href="{% url 'job_detail' job.retry_of_id %}">Previous attempt ↗</a></dd>{% endif %}<dt>Assignees</dt><dd>{% include 'core/assignees.html' with pr=job.pr %}</dd><dt>Triggered by</dt><dd>{{ job.actor }}</dd><dt>Reviewed commit</dt><dd><code>{{ job.head_sha }}</code></dd><dt>Workflow revision</dt><dd>{% if job.workflow_revision %}<code>{{ job.workflow_revision }}</code>{% else %}Legacy / version unknown{% endif %}</dd>{% if job.workflow_version %}<dt>Model configuration</dt><dd><code>{{ job.workflow_version }}</code></dd>{% endif %}<dt>Attempt identifier</dt><dd><code>{{ job.id }}</code></dd><dt>Provider</dt><dd data-job-provider>{{ job.provider.name|default:'Not assigned' }}</dd></dl></section>

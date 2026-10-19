@@ -1,9 +1,104 @@
 """Read-only progress projection. Never turn planned work into claimed work."""
 
+from django.utils.dateparse import parse_datetime
+
 from .models import Provider
 from .providers import REFUSAL_CATEGORIES, failure_description
 from .usage import public_usage
-from .workflow_schema import LEGACY_STEPS
+from .workflow_schema import LEGACY_STEPS, TEAM_REVISIONS
+
+
+def attempt_phases(job, attempt, events, next_started=None):
+    """Recorded sessions only: never borrow another provider attempt's progress."""
+    if job.workflow_revision not in TEAM_REVISIONS or attempt.status == "skipped":
+        return []
+    history = [
+        event
+        for event in events
+        if event.created_at >= attempt.started_at
+        and (not attempt.finished_at or event.created_at <= attempt.finished_at)
+        and (not next_started or event.created_at < next_started)
+    ]
+    phases = []
+    timeline = attempt.diagnostics.get("phase_timeline", [])
+    timeline = timeline[:5] if isinstance(timeline, list) else []
+    usage = public_usage(attempt.diagnostics)
+    used = {row.get("phase") for row in usage["passes"]}
+
+    def recorded_time(value):
+        try:
+            stamp = parse_datetime(value) if isinstance(value, str) and len(value) <= 40 else None
+        except ValueError:
+            return None
+        return (
+            stamp
+            if stamp
+            and stamp.tzinfo
+            and stamp >= attempt.started_at
+            and (not attempt.finished_at or stamp <= attempt.finished_at)
+            and (not next_started or stamp < next_started)
+            else None
+        )
+
+    for phase in ("intent", "code", "security", "tests", "synthesis"):
+        entered = next((e for e in history if e.code == f"{phase}_started"), None)
+        finished = next(
+            (e for e in reversed(history) if e.code in {f"{phase}_ready", f"{phase}_incomplete"}),
+            None,
+        )
+        state = (
+            "incomplete"
+            if finished and finished.code.endswith("_incomplete")
+            else "done"
+            if finished
+            else "unknown"
+            if phase in used
+            else "pending"
+        )
+        began = entered.created_at if entered else None
+        ended = finished.created_at if finished else None
+        stored = next(
+            (
+                row
+                for row in timeline
+                if isinstance(row, dict)
+                and row.get("phase") == phase
+                and row.get("state") in {"running", "done", "incomplete"}
+            ),
+            {},
+        )
+        stored_start = recorded_time(stored.get("started_at"))
+        stored_end = recorded_time(stored.get("finished_at"))
+        if stored_start:
+            began = stored_start
+            if (
+                stored.get("state") in {"done", "incomplete"}
+                and stored_end
+                and stored_end >= stored_start
+            ):
+                state, ended = stored["state"], stored_end
+            elif stored.get("state") == "running":
+                state = "running"
+        if began and not ended:
+            if attempt.status == "running" and job.status == "running":
+                state = "running"
+            else:
+                state = "cancelled" if job.status in {"cancelled", "superseded"} else "attention"
+                if (
+                    attempt.diagnostics.get("phase") == phase
+                    and attempt.diagnostics.get("failure_detail") == "review_incomplete"
+                ):
+                    state = "incomplete"
+                ended = attempt.finished_at
+        phases.append(
+            {
+                "phase": phase,
+                "state": state,
+                "started_at": began,
+                "finished_at": ended,
+            }
+        )
+    return phases
 
 
 def next_action(job, attempt, attempts, plan):
@@ -82,14 +177,21 @@ def snapshot(job, events):
         }
 
     def phase_node(key, title, prefix, detail, phase_events):
-        relevant = [e for e in phase_events if e.code in {f"{prefix}_started", f"{prefix}_ready"}]
+        relevant = [
+            e
+            for e in phase_events
+            if e.code in {f"{prefix}_started", f"{prefix}_ready", f"{prefix}_incomplete"}
+        ]
         stage = node(key, title, set(), set(), detail=detail)
         started = next((e for e in reversed(relevant) if e.code == f"{prefix}_started"), None)
         if started:
             stage["started_at"] = started.created_at
         if relevant:
-            if relevant[-1].code == f"{prefix}_ready":
-                stage.update(state="done", finished_at=relevant[-1].created_at)
+            if relevant[-1].code in {f"{prefix}_ready", f"{prefix}_incomplete"}:
+                stage.update(
+                    state="incomplete" if relevant[-1].code.endswith("_incomplete") else "done",
+                    finished_at=relevant[-1].created_at,
+                )
             else:
                 stage["state"] = (
                     "running"
@@ -300,7 +402,7 @@ def snapshot(job, events):
                 "attempts": [],
             }
         )
-    for attempt in attempts:
+    for attempt_index, attempt in enumerate(attempts):
         group = next(
             (
                 g
@@ -354,6 +456,14 @@ def snapshot(job, events):
                 "id": attempt.pk,
                 "state": state,
                 "phase": phase,
+                "phases": attempt_phases(
+                    job,
+                    attempt,
+                    all_events,
+                    attempts[attempt_index + 1].started_at
+                    if attempt_index + 1 < len(attempts)
+                    else None,
+                ),
                 "started_at": attempt.started_at,
                 "finished_at": attempt.finished_at,
                 "category": category,

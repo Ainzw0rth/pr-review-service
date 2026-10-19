@@ -19,12 +19,16 @@ test('compact index preserves evidence identities, inline text and aliases',()=>
 
 test('continuation hints reconstruct the full original evidence without granting early coverage',()=>{
  const entries=artifacts({source:'quoted "text"\n'.repeat(5000)}),coverage={};
- let read={id:'source'},content='';
+ let read={id:'source',length:8000},content='';
  while(read){
    const result=readEvidence(entries,coverage,{reads:[read]})[0];
+   assert.ok(Buffer.byteLength(JSON.stringify([result]),'utf8')<=24000);
    content+=result.content;
    read=result.next_read;
-   if(read) assert.deepEqual(missingEvidence(entries,coverage),['source']);
+   if(read) {
+     assert.ok(read.length<=8000);
+     assert.deepEqual(missingEvidence(entries,coverage),['source']);
+   }
  }
  assert.equal(content,entries[0].text);
  assert.deepEqual(missingEvidence(entries,coverage),[]);
@@ -89,4 +93,45 @@ test('small artifacts batch efficiently while total output remains bounded',()=>
  assert.equal(readEvidence(entries,{}, {reads:entries.map(x=>({id:x.id}))}).length,8);
  const big=artifacts({files:Array.from({length:4},(_,n)=>({path:`${n}.py`,content:'x'.repeat(20000)}))});
  assert.throws(()=>readEvidence(big,{}, {reads:big.map(x=>({id:x.id}))}));
+});
+
+test('escaped and non-ASCII replies exceed byte bounds without granting coverage',()=>{
+ for(const source of ['"'.repeat(10000),'界'.repeat(9000)]) {
+   const entries=artifacts({source}),coverage={};
+   const result=toolRead(entries,coverage,{reads:[{id:'source'}]});
+   assert.equal(result.isError,true);
+   const error=JSON.parse(result.content[0].text).error;
+   assert.equal(error.code,'REPLY_TOO_LARGE');
+   assert.match(error.hint,/split/i);
+   assert.match(error.hint,/smaller|reduce/i);
+   assert.deepEqual(coverage,{});
+   let read={id:'source',length:4000},content='';
+   while(read) {
+     const reply=toolRead(entries,coverage,{reads:[read]});
+     assert.equal(reply.isError,undefined);
+     assert.ok(Buffer.byteLength(reply.content[0].text,'utf8')<=24000);
+     const [part]=JSON.parse(reply.content[0].text);
+     content+=part.content;
+     read=part.next_read;
+   }
+   assert.equal(content,entries[0].text);
+   assert.deepEqual(missingEvidence(entries,coverage),[]);
+ }
+});
+
+test('late-batch reply overflow preserves previous coverage and accepts split retries',()=>{
+ const entries=artifacts({files:[{path:'a.py',content:'a'.repeat(14000)},{path:'b.py',content:'b'.repeat(14000)}]}),coverage={};
+ readEvidence(entries,coverage,{reads:[{id:'files_0',length:10}]});
+ const before=structuredClone(coverage);
+ const result=toolRead(entries,coverage,{reads:[{id:'files_0',offset:10},{id:'files_1'}]});
+ assert.equal(result.isError,true);
+ assert.equal(JSON.parse(result.content[0].text).error.code,'REPLY_TOO_LARGE');
+ assert.deepEqual(coverage,before);
+ assert.deepEqual(missingEvidence(entries,coverage),['files_0','files_1']);
+ for(const read of [{id:'files_0',offset:10},{id:'files_1'}]) {
+   const reply=toolRead(entries,coverage,{reads:[read]});
+   assert.equal(reply.isError,undefined);
+   assert.ok(Buffer.byteLength(reply.content[0].text,'utf8')<=24000);
+ }
+ assert.deepEqual(missingEvidence(entries,coverage),[]);
 });

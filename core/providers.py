@@ -79,6 +79,13 @@ REFUSAL_CATEGORIES = {
     "general_harms": "General harms",
 }
 
+CLAUDE_TERMINAL_REASONS = {
+    "error_during_execution": "Claude CLI stopped after an execution error.",
+    "error_max_turns": "Claude CLI reached its turn limit before returning a structured review.",
+    "error_max_budget_usd": "Claude CLI reached its budget limit before returning a structured review.",
+    "error_max_structured_output_retries": "Claude CLI reached its structured-output retry limit.",
+}
+
 
 def error_reason(status, data):
     error = data.get("error") if isinstance(data, dict) else None
@@ -119,6 +126,9 @@ def failure_description(diagnostics, state):
         "cli_stream_too_large": "A CLI output message exceeded the runner transport limit.",
     }
     if code in ("cli_protocol", "response_too_large"):
+        subtype = diagnostics.get("cli_terminal_subtype")
+        if isinstance(subtype, str):
+            reason = CLAUDE_TERMINAL_REASONS.get(subtype, reason)
         protocol = diagnostics.get("protocol_error")
         reason = stream_reasons.get(protocol, reason) if isinstance(protocol, str) else reason
         exit_code = diagnostics.get("cli_exit_code")

@@ -139,6 +139,34 @@ def run_job(job):
             cli_state = {}
             phase = "intent" if grounded else "review"
             phase_reports = {}
+            phase_history = {}
+
+            def team_progress(code):
+                progress(code)
+                name, _, event = code.rpartition("_")
+                if (
+                    team
+                    and name in {"intent", "code", "security", "tests", "synthesis"}
+                    and event in {"started", "ready", "incomplete"}
+                ):
+                    now = timezone.now().isoformat()
+                    row = phase_history.setdefault(name, {"started_at": None, "finished_at": None})
+                    row["state"] = (
+                        "running"
+                        if event == "started"
+                        else "done"
+                        if event == "ready"
+                        else "incomplete"
+                    )
+                    row["started_at" if event == "started" else "finished_at"] = now
+                    data = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
+                    data["phase_timeline"] = [
+                        {"phase": key, **value} for key, value in phase_history.items()
+                    ]
+                    ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
+                    Job.objects.filter(pk=job.pk, status="running").update(
+                        provider_diagnostics=data
+                    )
 
             def save_diagnostics(data):
                 from .activity import cli_progress
@@ -162,6 +190,10 @@ def run_job(job):
                             for name, values in phase_reports.items()
                         ],
                     }
+                if team:
+                    data["phase_timeline"] = [
+                        {"phase": name, **values} for name, values in phase_history.items()
+                    ]
                 Job.objects.filter(pk=job.pk, status="running").update(provider_diagnostics=data)
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
 
@@ -188,7 +220,7 @@ def run_job(job):
                 if grounded:
                     from .review_v2 import intent_context, validate_actions, validate_intent
 
-                    progress("intent_started")
+                    team_progress("intent_started")
                     save_diagnostics({})
                     intent = review(
                         provider,
@@ -206,7 +238,7 @@ def run_job(job):
                             detail="output_invalid",
                             validation_error=getattr(exc, "validation_error", None),
                         ) from None
-                    progress("intent_ready")
+                    team_progress("intent_ready")
                     guard(github, job)
                     if not team:
                         phase = "review"
@@ -224,7 +256,7 @@ def run_job(job):
                         call=review,
                         on_response=team_response,
                         on_activity=team_activity,
-                        progress=progress,
+                        progress=team_progress,
                     )
                 else:
                     result = review(

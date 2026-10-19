@@ -187,6 +187,50 @@ class TeamContractTests(TestCase):
         with self.assertRaises(ProviderError):
             finalize(value, reports, context())
 
+    def test_incomplete_review_cannot_be_overridden_or_resolve_threads(self):
+        from core.review_team import finalize
+
+        reports = {"code": report(complete=False), "security": report(), "tests": report()}
+        reports["code"]["coverage"]["limitations"] = ["Required caller behavior remains uncertain."]
+        value = synthesis()
+        value["replies"][0].update(action="reply", body="Checked this concern.", resolve=True)
+        value["action_plan"]["discussion_replies"]["decision"] = "publish"
+        final = finalize(value, reports, context())
+        self.assertFalse(final["complete"])
+        self.assertTrue(final["blocking"])
+        self.assertFalse(final["replies"][0]["resolve"])
+        self.assertIn("Incomplete review", final["summary"])
+        self.assertIn("Required caller behavior remains uncertain.", final["summary"])
+
+    def test_incomplete_synthesis_cannot_become_nonblocking(self):
+        from core.review_team import finalize
+
+        value = synthesis()
+        value["complete"] = False
+        final = finalize(
+            value, {role: report() for role in ("code", "security", "tests")}, context()
+        )
+        self.assertTrue(final["blocking"])
+        self.assertFalse(final["complete"])
+
+    def test_generated_coverage_notice_and_perspectives_fit_summary_limit(self):
+        from core.review_team import finalize
+
+        value = synthesis()
+        value["summary"] = "a" * 11000
+        value["reviewer_summaries"] = {
+            role: "Perspective " * 1000 for role in ("code", "security", "tests")
+        }
+        reports = {role: report(complete=False) for role in ("code", "security", "tests")}
+        for item in reports.values():
+            item["coverage"]["limitations"] = ["Gap " * 250]
+        final = finalize(value, reports, context())
+        self.assertLessEqual(len(final["summary"]), 12000)
+        self.assertTrue(final["summary"].startswith("**Incomplete review"))
+        for title in ("Code", "Security", "Test"):
+            self.assertIn(f"**{title}:**", final["summary"])
+        self.assertEqual(reports["code"]["coverage"]["limitations"], ["Gap " * 250])
+
 
 class TeamExecutionTests(TestCase):
     def run_team(self, call, *, kind="codex_cli", cancelled=lambda: False, **kwargs):
@@ -242,8 +286,11 @@ class TeamExecutionTests(TestCase):
             {phase for phase, _ in callbacks}, {"code", "security", "tests", "synthesis"}
         )
 
-    def test_failed_or_incomplete_required_reviewer_never_reaches_synthesis(self):
-        for failure in (ProviderError("unavailable"), report(complete=False)):
+    def test_failed_required_reviewer_never_reaches_synthesis(self):
+        for failure in (
+            ProviderError("unavailable"),
+            ProviderError("invalid", detail="cli_coverage"),
+        ):
             tasks = []
 
             def call(provider, evidence, cancelled, **kwargs):
@@ -257,6 +304,24 @@ class TeamExecutionTests(TestCase):
             with self.subTest(failure=failure), self.assertRaises(ProviderError):
                 self.run_team(call)
             self.assertNotIn("review_synthesis", tasks)
+
+    def test_incomplete_assessment_finishes_all_roles_without_granting_clearance(self):
+        for kind in ("codex_cli", "openai"):
+            tasks = []
+
+            def call(provider, evidence, cancelled, **kwargs):
+                tasks.append(kwargs["task"])
+                if kwargs["task"] == "review_synthesis":
+                    return synthesis()
+                return report(complete=kwargs["task"] != "review_code")
+
+            with self.subTest(kind=kind):
+                final, audit = self.run_team(call, kind=kind)
+                self.assertCountEqual(tasks[:3], ["review_code", "review_security", "review_tests"])
+                self.assertEqual(tasks[-1], "review_synthesis")
+                self.assertFalse(final["complete"])
+                self.assertTrue(final["blocking"])
+                self.assertFalse(audit["reports"]["code"]["complete"])
 
     def test_cancellation_after_role_prevents_remaining_cli_calls(self):
         stopped = False

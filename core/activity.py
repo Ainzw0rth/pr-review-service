@@ -90,6 +90,9 @@ for _phase, _title in {
     MESSAGES[f"{_phase}_ready"] = (
         f"{_title}: structured assessment validated; content remains private."
     )
+    MESSAGES[f"{_phase}_incomplete"] = (
+        f"{_title}: assessment has coverage limitations; clearance remains blocked."
+    )
 
 
 def cli_progress(progress, data, state):

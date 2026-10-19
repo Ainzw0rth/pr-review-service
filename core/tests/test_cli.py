@@ -26,6 +26,58 @@ class CLIStreamTests(TestCase):
         self.assertNotIn("cli_exit_code", p.diagnostics)
         self.assertNotIn("cli_exit_signal", p.diagnostics)
 
+    def test_claude_terminal_subtypes_explain_failures_without_private_prose(self):
+        from core.providers import failure_description
+
+        for subtype, description in (
+            ("error_during_execution", "execution error"),
+            ("error_max_turns", "turn limit"),
+            ("error_max_budget_usd", "budget limit"),
+            ("error_max_structured_output_retries", "structured-output retry limit"),
+        ):
+            with self.subTest(subtype=subtype):
+                p = self.parser("claude_cli")
+                p.feed(
+                    {
+                        "type": "result",
+                        "subtype": subtype,
+                        "is_error": True,
+                        "result": "private source contents",
+                        "errors": ["private provider error"],
+                    }
+                )
+                p.feed({"type": "runner_error", "code": "cli_failed", "message": ""})
+                p.feed({"type": "runner_exit", "code": 1})
+                with self.assertRaises(ProviderError) as caught:
+                    p.result(1)
+                self.assertEqual(caught.exception.detail, "cli_protocol")
+                self.assertEqual(p.diagnostics.get("cli_terminal_subtype"), subtype)
+                public = failure_description(p.diagnostics, "failed")
+                self.assertIn(description, public)
+                self.assertIn("CLI exit code: 1", public)
+                self.assertNotIn("private", json.dumps(p.diagnostics) + public)
+
+    def test_claude_terminal_subtypes_reject_arbitrary_values(self):
+        from core.providers import failure_description
+
+        for subtype in ("private-subtype", {"private": "value"}, ["private"], None):
+            with self.subTest(subtype=subtype):
+                p = self.parser("claude_cli")
+                p.feed({"type": "result", "subtype": subtype, "result": "private source"})
+                self.assertNotIn("cli_terminal_subtype", p.diagnostics)
+                public = failure_description(
+                    {**p.diagnostics, "cli_terminal_subtype": subtype}, "failed"
+                )
+                self.assertNotIn("private", json.dumps(p.diagnostics) + public)
+
+    def test_stream_failure_reason_takes_precedence_over_claude_terminal_subtype(self):
+        from core.providers import failure_description
+
+        p = self.parser("claude_cli")
+        p.feed({"type": "result", "subtype": "error_during_execution"})
+        p.feed({"type": "runner_error", "code": "cli_stream_truncated"})
+        self.assertIn("ended mid-message", failure_description(p.diagnostics, "failed"))
+
     def test_claude_assistant_rate_limit_survives_generic_final_error(self):
         p = self.parser("claude_cli")
         p.feed({"type": "assistant", "error": "rate_limit", "message": {"content": []}})

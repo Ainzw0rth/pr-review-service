@@ -69,7 +69,7 @@ def run_team(
     if provider.kind.endswith("_cli"):
         for phase in ROLES:
             reports[phase] = validate_report(serial(phase, context), context)
-            emit(phase, "ready")
+            emit(phase, "ready" if reports[phase]["complete"] else "incomplete")
     else:
         stop = threading.Event()
         events = queue.Queue(maxsize=100)
@@ -136,7 +136,7 @@ def run_team(
                             activity(phase, *data)
                         elif kind == "result":
                             reports[phase] = validate_report(data, context)
-                            emit(phase, "ready")
+                            emit(phase, "ready" if reports[phase]["complete"] else "incomplete")
                 finally:
                     stop.set()
         except ProviderError:
@@ -164,5 +164,5 @@ def run_team(
     evidence = {**context, "reviewer_reports": reports}
     value = serial("synthesis", evidence)
     result = finalize(value, reports, context)
-    emit("synthesis", "ready")
+    emit("synthesis", "ready" if result["complete"] else "incomplete")
     return result, {"reports": reports, "assessments": value["assessments"]}

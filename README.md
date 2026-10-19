@@ -832,21 +832,34 @@ existing transport cleanup timeouts still applying. Existing context/response si
 limits and API output-token caps remain enforced. CLI evidence recovery is still
 limited to one fresh pass per phase. This means five model phases per successful
 provider attempt (intent, three specialists, synthesis), plus bounded CLI recovery;
-fallback providers rerun the whole sequence. Required specialist failure, incomplete
-coverage or invalid synthesis cannot silently become clearance. Existing quota and
-authentication handling is unchanged; deadline and incomplete-coverage failures try
+fallback providers rerun the whole sequence. Failed calls, malformed output, invalid
+citations and unread evidence still stop that team attempt. A valid specialist
+assessment with limited coverage instead continues through the remaining reviewers
+and adjudication. The host forces the result to incomplete, blocking feedback, with
+limitations retained; it cannot approve, merge or resolve threads. Completeness
+describes review coverage, not defect-free code or passing CI. Existing quota and
+authentication handling is unchanged; deadlines and unread-evidence failures try
 the next configured provider.
 
 Specialist reports and adjudication decisions stay in the encrypted delivery
 checkpoint and its final compact audit. Delivery-only retries reuse saved analysis
-without any model calls. The dashboard adds Code reviewer, Security reviewer,
-Test reviewer and Review adjudication nodes, truthful overlapping API progress,
-and allowlisted per-phase token counters. Existing components and reduced-motion
-behavior are reused. Private report content remains off the dashboard.
+without any model calls. Job progress uses four compact expandable cards: Evidence,
+Checks, Review and GitHub. Review expands to a service-managed session tree: three
+specialists followed by adjudication, with model labels, recorded timing, reported
+phase usage and recent phase-scoped public activity. Model-attempt history remains
+available, including failures and fallback. Allowlisted phase timestamps persist
+independently of transcript retention; older missing history is labeled unrecorded,
+never invented. Expanded state and keyboard focus survive polling. Existing tokens,
+purposeful motion and reduced-motion behavior are reused. Private report content
+remains off the dashboard.
 
-No new dependency or migration is required. The CLI runner already accepts trusted
-schemas and policies, so only the schema-compatible application deployment is needed;
-saved older attempts retain their historical review path. Implementation checks use
+No new dependency or migration is required. Rebuild and pin the CLI runner alongside
+the application for the bounded evidence-reply update: fully serialized tool replies
+are limited to 24,000 UTF-8 bytes before granting coverage. Oversized batches get a
+corrective error and can be retried with smaller reads, whose continuation sizes are
+preserved. This prevents the service granting coverage to replies the CLI may truncate.
+Known Claude terminal failure subtypes are retained as allowlisted diagnostics, not
+raw error prose. Saved older attempts retain their historical review path. Checks use
 isolated fixtures, not live model/GitHub calls. Review-quality improvement still
 requires a human-scored comparison against representative previous reviews.
 

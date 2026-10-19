@@ -11,7 +11,7 @@
   let paused = false, stopped = false, busy = false, latest = 0;
   let transcriptMode = "cli", terminalEvents = [];
   const cliKinds = new Set(["cli_output_text","cli_output_tool","cli_output_done","cli_output_failed","cli_output_status"]);
-  const labels = {pending:'Waiting', unused:'Not used', not_needed:'Not needed', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', failed:'Review failed', skipped:'Skipped · quota', incomplete:'Incomplete evidence', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
+  const labels = {unknown:'Not recorded', pending:'Waiting', unused:'Not used', not_needed:'Not needed', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', failed:'Review failed', skipped:'Skipped · quota', incomplete:'Incomplete evidence', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
   const phaseNames = {intent:'Intent',review:'Review',code:'Code reviewer',security:'Security reviewer',tests:'Test reviewer',specialists:'Specialist reviews',synthesis:'Adjudication'};
   const phaseLabels = {intent:'Extracting intent',review:'Reviewing code',code:'Code review',security:'Security review',tests:'Test review',specialists:'Specialist reviews',synthesis:'Adjudicating findings'};
   const stateLabel = (state,phase) => state === 'running' && Object.hasOwn(phaseLabels,phase) ? phaseLabels[phase] : state === 'failed' && phase === 'intent' ? 'Intent failed' : labels[state] || 'Needs attention';
@@ -33,7 +33,7 @@
     const seconds = Math.max(0, Math.floor(((finish ? Date.parse(finish) : Date.now()) - Date.parse(start)) / 1000));
     return seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`;
   }
-  function card(data, index, model = false) {
+  function card(data, index, model = false, specialistStages = []) {
     const state = Object.hasOwn(labels, data.state) ? data.state : 'attention';
     const node = element('article', `flow-node node-${state}${model ? ' model-node' : ''}`);
     const latestAttempt = model ? data.attempts.at(-1) : null;
@@ -92,6 +92,11 @@
           if (attempt.retry_at) diagnosis.append(element('p','try-next',`Next availability check: ${jakarta(attempt.retry_at)} (not a guaranteed quota reset).`));
           row.append(diagnosis);
         }
+        if (specialistStages.length && attempt.phases?.length) {
+          const phases = disclosure(`attempt-phases-${attempt.id}`,'attempt-phases','Recorded reviewer sessions');
+          phases.details.append(reviewTree(specialistStages,{model:data,attempt},`attempt-${attempt.id}`));
+          row.append(phases.details);
+        }
         tries.append(row);
       }
       node.append(tries);
@@ -107,9 +112,121 @@
     }
     return node;
   }
+  function disclosure(key, className, title) {
+    const details = element('details',className);
+    details.dataset.flowKey = key;
+    const previous = [...graph.querySelectorAll('[data-flow-key]')].find(node => node.dataset.flowKey === key);
+    details.open = Boolean(previous?.open);
+    const summary = element('summary','',title);
+    summary.dataset.flowFocus = key;
+    details.append(summary);
+    return {details,summary};
+  }
+  const usageValue = value => Number.isSafeInteger(value) && value >= 0 ? value.toLocaleString() : 'Unavailable';
+  function phaseUsage(attempt, phase) {
+    const passes = attempt?.usage?.passes.filter(pass => pass.phase === phase) || [];
+    const content = element('div','session-usage');
+    content.append(element('h5','try-label','Phase usage'));
+    if (!passes.length) {
+      content.append(element('p','node-detail','Token usage not reported for this phase.'));
+      return content;
+    }
+    const totals = element('dl','usage-grid');
+    for (const [key,label] of Object.entries({input_tokens:'Input',output_tokens:'Output',cached_input_tokens:'Cache read',cache_creation_input_tokens:'Cache creation'})) {
+      const known = passes.every(pass => Number.isSafeInteger(pass[key]) && pass[key] >= 0);
+      totals.append(element('dt','',label),element('dd','',known ? usageValue(passes.reduce((sum,pass) => sum + pass[key],0)) : 'Unavailable'));
+    }
+    content.append(totals,element('p','node-detail',`${passes.length} reported session(s) · provider-reported tokens, not charges.`));
+    return content;
+  }
+  function phaseActivity(model, attempt, phase, scope) {
+    const content = element('div','session-activity');
+    content.append(element('h5','try-label','Public phase activity'));
+    const events = terminalEvents.filter(event => {
+      const sourceMatches = model && event.source === `${model.title.slice(0,80)} / ${phase}`;
+      const exactAttempt = event.model_attempt_id !== undefined && String(event.model_attempt_id) === String(attempt?.id);
+      if (event.model_attempt_id !== undefined && !exactAttempt) return false;
+      if (!(sourceMatches || exactAttempt && event.phase === phase)) return false;
+      const at = Date.parse(event.at);
+      return attempt && at >= Date.parse(attempt.started_at) && (!attempt.finished_at || at <= Date.parse(attempt.finished_at));
+    });
+    if (!events.length) {
+      content.append(element('p','node-detail','No public activity recorded for this phase in the recent feed.'));
+      return content;
+    }
+    const list = element('ol','phase-activity');
+    list.tabIndex = 0;
+    list.setAttribute('aria-label',`${phaseNames[phase]} public activity`);
+    list.dataset.flowFocus = `activity-${scope}-${phase}`;
+    list.dataset.flowScroll = list.dataset.flowFocus;
+    for (const event of events) {
+      const row = element('li','');
+      const time = element('time','',shortTime(event.at));
+      time.dateTime = event.at;
+      row.append(time,element('span','',event.message));
+      list.append(row);
+    }
+    content.append(list,element('p','node-detail','Recent public progress only · the page retains the latest 100 events.'));
+    return content;
+  }
+  function reviewTree(stages, current, scope = 'current') {
+    const tree = element('section','review-tree');
+    tree.setAttribute('aria-label','Service-managed reviewer sessions');
+    const state = current?.attempt.state || 'pending';
+    const phases = {code_review:'code',security_review:'security',test_review:'tests',synthesis:'synthesis'};
+    if (Array.isArray(current?.attempt.phases)) {
+      stages = stages.map(stage => {
+        const recorded = current.attempt.phases.find(item => item.phase === phases[stage.id]);
+        return {...stage,state:recorded?.state || 'pending',started_at:recorded?.started_at || null,finished_at:recorded?.finished_at || null};
+      });
+    }
+    const root = element('article',`review-orchestrator node-${state}`);
+    const heading = element('div','session-heading');
+    heading.append(element('h3','','Review orchestrator'),element('span','node-state',stateLabel(state,current?.attempt.phase)));
+    root.append(heading,element('p','orchestrator-note','Service-managed sessions'));
+    root.append(element('p','session-model',current ? `${current.model.title} · ${current.model.model}` : 'Model not assigned'));
+    root.append(element('p','session-elapsed',current ? duration(current.attempt.started_at,current.attempt.finished_at,state) || 'Timing not recorded' : 'Not started'));
+    tree.append(root);
+    const children = element('ul','review-sessions');
+    children.setAttribute('aria-label','Specialist review sessions');
+    let adjudication = null;
+    for (const stage of stages) {
+      const phase = phases[stage.id];
+      const state = stage.state;
+      const key = `session-${scope}-${phase}`;
+      const {details,summary} = disclosure(key,`review-session node-${state}`,'');
+      details.dataset.phase = phase;
+      details.dataset.state = state;
+      details.dataset.stageId = stage.id;
+      const title = element('span','session-title',stage.title);
+      const status = element('span','node-state',state === 'incomplete' ? 'Limited review' : labels[state] || 'Needs attention');
+      const previous = graph.querySelector(`[data-flow-key="${key}"]`);
+      if (previous && previous.dataset.state !== state) status.classList.add('motion-enter');
+      const timing = duration(stage.started_at,stage.finished_at || current?.attempt.finished_at,state);
+      summary.append(title,status,element('span','session-model',current?.model.model || 'Model not assigned'),element('span','session-elapsed',timing || (state === 'unknown' || stage.started_at ? 'Timing not recorded' : 'Not started')));
+      const body = element('div','session-content');
+      body.append(element('p','node-detail',stage.detail),phaseUsage(current?.attempt,phase),phaseActivity(current?.model,current?.attempt,phase,scope));
+      details.append(body);
+      if (phase === 'synthesis') {
+        adjudication = element('div','review-adjudication');
+        adjudication.append(element('p','review-dependency','After specialist reviews'),details);
+      } else {
+        const item = element('li','');
+        item.append(details); children.append(item);
+      }
+    }
+    tree.append(children);
+    if (adjudication) {
+      tree.classList.add('has-adjudication');
+      tree.append(adjudication);
+    }
+    return tree;
+  }
   function renderFlow(flow) {
     const fragment = document.createDocumentFragment();
     const focused = graph.contains(document.activeElement) ? document.activeElement.dataset.flowFocus : null;
+    const focusedGroup = focused ? document.activeElement.closest('[data-flow-key]')?.dataset.flowKey : null;
+    const scrollPositions = new Map([...graph.querySelectorAll('[data-flow-scroll]')].map(node => [node.dataset.flowScroll,node.scrollTop]));
     const specialists = flow.stages.filter(n => ['code_review','security_review','test_review','synthesis'].includes(n.id));
     const sessions = flow.models.flatMap(model => model.attempts.map(attempt => ({model,attempt})));
     const current = sessions.reduce((latest,row) => !latest || row.attempt.id > latest.attempt.id ? row : latest,null);
@@ -120,79 +237,61 @@
       if (nodes.every(n => ['done','success','not_needed','unused'].includes(n.state))) return 'done';
       if (nodes.some(n => ['attention','failed','refused','unavailable','quota','incomplete','interrupted'].includes(n.state))) return 'attention';
       if (nodes.some(n => n.state === 'cancelled')) return 'cancelled';
+      if (nodes.some(n => n.state === 'unknown')) return 'unknown';
       if (nodes.some(n => ['done','success','not_needed'].includes(n.state))) return panel.dataset.jobState === 'running' ? 'running' : 'attention';
       return 'pending';
     }
+    const reviewNodes = current?.attempt.phases?.length ? current.attempt.phases.filter(phase => ['code','security','tests','synthesis'].includes(phase.phase)) : specialists;
     const overview = element('ol','review-progress');
     const groups = [
-      ['evidence','Evidence',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id))],
-      ['checks','Checks',flow.stages.filter(n => ['checks','tests'].includes(n.id))],
-      ['review','Review',specialists.length ? specialists : current ? [current.attempt] : flow.legacy ? flow.models : []],
-      ['delivery','GitHub',flow.stages.filter(n => ['publication','pr_summary','inline_findings','discussion_replies','related_pr_comments','related_issue_comments','labels','sheet'].includes(n.id))],
+      ['evidence','Evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id))],
+      ['checks','Checks','Checks run against this exact commit.',flow.stages.filter(n => ['checks','tests'].includes(n.id))],
+      ['review','Review',flow.model_detail || 'Recorded failure causes and model fallback.',specialists.length ? [...reviewNodes,...(current ? [current.attempt] : [])] : current ? [current.attempt] : flow.legacy ? flow.models : []],
+      ['delivery','GitHub','Recorded delivery confirmations; review content stays on GitHub.',flow.stages.filter(n => ['publication','pr_summary','inline_findings','discussion_replies','related_pr_comments','related_issue_comments','labels','sheet'].includes(n.id))],
     ];
-    for (const [id,title,nodes] of groups) {
+    for (const [id,title,description,nodes] of groups) {
       const state = overall(nodes);
-      const step = element('li',`progress-step node-${state}`);
-      step.dataset.progressId = id;
-      step.dataset.state = state;
+      const item = element('li','progress-item');
+      const {details,summary} = disclosure(`progress-${id}`,'progress-step','');
+      summary.classList.add(`node-${state}`);
+      details.dataset.progressId = id;
+      details.dataset.state = state;
       const status = element('span','node-state',labels[state] || 'Not started');
       const previous = graph.querySelector(`[data-progress-id="${id}"]`);
       if (previous && previous.dataset.state !== state) status.classList.add('motion-enter');
-      step.append(element('span','progress-title',title),status);
-      overview.append(step);
+      summary.append(element('span','progress-title',title),status);
+      const content = element('div','progress-content');
+      content.append(element('p','lane-description',description));
+      if (id === 'review') {
+        if (specialists.length) content.append(reviewTree(specialists,current));
+        const models = flow.models.filter(model => model.attempts.length || flow.legacy);
+        if (models.length) {
+          const grid = element('div','node-track model-track');
+          models.forEach((model,index) => grid.append(card(model,index,true,specialists)));
+          if (specialists.length) {
+            const history = disclosure('model-history','disclosure model-history',`Model attempts · ${sessions.length} recorded`);
+            history.summary.append(element('span','disclosure-hint','Failures, fallback & total usage'));
+            history.details.append(grid); content.append(history.details);
+          } else content.append(grid);
+        } else if (!specialists.length) content.append(element('p','node-detail','No model session recorded.'));
+        if (current && ['attention','failed','quota'].includes(panel.dataset.jobState) && current.attempt.failure_reason) {
+          content.append(element('p','review-failure',`${current.attempt.failure_reason} ${current.attempt.next_action || ''}`));
+        }
+      } else {
+        const grid = element('div','node-track');
+        nodes.forEach((node,index) => grid.append(card(node,index)));
+        if (!nodes.length) grid.append(element('p','node-detail','No stage configured for this attempt.'));
+        content.append(grid);
+      }
+      details.append(content); item.append(details); overview.append(item);
     }
     fragment.append(overview);
-    if (current) {
-      const provider = element('p','review-provider');
-      provider.append(element('strong','',current.model.title),document.createTextNode(` · ${stateLabel(current.attempt.state,current.attempt.phase)}`));
-      fragment.append(provider);
-      if (['attention','failed','quota'].includes(panel.dataset.jobState) && current.attempt.failure_reason) {
-        fragment.append(element('p','review-failure',`${current.attempt.failure_reason} ${current.attempt.next_action || ''}`));
-      }
-    }
-    if (specialists.length) {
-      const team = element('section','review-team');
-      team.append(element('h3','','Review team'));
-      const list = element('ul','review-team-list');
-      for (const stage of specialists) {
-        const row = element('li',`review-team-row node-${stage.state}`);
-        row.dataset.stageId = stage.id;
-        row.dataset.state = stage.state;
-        const status = element('span','node-state',labels[stage.state] || 'Not started');
-        const previous = graph.querySelector(`[data-stage-id="${stage.id}"]`);
-        if (previous && previous.dataset.state !== stage.state) status.classList.add('motion-enter');
-        row.append(element('span','',stage.title),status);
-        list.append(row);
-      }
-      team.append(list); fragment.append(team);
-    }
-    const details = element('details','disclosure review-technical');
-    details.dataset.flowDetails = '';
-    details.open = Boolean(graph.querySelector('[data-flow-details]')?.open);
-    const summary = element('summary','','Technical details');
-    summary.dataset.flowFocus = 'technical';
-    summary.append(element('span','disclosure-hint','Evidence, model attempts & delivery'));
-    details.append(summary);
-    const sections = [
-      ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id)),false],
-      ['02','Verify the change','Checks run against this exact commit.',flow.stages.filter(n => ['checks','tests'].includes(n.id)),false],
-      ['03',flow.stages.some(stage => stage.id === 'intent') ? 'AI model sessions' : 'Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models.filter(model => model.attempts.length || flow.legacy),true],
-      ['04','Deliver the review','Results belong on GitHub, not in this dashboard.',flow.stages.filter(n => ['publication','pr_summary','inline_findings','discussion_replies','related_pr_comments','related_issue_comments','labels','sheet'].includes(n.id)),false],
-    ];
-    for (const [number,title,description,nodes,model] of sections) {
-      const section = element('section','flow-lane');
-      const heading = element('div','lane-heading');
-      const label = element('div','lane-label');
-      label.append(element('span','lane-number',number),element('h3','lane-title',title));
-      heading.append(label,element('p','lane-description',description));
-      const grid = element('div',`node-track${model ? ' model-track' : ''}`);
-      nodes.forEach((node,index) => grid.append(card(node,index,model)));
-      if (!nodes.length) grid.append(element('p','node-detail','No model session recorded.'));
-      section.append(heading,grid); details.append(section);
-    }
-    fragment.append(details);
     graph.replaceChildren(fragment);
-    if (focused) [...graph.querySelectorAll('[data-flow-focus]')].find(node => node.dataset.flowFocus === focused)?.focus({preventScroll:true});
+    graph.querySelectorAll('[data-flow-scroll]').forEach(node => {node.scrollTop = scrollPositions.get(node.dataset.flowScroll) || 0;});
+    if (focused) {
+      const target = [...graph.querySelectorAll('[data-flow-focus]')].find(node => node.dataset.flowFocus === focused) || [...graph.querySelectorAll('[data-flow-key]')].find(node => node.dataset.flowKey === focusedGroup)?.querySelector('summary');
+      target?.focus({preventScroll:true});
+    }
     panel.querySelector('.flow-legacy').hidden = !flow.legacy;
   }
   function renderTranscript() {
@@ -248,18 +347,25 @@
         retryControl.querySelector('[data-retry-label]').textContent = data.delivery_retry ? 'Retry delivery ↻' : 'Retry review ↻';
         retryControl.querySelector('[data-retry-explanation]').textContent = data.delivery_retry ? 'Deliver the saved review without another model call. Existing receipts and current GitHub state are rechecked.' : 'Starts a fresh attempt from the first model. The current commit, reviewer and on review label must still match.';
       }
-      renderFlow(data.flow);
       let changed = false;
       for (const event of data.events) {
         if(event.id<=latest) continue;
         terminalEvents.push(event); latest=event.id; changed=true;
       }
       terminalEvents=terminalEvents.slice(-100);
+      renderFlow(data.flow);
       if(changed || !terminalEvents.length) renderTranscript();
     } catch {
       if (!paused) text(connection,'Connection interrupted · retrying. Nodes may be stale.');
     } finally { clearTimeout(timeout); busy = false; }
   }
+  graph.addEventListener('click',event => {
+    const summary = event.target.closest('summary');
+    if (!summary || !graph.contains(summary) || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    requestAnimationFrame(() => {
+      if (summary.parentElement?.open) summary.nextElementSibling?.animate([{opacity:0,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],{duration:180,easing:'ease-out'});
+    });
+  });
   panel.querySelectorAll('[data-terminal-mode]').forEach(button => button.addEventListener('click', () => {
     transcriptMode=button.dataset.terminalMode;
     panel.querySelectorAll('[data-terminal-mode]').forEach(other=>other.setAttribute('aria-pressed',String(other===button)));

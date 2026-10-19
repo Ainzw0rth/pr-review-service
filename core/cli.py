@@ -12,6 +12,7 @@ import uuid
 from django.conf import settings
 
 from .providers import (
+    CLAUDE_TERMINAL_REASONS,
     MAX_RESPONSE_BYTES,
     REFUSAL_CATEGORIES,
     ProviderError,
@@ -215,6 +216,9 @@ class CLIStream:
             self.usage(event.get("usage"))
         elif kind == "result" and self.kind == "claude_cli":
             self.usage(event.get("usage"))
+            subtype = event.get("subtype")
+            if isinstance(subtype, str) and subtype in CLAUDE_TERMINAL_REASONS:
+                self.diagnostics["cli_terminal_subtype"] = subtype
             if event.get("is_error") or event.get("subtype") != "success":
                 self.fail({"message": event.get("result", ""), "code": event.get("subtype")})
             else:

@@ -1,4 +1,5 @@
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from core.activity import message, record
 from core.flow import snapshot
@@ -56,6 +57,92 @@ class WorkflowV2Tests(TestCase):
         flow = snapshot(self.job, list(self.job.activity.all()))
         self.assertEqual(flow["models"][0]["attempts"][0]["phase"], "review")
         self.assertEqual(self.stages()["intent"]["state"], "done")
+
+    def test_reviewer_sessions_are_scoped_to_their_provider_attempt(self):
+        provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        first = ModelAttempt.objects.create(
+            job=self.job,
+            provider=provider,
+            provider_name="First",
+            model="sol",
+            diagnostics={"phase": "code", "failure_detail": "review_incomplete"},
+        )
+        record(self.job, "intent_started")
+        record(self.job, "intent_ready")
+        record(self.job, "code_started")
+        first_code = self.job.activity.last()
+        first.status = "failed"
+        first.finished_at = timezone.now()
+        first.save()
+        second = ModelAttempt.objects.create(
+            job=self.job,
+            provider=provider,
+            provider_name="Second",
+            model="sol",
+            diagnostics={"phase": "security"},
+        )
+        record(self.job, "intent_started")
+        record(self.job, "intent_ready")
+        record(self.job, "code_started")
+        record(self.job, "code_ready")
+        second_code = self.job.activity.last()
+        record(self.job, "security_started")
+        attempts = snapshot(self.job, list(self.job.activity.all()))["models"][0]["attempts"]
+        phases = {row["id"]: {p["phase"]: p for p in row["phases"]} for row in attempts}
+        self.assertEqual(phases[first.pk]["code"]["state"], "incomplete")
+        self.assertEqual(phases[first.pk]["code"]["started_at"], first_code.created_at)
+        self.assertEqual(phases[first.pk]["code"]["finished_at"], first.finished_at)
+        self.assertEqual(phases[first.pk]["security"]["state"], "pending")
+        self.assertEqual(phases[second.pk]["code"]["state"], "done")
+        self.assertEqual(phases[second.pk]["code"]["finished_at"], second_code.created_at)
+        self.assertEqual(phases[second.pk]["security"]["state"], "running")
+        self.assertEqual(phases[second.pk]["tests"]["state"], "pending")
+
+    def test_legacy_attempts_do_not_invent_reviewer_sessions(self):
+        self.job.workflow_revision = "v2.1"
+        provider = Provider.objects.create(name="Old", kind="codex_cli", model="old")
+        ModelAttempt.objects.create(
+            job=self.job, provider=provider, provider_name="Old", model="old"
+        )
+        record(self.job, "model")
+        value = snapshot(self.job, list(self.job.activity.all()))["models"][0]["attempts"][0]
+        self.assertEqual(value["phases"], [])
+
+    def test_saved_phase_timing_survives_transcript_retention(self):
+        provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        attempt = ModelAttempt.objects.create(
+            job=self.job, provider=provider, provider_name="Sol", model="sol"
+        )
+        started = timezone.now()
+        finished = timezone.now()
+        attempt.diagnostics = {
+            "phase_timeline": [
+                {
+                    "phase": "code",
+                    "state": "incomplete",
+                    "started_at": started.isoformat(),
+                    "finished_at": finished.isoformat(),
+                }
+            ]
+        }
+        attempt.save()
+        phases = snapshot(self.job, [])["models"][0]["attempts"][0]["phases"]
+        code = next(p for p in phases if p["phase"] == "code")
+        self.assertEqual(code["state"], "incomplete")
+        self.assertEqual(code["started_at"], started)
+        self.assertEqual(code["finished_at"], finished)
+
+    def test_usage_without_recorded_phase_times_is_unknown_not_waiting(self):
+        provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        ModelAttempt.objects.create(
+            job=self.job,
+            provider=provider,
+            provider_name="Sol",
+            model="sol",
+            diagnostics={"phase_usage": [{"phase": "code", "passes": [{}]}]},
+        )
+        phases = snapshot(self.job, [])["models"][0]["attempts"][0]["phases"]
+        self.assertEqual(next(p for p in phases if p["phase"] == "code")["state"], "unknown")
 
     def test_missing_or_untrusted_model_phase_is_not_inferred_or_exposed(self):
         provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")

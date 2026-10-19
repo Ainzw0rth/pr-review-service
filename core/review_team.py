@@ -86,8 +86,11 @@ item is section_index (files_0, docs_0, issues_0); a non-list section is its key
 Each citation needs source and quote: a verbatim nonempty excerpt from that original artifact,
 not from a peer finding or synthesized intent. Cite supporting unchanged source when relevant.
 Separate blocking defects from optional suggestions; no finding quota or coverage percentage.
-Provide a brief summary and specific reviewed areas and limitations. Set complete false when
-necessary evidence is missing, contradictory or truncated, even if no finding can be anchored.
+Provide a brief summary and specific reviewed areas and limitations. Complete describes review
+coverage, not defect-free code or passing tests. A concrete implementation/spec contradiction
+is a finding, not by itself missing coverage. Set complete false when necessary evidence is
+missing or truncated, or conflicting requirements prevent a grounded assessment. Explain the
+specific gap in coverage.limitations; do not claim coverage merely because all items were read.
 Do not claim tests ran unless supplied evidence proves it. CI status alone is not a defect.
 Do not publish, draft discussion actions, resolve threads, or claim approval.
 """
@@ -128,6 +131,10 @@ candidates cannot be downgraded to suggestions. Write one concise actionable fin
 root cause. Assess all unresolved threads against original evidence using the normal action
 contract. Do not resolve or clear incomplete review coverage. Give concise reviewer_summaries
 for code, security and tests, mentioning relevant coverage limits; these appear on GitHub.
+Valid incomplete specialist assessments still require adjudication. If any specialist is
+incomplete, preserve its limitations, set complete false and blocking true, and set every
+thread resolution false. Return useful evidence-backed findings and clarification needs;
+never turn an incomplete assessment into clearance merely because no defect was confirmed.
 """
 )
 
@@ -145,6 +152,10 @@ def _strings(value):
     elif isinstance(value, list):
         for item in value:
             yield from _strings(item)
+
+
+def _excerpt(text, limit):
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def validate_report_shape(value):
@@ -206,8 +217,6 @@ def validate_report(value, context):
         if item["line"] not in files.get(item["path"], []):
             _invalid()
         _citations(item["evidence"], context)
-    if not value["complete"]:
-        raise ProviderError("invalid", detail="review_incomplete")
     return value
 
 
@@ -263,8 +272,37 @@ def finalize(value, reports, context):
             _invalid()
         reviewers = ", ".join(ROLES[role] for role in ROLES if any(r == role for r, _ in group))
         item["body"] += f"\n\n_Reviewers: {reviewers}._"
-    final["summary"] += "\n\n**Review perspectives**\n" + "\n".join(
-        f"- **{title}:** {value['reviewer_summaries'][role]}" for role, title in ROLES.items()
+    perspectives = "\n\n**Review perspectives**\n" + "\n".join(
+        f"- **{title}:** {_excerpt(value['reviewer_summaries'][role], 1500)}"
+        for role, title in ROLES.items()
+    )
+    notice = ""
+    incomplete = [role for role, report in reports.items() if not report["complete"]]
+    if incomplete or not final["complete"] or not context.get("complete", False):
+        # Semantic limitations are feedback, never a provider outage or permission to clear.
+        final.update(complete=False, blocking=True)
+        for reply in final["replies"]:
+            reply["resolve"] = False
+        limits = [
+            f"- **{ROLES[role]}:** "
+            + _excerpt(
+                "; ".join(reports[role]["coverage"]["limitations"])
+                or "Complete coverage was not established.",
+                1000,
+            )
+            for role in incomplete
+        ]
+        notice = (
+            "**Incomplete review — human follow-up required.** No clearance or thread resolution.\n"
+            + "\n".join(limits)
+            + "\n\n"
+        )
+    # Keep host-added safeguards and all three perspectives within the existing schema.
+    # Full reports remain unchanged in the encrypted adjudication audit.
+    final["summary"] = (
+        notice
+        + _excerpt(final["summary"], TEXT["maxLength"] - len(notice) - len(perspectives))
+        + perspectives
     )
     return validate_actions(final, context)
 

@@ -53,14 +53,18 @@ export function readEvidence(entries, coverage, args) {
   });
   if(batch.reduce((total,read)=>total+read.end-read.offset,0)>60000)
     throw new EvidenceError('BATCH_TOO_LARGE','Batch exceeds 60000 characters.','Split the batch or reduce lengths; maximum 12 reads and 60000 content characters per call.');
-  return batch.map(({item,offset,end})=>{
+  const result=batch.map(({item,offset,end})=>({id:item.id,offset,next_offset:end,eof:end===item.text.length,content:item.text.slice(offset,end),...(end<item.text.length?{next_read:{id:item.id,offset:end,length:Math.min(end-offset,item.text.length-end)}}:{})}));
+  // Coverage must describe evidence delivered, not a reply the CLI may truncate.
+  if(Buffer.byteLength(JSON.stringify(result),'utf8')>24000)
+    throw new EvidenceError('REPLY_TOO_LARGE','Evidence reply exceeds 24000 UTF-8 bytes.','Split the batch or reduce read lengths; retry with length 4000, then follow next_read. JSON escaping and non-ASCII text count toward the reply-byte limit.');
+  for(const {item,offset,end} of batch){
     const key=item.canonical_id||item.id;
     const ranges=[...(coverage[key]||[]),[offset,end]].sort((a,b)=>a[0]-b[0]);
     const merged=[];
     for(const range of ranges){const last=merged.at(-1);if(last&&range[0]<=last[1])last[1]=Math.max(last[1],range[1]);else merged.push([...range]);}
     coverage[key]=merged;
-    return {id:item.id,offset,next_offset:end,eof:end===item.text.length,content:item.text.slice(offset,end),...(end<item.text.length?{next_read:{id:item.id,offset:end,length:Math.min(20000,item.text.length-end)}}:{})};
-  });
+  }
+  return result;
 }
 
 export function toolRead(entries,coverage,args) {
@@ -76,7 +80,7 @@ if(process.argv[1]?.endsWith('/evidence.mjs')) {
   let coverage={};
   try{coverage=JSON.parse(await readFile('/tmp/review/coverage.json','utf8'));}catch{}
   const send=value=>process.stdout.write(JSON.stringify(value)+'\n');
-  const tool={name:'read_evidence',annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},description:'Read exact ranges of commit-pinned PR evidence by manifest ID. Read every artifact fully before completing the review; follow next_read until eof. Batch up to 12 reads per call, at most 60000 content characters total. Errors include a code and corrective hint; failed batches grant no coverage.',inputSchema:{type:'object',properties:{reads:{type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{id:{type:'string'},offset:{type:'integer',minimum:0},length:{type:'integer',minimum:1,maximum:20000}},required:['id'],additionalProperties:false}}},required:['reads'],additionalProperties:false}};
+  const tool={name:'read_evidence',annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false},description:'Read exact ranges of commit-pinned PR evidence by manifest ID. Read every artifact fully before completing the review; follow next_read until eof. Batch up to 12 reads per call, at most 60000 content characters total and 24000 UTF-8 bytes in the serialized reply. Split batches or use smaller lengths when the reply limit is exceeded. Errors include a code and corrective hint; failed batches grant no coverage.',inputSchema:{type:'object',properties:{reads:{type:'array',minItems:1,maxItems:12,items:{type:'object',properties:{id:{type:'string'},offset:{type:'integer',minimum:0},length:{type:'integer',minimum:1,maximum:20000}},required:['id'],additionalProperties:false}}},required:['reads'],additionalProperties:false}};
   for await(const line of createInterface({input:process.stdin,crlfDelay:Infinity})) {
     let request;
     try{
