@@ -762,6 +762,12 @@ summary**, **Inline findings**, **Discussion replies**, **Related-PR comments**,
 confirmed receipts and guarded label transitions, not model claims. The diagram
 is operational progress, not private reasoning or guaranteed action order.
 
+Under **AI model sessions**, active model cards distinguish **Extracting intent**
+from **Reviewing code** using the recorded phase. Full intent evidence coverage
+still waits for a validated intent summary; it does not mean code review has begun.
+Historical attempts without phase metadata keep neutral status labels. Phase changes
+reuse the dashboard's restrained motion and respect reduced-motion preferences.
+
 Intent and action-plan prose stays in the encrypted review checkpoint, never in
 public activity or node descriptions. Confirmed delivery retries reuse that
 checkpoint without new intent/review calls. Fallback providers run their own

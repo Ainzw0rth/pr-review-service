@@ -12,6 +12,8 @@
   let transcriptMode = "cli", terminalEvents = [];
   const cliKinds = new Set(["cli_output_text","cli_output_tool","cli_output_done","cli_output_failed","cli_output_status"]);
   const labels = {pending:'Waiting', unused:'Not used', not_needed:'Not needed', running:'In progress', done:'Complete', success:'Responded', refused:'Declined', failed:'Review failed', skipped:'Skipped · quota', incomplete:'Incomplete evidence', unavailable:'Unavailable', quota:'Out of quota', attention:'Needs attention', blocked:'Blocked', cancelled:'Cancelled', cancelling:'Cancelling', interrupted:'Interrupted'};
+  const phaseLabels = {intent:'Extracting intent',review:'Reviewing code'};
+  const stateLabel = (state,phase) => state === 'running' && Object.hasOwn(phaseLabels,phase) ? phaseLabels[phase] : state === 'failed' && phase === 'intent' ? 'Intent failed' : labels[state] || 'Needs attention';
   const jakartaFormat = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
@@ -33,8 +35,9 @@
   function card(data, index, model = false) {
     const state = Object.hasOwn(labels, data.state) ? data.state : 'attention';
     const node = element('article', `flow-node node-${state}${model ? ' model-node' : ''}`);
-    const top = element('div', 'node-top');
-    top.append(element('span','node-number',String(index + 1).padStart(2,'0')),element('span',`node-state state-${state}`,labels[state]));
+    const latestAttempt = model ? data.attempts.at(-1) : null;
+    const top = element('div', 'node-topline');
+    top.append(element('span','node-number',String(index + 1).padStart(2,'0')),element('span',`node-state state-${state}`,stateLabel(state,latestAttempt?.phase)));
     node.append(top);
     if (model) {
       node.append(element('h4','model-name',data.title),element('p','model-id',data.model));
@@ -43,9 +46,18 @@
       const tries = element('ol','model-tries');
       for (const [number, attempt] of data.attempts.entries()) {
         const row = element('li',`model-try try-${attempt.state}`);
+        row.dataset.modelAttempt = String(attempt.id);
+        row.dataset.phase = attempt.phase || '';
         const line = element('div','try-heading');
-        line.append(element('span','try-index',String(number + 1).padStart(2,'0')),element('strong','try-outcome',labels[attempt.state] || 'Needs attention'),element('span','try-duration',duration(attempt.started_at,attempt.finished_at,attempt.state)));
+        line.append(element('span','try-index',String(number + 1).padStart(2,'0')),element('strong','try-outcome',stateLabel(attempt.state,attempt.phase)),element('span','try-duration',duration(attempt.started_at,attempt.finished_at,attempt.state)));
+        const previous = graph.querySelector(`[data-model-attempt="${attempt.id}"]`);
+        if (previous && attempt.phase && previous.dataset.phase !== attempt.phase) {
+          line.classList.add('motion-enter');
+          if (attempt === latestAttempt) top.classList.add('motion-enter');
+        }
         row.append(line,element('p','try-time',shortTime(attempt.started_at)));
+        if (attempt.phase === 'intent') row.append(element('p','try-progress',attempt.state !== 'running' ? 'Phase: Intent extraction.' : attempt.evidence_total > 0 && attempt.evidence_read === attempt.evidence_total ? 'All intent evidence supplied; awaiting a validated intent summary.' : 'Extracting requirements before code review.'));
+        else if (attempt.phase === 'review') row.append(element('p','try-progress','Phase: Code review.'));
         if (attempt.recovery_pass === 1) row.append(element('p','try-progress','Evidence recovery pass 1 of 1 · fresh session'));
         if (attempt.events_received !== null && attempt.events_received !== undefined) row.append(element('p','try-progress',`${attempt.events_received} CLI events received`));
         if (attempt.evidence_total !== null && attempt.evidence_total !== undefined) row.append(element('p','try-progress',`${attempt.evidence_read} / ${attempt.evidence_total} evidence items supplied`));
@@ -91,7 +103,7 @@
     const sections = [
       ['01','Gather evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id)),false],
       ['02','Verify the change','Checks run against this exact commit.',flow.stages.filter(n => ['checks','tests'].includes(n.id)),false],
-      ['03','Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models,true],
+      ['03',flow.stages.some(stage => stage.id === 'intent') ? 'AI model sessions' : 'Review with AI',flow.model_detail || 'Recorded failure causes and model fallback.',flow.models,true],
       ['04','Deliver the review','Results belong on GitHub, not in this dashboard.',flow.stages.filter(n => ['publication','pr_summary','inline_findings','discussion_replies','related_pr_comments','related_issue_comments','labels','sheet'].includes(n.id)),false],
     ];
     for (const [number,title,description,nodes,model] of sections) {

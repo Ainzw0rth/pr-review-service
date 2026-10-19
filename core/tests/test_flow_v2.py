@@ -2,7 +2,15 @@ from django.test import TestCase, override_settings
 
 from core.activity import message, record
 from core.flow import snapshot
-from core.models import Credential, Job, Organization, PullRequest, Repository
+from core.models import (
+    Credential,
+    Job,
+    ModelAttempt,
+    Organization,
+    Provider,
+    PullRequest,
+    Repository,
+)
 
 
 @override_settings(GRAPH_REPOSITORIES=[])
@@ -27,6 +35,39 @@ class WorkflowV2Tests(TestCase):
             stage["id"]: stage
             for stage in snapshot(self.job, list(self.job.activity.all()))["stages"]
         }
+
+    def test_model_phase_tracks_intent_to_review_without_claiming_overlap(self):
+        provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        attempt = ModelAttempt.objects.create(
+            job=self.job,
+            provider=provider,
+            provider_name=provider.name,
+            model=provider.model,
+            diagnostics={"phase": "intent", "evidence_read": 46, "evidence_total": 46},
+        )
+        record(self.job, "intent_started")
+        flow = snapshot(self.job, list(self.job.activity.all()))
+        self.assertEqual(flow["models"][0]["attempts"][0]["phase"], "intent")
+        self.assertEqual(self.stages()["intent"]["state"], "running")
+        record(self.job, "intent_ready")
+        record(self.job, "model")
+        attempt.diagnostics = {"phase": "review"}
+        attempt.save()
+        flow = snapshot(self.job, list(self.job.activity.all()))
+        self.assertEqual(flow["models"][0]["attempts"][0]["phase"], "review")
+        self.assertEqual(self.stages()["intent"]["state"], "done")
+
+    def test_missing_or_untrusted_model_phase_is_not_inferred_or_exposed(self):
+        provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        attempt = ModelAttempt.objects.create(
+            job=self.job, provider=provider, provider_name=provider.name, model=provider.model
+        )
+        for phase in (None, "private-model-text", ["intent"], {"phase": "review"}):
+            with self.subTest(phase=phase):
+                attempt.diagnostics = {"phase": phase}
+                attempt.save()
+                value = snapshot(self.job, [])["models"][0]["attempts"][0]
+                self.assertIsNone(value["phase"])
 
     def test_new_jobs_snapshot_explicit_v2_steps(self):
         self.assertEqual(self.job.workflow_revision, "v2.1")

@@ -308,10 +308,14 @@ def snapshot(job, events):
             and 0 <= evidence_read <= evidence_total <= 1_000_000
         ):
             evidence_read = evidence_total = None
+        phase = attempt.diagnostics.get("phase")
+        if not isinstance(phase, str) or phase not in {"intent", "review"}:
+            phase = None
         group["attempts"].append(
             {
                 "id": attempt.pk,
                 "state": state,
+                "phase": phase,
                 "started_at": attempt.started_at,
                 "finished_at": attempt.finished_at,
                 "category": category,
@@ -357,6 +361,8 @@ def snapshot(job, events):
     model_detail = (
         "Saved analysis reused for delivery; no additional model call."
         if "delivery_resume" in codes
+        else "Each model extracts intent first, then reviews code after the intent summary is validated."
+        if includes("intent", False)
         else "Each attempt shows its recorded failure cause and what happened next."
     )
     if not attempts and not legacy and "context_failed" in codes:
