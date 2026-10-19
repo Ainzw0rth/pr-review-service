@@ -702,7 +702,7 @@ workflow edits become available. This page does not change CI or publication gua
 
 ### Per-attempt workflow history
 
-Each new `Job` (review attempt) stores `workflow_revision` (currently `v2`) and
+Each new `Job` (review attempt) stores `workflow_revision` (currently `v2.1`) and
 `workflow_steps` (an ordered JSON list of planned stage IDs) on its database row.
 Optional graph, isolated-test and timeline stages are selected at creation. The
 dashboard uses this saved list rather than current repository settings, so later
@@ -769,10 +769,20 @@ intent pass, and reported usage distinguishes intent/review plus recovery sessio
 This adds model time/quota; it does not estimate subscription costs from tokens.
 
 Existing legacy/v1/v1.1 attempts retain their historical schema and diagram. New
-review attempts use v2; delivery-only retries retain the original revision.
+review attempts use v2.1; delivery-only retries retain the original revision.
 Deploy migration `0018` and rebuild the application and CLI images together using
 the drain/idle/backup/migrate procedure. No live migration or deployment is
 performed by adding these files.
+
+Revision `v2.1` aligns grounded-intent citation IDs with the CLI evidence manifest
+(`pr`, `comments_0`, `issues_0`, ...), preserving them in the later review pass.
+API and CLI results use the same IDs; unknown,
+duplicate and empty required citations remain invalid. Invalid JSON, invalid intent
+shape, empty claims and unknown evidence references have separate allowlisted
+diagnostic reasons; raw responses and source values are never added to diagnostics.
+Existing v2 attempts and encrypted delivery checkpoints remain supported. This fix
+needs only the normal schema-compatible application deployment, with no migration
+or CLI-image rebuild. Paused historical jobs are not resumed automatically.
 
 ### Hermes Telegram approval alerts
 

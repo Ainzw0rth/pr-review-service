@@ -18,6 +18,7 @@ from core.publication import (
     thread_replies,
 )
 from core.workflow import finish
+from core.workflow_schema import GROUNDED_REVISIONS
 
 
 def run_job(job):
@@ -34,6 +35,7 @@ def run_job(job):
     outcome = None
     diagnostic = "Review incomplete. Check connections and required checks; request a new review."
     progress = Progress(job)
+    grounded = job.workflow_revision in GROUNDED_REVISIONS
     progress.start()
     try:
         progress("starting")
@@ -134,7 +136,7 @@ def run_job(job):
             )
 
             cli_state = {}
-            phase = "intent" if job.workflow_revision == "v2" else "review"
+            phase = "intent" if grounded else "review"
             phase_reports = {}
 
             def save_diagnostics(data):
@@ -142,7 +144,7 @@ def run_job(job):
                 from .usage import usage_counters
 
                 cli_progress(progress, data, cli_state)
-                if job.workflow_revision == "v2":
+                if grounded:
                     passes = data.get("usage_passes")
                     if not isinstance(passes, list) or not passes:
                         passes = [data]
@@ -165,7 +167,7 @@ def run_job(job):
 
             try:
                 review_context = context
-                if job.workflow_revision == "v2":
+                if grounded:
                     from .review_v2 import intent_context, validate_actions, validate_intent
 
                     progress("intent_started")
@@ -180,8 +182,12 @@ def run_job(job):
                     )
                     try:
                         validate_intent(intent, context)
-                    except (ProviderError, ValueError, KeyError, TypeError):
-                        raise ProviderError("invalid", detail="output_invalid") from None
+                    except (ProviderError, ValueError, KeyError, TypeError) as exc:
+                        raise ProviderError(
+                            "invalid",
+                            detail="output_invalid",
+                            validation_error=getattr(exc, "validation_error", None),
+                        ) from None
                     progress("intent_ready")
                     guard(github, job)
                     phase = "review"
@@ -195,15 +201,15 @@ def run_job(job):
                     progress.cancelled,
                     on_response=save_diagnostics,
                     on_activity=save_activity,
-                    **({"task": "review_v2"} if job.workflow_revision == "v2" else {}),
+                    **({"task": "review_v2"} if grounded else {}),
                 )
                 try:
-                    if job.workflow_revision == "v2":
+                    if grounded:
                         validate_actions(result, review_context)
                     thread_replies(result, context)
                 except (ProviderError, ValueError, KeyError, TypeError):
                     raise ProviderError("invalid", detail="output_invalid") from None
-                if job.workflow_revision == "v2":
+                if grounded:
                     context["intent"] = intent
                 ModelAttempt.objects.filter(pk=model_attempt.pk).update(
                     status="success", finished_at=timezone.now()
@@ -217,6 +223,8 @@ def run_job(job):
                 result = None
                 metadata = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
                 metadata.update(failure_kind=exc.kind, failure_detail=exc.detail)
+                if exc.validation_error:
+                    metadata["validation_error"] = exc.validation_error
                 save_diagnostics(metadata)
                 incomplete = exc.detail == "cli_coverage"
                 review_failed = exc.kind == "invalid" and exc.detail in {

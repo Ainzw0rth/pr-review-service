@@ -12,11 +12,12 @@ from core.delivery import checkpoint_state, safe_error, update_cursor
 from core.github import IntegrationError
 from core.models import ExpectedLabel, Job, Receipt
 from core.workflow import canonical_cycle, current
+from core.workflow_schema import GROUNDED_REVISIONS
 
 
 def _progress(job, category, status, count=None):
     """Never restart a category already confirmed by this attempt."""
-    if job.workflow_revision != "v2":
+    if job.workflow_revision not in GROUNDED_REVISIONS:
         return
     if job.activity.filter(code__in=[f"{category}_done", f"{category}_unused"]).exists():
         return
@@ -391,7 +392,9 @@ def publish(github, job, result, context, checks):
     # Allowed targets are established by trusted context retrieval, not the model.
     related_prs = _related_targets(job, context.get("related_prs", []))
     related_issues = (
-        _related_targets(job, context.get("issues", [])) if job.workflow_revision == "v2" else set()
+        _related_targets(job, context.get("issues", []))
+        if job.workflow_revision in GROUNDED_REVISIONS
+        else set()
     )
     related = related_prs | related_issues
     replies = thread_replies(result, context)

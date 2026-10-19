@@ -71,6 +71,15 @@ class WorkerV2Tests(TestCase):
             json.loads(decrypt(job.review_checkpoint.encrypted_payload))["intent"], INTENT
         )
 
+    def test_saved_v2_attempts_still_run_both_phases(self):
+        with patch("core.workflow_schema.REVISION", "v2"):
+            job, _, model = self.run_v2([INTENT, copy.deepcopy(V2_RESULT)])
+        self.assertEqual(job.workflow_revision, "v2")
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(
+            [call.kwargs["task"] for call in model.call_args_list], ["intent", "review_v2"]
+        )
+
     def test_bad_intent_reference_falls_back_before_review(self):
         bad = copy.deepcopy(INTENT)
         bad["goal"]["sources"] = ["invented_source"]
@@ -83,6 +92,10 @@ class WorkerV2Tests(TestCase):
         self.assertEqual(
             list(job.model_attempts.values_list("status", flat=True)), ["failed", "success"]
         )
+        diagnostics = job.model_attempts.order_by("id").first().diagnostics
+        self.assertEqual(diagnostics["failure_detail"], "output_invalid")
+        self.assertEqual(diagnostics["validation_error"], "intent_unknown_source")
+        self.assertNotIn("invented_source", json.dumps(diagnostics))
 
     def test_inconsistent_action_plan_cannot_publish(self):
         bad = copy.deepcopy(V2_RESULT)

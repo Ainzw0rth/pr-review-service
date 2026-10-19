@@ -235,8 +235,17 @@ class CLIStream:
         try:
             value = json.loads(self.output) if isinstance(self.output, str) else self.output
             return self.validator(value)
-        except (ValueError, TypeError, RecursionError, ProviderError):
-            raise ProviderError("invalid", detail="output_invalid") from None
+        except ProviderError as exc:
+            if exc.validation_error:
+                self.diagnostics["validation_error"] = exc.validation_error
+            raise ProviderError(
+                "invalid", detail="output_invalid", validation_error=exc.validation_error
+            ) from None
+        except (ValueError, TypeError, RecursionError):
+            self.diagnostics["validation_error"] = "invalid_json"
+            raise ProviderError(
+                "invalid", detail="output_invalid", validation_error="invalid_json"
+            ) from None
 
 
 def container_arguments(kind, name, image, volume):
@@ -270,6 +279,13 @@ def container_arguments(kind, name, image, volume):
 
 
 def review_cli(provider, context, cancelled, *, on_response=None, on_activity=None, task="review"):
+    if task == "intent":
+        # Keep citation/tool IDs identical here, in the API envelope and in the later review.
+        context = {
+            "head_sha": context.get("head_sha"),
+            "complete": context.get("complete", False),
+            **{entry["id"]: entry["value"] for entry in context.get("evidence", [])},
+        }
     recovery = None
     usage_passes = []
     for recovery_pass in range(2):

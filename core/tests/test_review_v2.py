@@ -1,5 +1,11 @@
 import copy
-from unittest import TestCase
+import json
+import shutil
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import TestCase, skipUnless
+from unittest.mock import patch
 
 from core import review_v2
 from core.providers import SCHEMA, ProviderError
@@ -61,6 +67,90 @@ def result():
 
 
 class IntentTests(TestCase):
+    @skipUnless(shutil.which("node"), "Real CLI evidence serialization requires Node")
+    def test_cli_manifest_citations_pass_worker_grounding_validation(self):
+        from core.cli import CLIStream, review_cli
+
+        captured = review_v2.intent_context(context())
+        with patch("core.cli._review_cli_once", return_value={}) as run:
+            review_cli(
+                SimpleNamespace(kind="codex_cli", model="configured"),
+                captured,
+                lambda: False,
+                task="intent",
+            )
+        delivered = run.call_args.args[1]
+        serialized = subprocess.run(
+            [
+                "node",
+                "--input-type=module",
+                "-e",
+                "import {artifacts} from './cli/evidence.mjs';"
+                "let raw=''; for await (const chunk of process.stdin) raw+=chunk;"
+                "const [intent,review]=JSON.parse(raw);"
+                "console.log(JSON.stringify({intent:artifacts(intent),"
+                "review:artifacts(review).map(entry=>entry.id)}));",
+            ],
+            input=json.dumps([delivered, context()]),
+            text=True,
+            capture_output=True,
+            check=True,
+            cwd=Path(__file__).resolve().parents[2],
+        )
+        manifests = json.loads(serialized.stdout)
+        entries = manifests["intent"]
+        self.assertGreater(len(entries), 2)
+        for entry in entries:
+            if entry["id"] in {"head_sha", "complete"}:
+                continue
+            for kind in ("codex_cli", "claude_cli"):
+                with self.subTest(source=entry["id"], backend=kind):
+                    value = {
+                        "goal": {
+                            "text": "A grounded goal",
+                            "sources": [entry["id"]],
+                            "certainty": "inferred",
+                        },
+                        "requirements": [],
+                        "non_goals": [],
+                        "unknowns": [],
+                    }
+                    parser = CLIStream(kind, delivered, task="intent")
+                    parser.feed(
+                        {"type": "runner_coverage", "read": len(entries), "total": len(entries)}
+                    )
+                    if kind == "codex_cli":
+                        parser.feed(
+                            {
+                                "type": "item.completed",
+                                "item": {"type": "agent_message", "text": json.dumps(value)},
+                            }
+                        )
+                        parser.feed({"type": "turn.completed"})
+                    else:
+                        parser.feed(
+                            {"type": "result", "subtype": "success", "structured_output": value}
+                        )
+                    self.assertTrue(parser.coverage)
+                    self.assertEqual(review_v2.validate_intent(parser.result(0), context()), value)
+                    self.assertIn(entry["id"], manifests["review"])
+
+    def test_intent_failures_have_safe_specific_reasons(self):
+        for mutate, reason in [
+            (lambda value: value.update(goal={}), "intent_schema"),
+            (lambda value: value["goal"].update(text="   "), "intent_empty_claim"),
+            (
+                lambda value: value["goal"].update(sources=["private-invented-source"]),
+                "intent_unknown_source",
+            ),
+        ]:
+            value = intent()
+            mutate(value)
+            with self.subTest(reason=reason), self.assertRaises(ProviderError) as caught:
+                review_v2.validate_intent(value, context())
+            self.assertEqual(caught.exception.validation_error, reason)
+            self.assertNotIn("private-invented-source", str(caught.exception))
+
     def test_intent_is_grounded_in_fixed_non_code_evidence(self):
         evidence = review_v2.intent_context(context())
         self.assertEqual(set(evidence), {"head_sha", "complete", "evidence"})

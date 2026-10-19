@@ -3,7 +3,8 @@
 from django.conf import settings
 
 # Bump for review-step or behavior changes. Keep old stage IDs/renderers available.
-REVISION = "v2"
+REVISION = "v2.1"
+GROUNDED_REVISIONS = {"v2", "v2.1"}
 
 # Fixed pre-versioning vocabulary: never add future stages to legacy attempts.
 LEGACY_STEPS = ("files", "discussion", "docs", "graph", "checks", "tests", "publication", "sheet")

@@ -32,10 +32,15 @@ class ProviderError(Exception):
         "invalid": "Provider configuration or review output is invalid or incomplete.",
     }
 
-    def __init__(self, kind, message=None, retry_at=None, *, detail=None):
+    def __init__(self, kind, message=None, retry_at=None, *, detail=None, validation_error=None):
         self.kind = kind
         self.retry_at = retry_at
         self.detail = detail if detail in ERROR_REASONS else None
+        self.validation_error = (
+            validation_error
+            if isinstance(validation_error, str) and validation_error in VALIDATION_REASONS
+            else None
+        )
         super().__init__(ERROR_REASONS.get(self.detail, self.MESSAGES[kind]))
 
 
@@ -55,6 +60,13 @@ ERROR_REASONS = {
     "output_incomplete": "Provider stopped before producing a complete review. Nothing was published.",
     "response_too_large": "Provider response exceeded the service's response-size limit.",
     "context_limit": "Review context exceeded the service's request-size limit.",
+}
+
+VALIDATION_REASONS = {
+    "invalid_json": "Provider did not return valid JSON. Nothing was published.",
+    "intent_schema": "Grounded intent failed JSON/schema validation. Nothing was published.",
+    "intent_empty_claim": "Grounded intent contained an empty claim. Nothing was published.",
+    "intent_unknown_source": "Grounded intent cited unknown evidence IDs. Nothing was published.",
 }
 
 REFUSAL_CATEGORIES = {
@@ -96,6 +108,9 @@ def failure_description(diagnostics, state):
     """Public operational reason from allowlisted metadata; never raw provider prose."""
     code = diagnostics.get("failure_detail") or diagnostics.get("error_reason")
     reason = ERROR_REASONS.get(code) if isinstance(code, str) else None
+    validation = diagnostics.get("validation_error")
+    if code == "output_invalid" and isinstance(validation, str):
+        reason = VALIDATION_REASONS.get(validation, reason)
     stream_reasons = {
         "cli_stream_malformed": "CLI emitted malformed JSON; the output stream could not be decoded.",
         "cli_stream_truncated": "CLI output ended mid-message; the structured response was truncated.",
@@ -535,10 +550,17 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None, 
             if data.get("stop_reason") != "end_turn":
                 raise ProviderError("invalid", detail="output_incomplete")
             text = "".join(block["text"] for block in data["content"] if block["type"] == "text")
-        result = json.loads(text)
     except (ValueError, KeyError, TypeError, RecursionError):
         raise ProviderError("invalid", detail="output_invalid") from None
     try:
+        result = json.loads(text)
+    except (ValueError, TypeError, RecursionError):
+        raise ProviderError(
+            "invalid", detail="output_invalid", validation_error="invalid_json"
+        ) from None
+    try:
         return validator(result)
-    except ProviderError:
-        raise ProviderError("invalid", detail="output_invalid") from None
+    except ProviderError as exc:
+        raise ProviderError(
+            "invalid", detail="output_invalid", validation_error=exc.validation_error
+        ) from None

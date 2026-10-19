@@ -29,7 +29,7 @@ class WorkflowV2Tests(TestCase):
         }
 
     def test_new_jobs_snapshot_explicit_v2_steps(self):
-        self.assertEqual(self.job.workflow_revision, "v2")
+        self.assertEqual(self.job.workflow_revision, "v2.1")
         self.assertEqual(
             list(self.stages()),
             [
