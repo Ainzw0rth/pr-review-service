@@ -81,9 +81,9 @@ def assert_fresh(models, alias):
         raise ValueError("Target permissions are not fresh")
     if list(
         ServiceSettings.objects.using(alias).values_list(
-            "id", "concurrent_pr_reviews", "draining", "drain_generation"
+            "id", "concurrent_pr_reviews", "cli_account_concurrency", "draining", "drain_generation"
         )
-    ) != [(1, 2, False, 0)]:
+    ) != [(1, 2, None, False, 0)]:
         raise ValueError("Target pool settings are not fresh")
     seeded = {"django_content_type", "auth_permission", "core_servicesettings", "django_migrations"}
     for model in models:

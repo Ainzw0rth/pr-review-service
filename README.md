@@ -813,10 +813,16 @@ reviews against the same original commit-pinned evidence and intent:
 | Test | Concrete missing scenarios, edge cases, regressions, test quality and failure-path coverage |
 
 Direct API specialists run concurrently with a maximum of three calls. Subscription
-CLI specialists also run concurrently when `CLI_ACCOUNT_CONCURRENCY` is greater than
-one (recommended: three). Default one preserves serial execution until rollout.
+CLI specialists also run concurrently when the effective CLI session limit is greater than
+one. Owner **Settings → Parallel CLI sessions per account** controls this live (1–32).
+Before a value is saved, `CLI_ACCOUNT_CONCURRENCY` supplies the bootstrap default (one).
 The cap applies across PRs, model rows and quota probes sharing an auth volume;
-waiting for a slot does not consume the active analysis budget. Synthesis waits for
+waiting for a slot does not consume the active analysis budget. CLI admissions use
+a same-host priority queue: ready adjudication first, ordinary review/intent calls
+next, quota refresh last, FIFO within each priority. Already running calls are never
+preempted. Unique waiter tickets hold liveness locks; crashed/cancelled waiters cannot
+block the queue. Lowering capacity counts active slots above the new limit and admits
+no replacement until total active sessions fall below it. Synthesis waits for
 all three validated specialist reports. Specialists never receive their peers' reports. Each reports coverage and
 limitations, plus structured candidate findings anchored to supplied changed lines.
 Finding citations use exact original-artifact IDs and verbatim source excerpts.
@@ -833,9 +839,13 @@ shared while ordinary per-session config is private. Re-audit these guarantees w
 upgrading either pinned CLI. No access/refresh tokens enter model evidence or progress.
 
 To enable parallel CLI reviews, build `cli/Dockerfile`, pin its image digest in
-`CLI_RUNNER_IMAGE`, and set `CLI_ACCOUNT_CONCURRENCY=3`. The app refuses concurrent
+`CLI_RUNNER_IMAGE`, and save the desired per-account limit in Settings. Worker
+supervisors refresh saved capacity on each loop (normally every two seconds; an
+in-flight auxiliary probe may delay refresh). Waiting sessions use the latest observed
+limit without restarting the worker. The app refuses concurrent
 sessions unless the pinned image declares `auto-reviewer.auth-coordination=v1`.
-Drain all workers and probes before changing runner images or slot limits; never
+Drain all workers and probes before changing runner images, bootstrap environment
+limits, or queue implementation; saved Settings limits can change live. Never
 replace/unlink live lock files. Keep native-container resource ceilings in mind:
 each session permits up to 2 GiB and 2 CPUs, and each distinct auth volume has its
 own cap. Drain reviews before manual credential replacement; Codex login uses the

@@ -6,9 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from copy import deepcopy
 
-from django.conf import settings
-
-from .capacity import ActiveBudget, CapacityError
+from .capacity import ActiveBudget, CapacityError, cli_limit
 from .providers import ProviderError, ReviewCancelled, resolve_capacity_scope
 from .review_team import ROLES, finalize, validate_report
 
@@ -70,7 +68,7 @@ def run_team(
         check()
         return value
 
-    if provider.kind.endswith("_cli") and settings.CLI_ACCOUNT_CONCURRENCY == 1:
+    if provider.kind.endswith("_cli") and cli_limit() == 1:
         for phase in ROLES:
             reports[phase] = validate_report(serial(phase, context), context)
             emit(phase, "ready" if reports[phase]["complete"] else "incomplete")

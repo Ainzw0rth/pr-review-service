@@ -373,6 +373,7 @@ class ApprovalRecord(models.Model):
 class ServiceSettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     concurrent_pr_reviews = models.PositiveSmallIntegerField(default=2)
+    cli_account_concurrency = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     draining = models.BooleanField(default=False)
     drain_generation = models.PositiveIntegerField(default=0)
 
@@ -381,6 +382,13 @@ class ServiceSettings(models.Model):
 
         if type(self.concurrent_pr_reviews) is not int or not 1 <= self.concurrent_pr_reviews <= 8:
             raise ValidationError({"concurrent_pr_reviews": "Choose a whole number from 1 to 8."})
+        if self.cli_account_concurrency is not None and (
+            type(self.cli_account_concurrency) is not int
+            or not 1 <= self.cli_account_concurrency <= 32
+        ):
+            raise ValidationError(
+                {"cli_account_concurrency": "Choose a whole number from 1 to 32."}
+            )
         if self.pk != 1:
             raise ValidationError("Service settings is a singleton.")
 
@@ -398,6 +406,11 @@ class ServiceSettings(models.Model):
             models.CheckConstraint(
                 condition=models.Q(concurrent_pr_reviews__gte=1, concurrent_pr_reviews__lte=8),
                 name="concurrent_reviews_bounds",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(cli_account_concurrency__isnull=True)
+                | models.Q(cli_account_concurrency__gte=1, cli_account_concurrency__lte=32),
+                name="cli_account_concurrency_bounds",
             ),
         ]
 

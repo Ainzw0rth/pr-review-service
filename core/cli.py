@@ -10,6 +10,7 @@ import time
 
 from django.conf import settings
 
+from .cli_queue import admit_cli
 from .providers import (
     CLAUDE_TERMINAL_REASONS,
     MAX_RESPONSE_BYTES,
@@ -359,13 +360,13 @@ def require_auth_coordination():
 def _review_cli_once(provider, context, cancelled, *, on_capacity=None, budget=None, **kwargs):
     from contextlib import nullcontext
 
-    from .capacity import Container, cli_scope, limit, permit
+    from .capacity import Container, cli_scope
     from .runner import _docker
 
     volume, scope = cli_scope(provider.kind)
-    slots = limit("CLI_ACCOUNT_CONCURRENCY", 1)
-    with permit(scope, slots, cancelled, on_wait=on_capacity) as slot:
-        if slots > 1:
+    priority = 0 if kwargs.get("task") == "review_synthesis" else 1
+    with admit_cli(scope, cancelled, on_wait=on_capacity, priority=priority) as slot:
+        if slot.admission_limit is None or slot.admission_limit > 1:
             require_auth_coordination()
         container = Container(slot, _docker, volume=volume)
         container.cleanup()  # Admission housekeeping is not model active time.

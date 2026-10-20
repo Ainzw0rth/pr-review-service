@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
 
 from core.claims import release
@@ -131,3 +133,117 @@ class ConcurrencySettingsTests(TestCase):
         fourth = claim()
         self.assertIsNotNone(fourth)
         release(fourth)
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_cli_fallback_and_omitted_field_preserve_null(self):
+        self.assertContains(
+            self.client.get("/settings/"), 'name="cli_account_concurrency" value="3"'
+        )
+        self.assertEqual(self.save(concurrent_pr_reviews="4").status_code, 302)
+        self.service.refresh_from_db()
+        self.assertIsNone(self.service.cli_account_concurrency)
+
+    def test_cli_bounds_preserve_pr_capacity_and_drain(self):
+        self.service.draining = True
+        self.service.drain_generation = 7
+        self.service.save()
+        for value in ("1", "32", "6"):
+            with self.subTest(value=value):
+                self.assertEqual(self.save(cli_account_concurrency=value).status_code, 302)
+                self.service.refresh_from_db()
+                self.assertEqual(self.service.cli_account_concurrency, int(value))
+                self.assertEqual(self.service.concurrent_pr_reviews, 2)
+                self.assertTrue(self.service.draining)
+                self.assertEqual(self.service.drain_generation, 7)
+                self.assertContains(
+                    self.client.get("/settings/"), f'name="cli_account_concurrency" value="{value}"'
+                )
+        self.assertEqual(self.save(concurrent_pr_reviews="3").status_code, 302)
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.cli_account_concurrency, 6)
+
+    def test_invalid_cli_capacity_rolls_back_all_settings(self):
+        for value in ("0", "33", "-1", "1.5", "", "true", "False", " 2", "2 ", "+2", "٢", "02"):
+            with self.subTest(value=value):
+                response = self.save(
+                    cli_account_concurrency=value,
+                    concurrent_pr_reviews="8",
+                    **{
+                        f"auto_approve_{self.repo.pk}": "on",
+                        f"auto_merge_{self.repo.pk}": "on",
+                        f"merge_method_{self.repo.pk}": "rebase",
+                        f"related_item_limit_{self.repo.pk}": "75",
+                    },
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertContains(response, 'aria-invalid="true"', status_code=400)
+                self.service.refresh_from_db()
+                self.repo.refresh_from_db()
+                self.assertIsNone(self.service.cli_account_concurrency)
+                self.assertEqual(self.service.concurrent_pr_reviews, 2)
+                self.assertFalse(self.repo.auto_approve)
+                self.assertFalse(self.repo.auto_merge)
+                self.assertEqual(self.repo.merge_method, "squash")
+                self.assertEqual(self.repo.related_item_limit, 50)
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_cli_only_change_rejects_stale_tab_even_when_effective_value_unchanged(self):
+        version = self.client.get("/settings/").context["version"]
+        self.assertEqual(self.save(cli_account_concurrency="3").status_code, 302)
+        response = self.client.post(
+            "/settings/", {"version": version, "concurrent_pr_reviews": "8"}
+        )
+        self.assertEqual(response.status_code, 409)
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.concurrent_pr_reviews, 2)
+        self.assertEqual(self.service.cli_account_concurrency, 3)
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_changed_cli_fallback_rejects_stale_tab(self):
+        version = self.client.get("/settings/").context["version"]
+        with override_settings(CLI_ACCOUNT_CONCURRENCY=4):
+            response = self.client.post(
+                "/settings/", {"version": version, "cli_account_concurrency": "6"}
+            )
+        self.assertEqual(response.status_code, 409)
+        self.service.refresh_from_db()
+        self.assertIsNone(self.service.cli_account_concurrency)
+
+    def test_invalid_repository_policy_does_not_change_cli_capacity(self):
+        response = self.save(
+            cli_account_concurrency="6", **{f"related_item_limit_{self.repo.pk}": "0"}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.service.refresh_from_db()
+        self.assertIsNone(self.service.cli_account_concurrency)
+
+    def test_cli_model_requires_strict_integer_or_null(self):
+        for value in (True, False, "6", 1.5, 0, 33):
+            with self.subTest(value=value):
+                self.service.cli_account_concurrency = value
+                with self.assertRaises(ValidationError):
+                    self.service.full_clean()
+        for value in (None, 1, 32):
+            self.service.cli_account_concurrency = value
+            self.service.full_clean()
+
+    def test_cli_database_bounds_allow_null_and_valid_values(self):
+        for value in (None, 1, 32):
+            ServiceSettings.objects.filter(pk=1).update(cli_account_concurrency=value)
+        for value in (0, 33):
+            with self.subTest(value=value), self.assertRaises(IntegrityError), transaction.atomic():
+                ServiceSettings.objects.filter(pk=1).update(cli_account_concurrency=value)
+
+    def test_cli_settings_require_owner_and_csrf(self):
+        other = get_user_model().objects.create_user(pk=2, username="other", is_superuser=True)
+        self.client.force_login(other)
+        self.assertEqual(
+            self.client.post("/settings/", {"cli_account_concurrency": "6"}).status_code, 403
+        )
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+        self.assertEqual(
+            csrf_client.post("/settings/", {"cli_account_concurrency": "6"}).status_code, 403
+        )
+        self.service.refresh_from_db()
+        self.assertIsNone(self.service.cli_account_concurrency)

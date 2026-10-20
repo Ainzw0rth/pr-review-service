@@ -13,7 +13,7 @@ from cryptography.fernet import Fernet
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
-from django.test import SimpleTestCase, TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 
 
 @skipUnless(connection.vendor == "postgresql", "Requires real PostgreSQL")
@@ -305,3 +305,18 @@ class StagingTests(SimpleTestCase):
                 call_command(
                     "stage_sqlite", source=str(source), directory=str(root / "stage"), offline=True
                 )
+
+
+class FreshTargetCLISettingsTests(TestCase):
+    def test_saved_cli_capacity_means_target_is_not_fresh(self):
+        from django.apps import apps
+        from django.db.migrations.recorder import MigrationRecorder
+
+        from core.management.commands.transfer_sqlite_to_postgres import assert_fresh
+        from core.models import ServiceSettings
+
+        models = list(apps.get_models(include_auto_created=True)) + [MigrationRecorder.Migration]
+        ServiceSettings.objects.filter(pk=1).update(cli_account_concurrency=6)
+        with self.assertRaises(ValueError):
+            assert_fresh(models, "default")
+        self.assertEqual(ServiceSettings.objects.get(pk=1).cli_account_concurrency, 6)

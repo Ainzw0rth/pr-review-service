@@ -12,15 +12,18 @@ from django.shortcuts import redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
+from .capacity import limit
 from .models import Repository, ServiceSettings
 from .retries import is_retry_owner
 
 
-def revision(repositories, capacity):
+def revision(repositories, capacity, cli_saved, cli_effective):
     return hashlib.sha256(
         json.dumps(
             [
                 capacity,
+                cli_saved,
+                cli_effective,
                 [
                     (r.pk, r.auto_approve, r.auto_merge, r.merge_method, r.related_item_limit)
                     for r in repositories
@@ -56,8 +59,12 @@ def service_settings(request):
         capacity = service.concurrent_pr_reviews
         capacity_value = request.POST.get("concurrent_pr_reviews", capacity)
         capacity_error = ""
+        cli_saved = service.cli_account_concurrency
+        cli_effective = cli_saved if cli_saved is not None else limit("CLI_ACCOUNT_CONCURRENCY", 1)
+        cli_value = request.POST.get("cli_account_concurrency", cli_effective)
+        cli_error = ""
         repositories = list(Repository.objects.select_for_update().order_by("full_name"))
-        version = revision(repositories, capacity)
+        version = revision(repositories, capacity, cli_saved, cli_effective)
         error = ""
         status = 200
         if request.method == "POST":
@@ -92,13 +99,19 @@ def service_settings(request):
                             capacity_error = "Choose a whole number from 1 to 8."
                             raise ValueError(capacity_error)
                         capacity = int(capacity_value)
+                    if "cli_account_concurrency" in request.POST:
+                        if not re.fullmatch(r"(?:[1-9]|[12][0-9]|3[0-2])", cli_value):
+                            cli_error = "Choose a whole number from 1 to 32."
+                            raise ValueError(cli_error)
+                        cli_saved = int(cli_value)
                     limits = {repo.pk: related_limit(request.POST, repo) for repo in repositories}
                 except ValueError as exc:
                     error = str(exc)
                     status = 400
                 else:
                     service.concurrent_pr_reviews = capacity
-                    service.save(update_fields=["concurrent_pr_reviews"])
+                    service.cli_account_concurrency = cli_saved
+                    service.save(update_fields=["concurrent_pr_reviews", "cli_account_concurrency"])
                     for repo in repositories:
                         repo.auto_approve = request.POST.get(f"auto_approve_{repo.pk}") == "on"
                         repo.auto_merge = request.POST.get(f"auto_merge_{repo.pk}") == "on"
@@ -116,7 +129,7 @@ def service_settings(request):
                         )
                     messages.success(
                         request,
-                        "Settings saved. Review capacity applies to new claims. Evidence limits apply when collection starts. Approval and merge policies apply as described below.",
+                        "Settings saved. Review capacity applies to new claims. CLI capacity applies shortly to new starts. Evidence limits apply when collection starts. Approval and merge policies apply as described below.",
                     )
                     return redirect("service_settings")
     return render(
@@ -128,6 +141,8 @@ def service_settings(request):
             "error": error,
             "capacity_value": capacity_value,
             "capacity_error": capacity_error,
+            "cli_value": cli_value,
+            "cli_error": cli_error,
         },
         status=status,
     )

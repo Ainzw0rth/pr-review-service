@@ -7,7 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.activity import Progress
-from core.capacity import CapacityError
+from core.capacity import CapacityError, cli_limit
 from core.claims import admission, attempt_rows, create_attempt, fenced, job_rows, owned
 from core.models import Job, ModelAttempt, Receipt, ReviewCheckpoint
 from core.publication import (
@@ -221,10 +221,7 @@ def _run_job(job):
                         **data,
                         "phase": "specialists"
                         if team
-                        and (
-                            not provider.kind.endswith("_cli")
-                            or settings.CLI_ACCOUNT_CONCURRENCY > 1
-                        )
+                        and (not provider.kind.endswith("_cli") or cli_limit() > 1)
                         and phase in {"code", "security", "tests"}
                         else phase,
                         "phase_usage": [

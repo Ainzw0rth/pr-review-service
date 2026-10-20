@@ -1,7 +1,8 @@
 """Same-host admission. Stable flock inodes; never remove files while deployed.
 
 All workers share DATA_DIR and SECRET_KEY. Drain before changing pool limits or
-migrating legacy containers. flock offers bounded concurrency, not FIFO fairness.
+migrating legacy containers. Generic flock permits are bounded, not FIFO; CLI
+admission adds explicit priority/FIFO ordering in cli_queue.
 """
 
 import fcntl
@@ -55,12 +56,30 @@ def limit(name, default):
     return value
 
 
+# Supervisor refreshes this process-local snapshot from ServiceSettings each loop.
+# Provider threads remain DB-free; pending admissions read the latest snapshot.
+_cli_concurrency = None
+
+
+def cli_limit():
+    return _cli_concurrency if _cli_concurrency is not None else limit("CLI_ACCOUNT_CONCURRENCY", 1)
+
+
+def set_cli_limit(value):
+    global _cli_concurrency
+    if value is not None and (type(value) is not int or not 1 <= value <= 32):
+        raise CapacityError()
+    previous, _cli_concurrency = _cli_concurrency, value
+    return previous
+
+
 @dataclass(frozen=True)
 class Slot:
     scope: str
     index: int
     generation: str
     path: object
+    admission_limit: int | None = None
 
     @property
     def namespace(self):

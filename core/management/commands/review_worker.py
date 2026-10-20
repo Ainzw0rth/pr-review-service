@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections, connection, connections, transaction
 from django.utils import timezone
 
-from core.capacity import CapacityError, recover_resources
+from core.capacity import CapacityError, recover_resources, set_cli_limit
 from core.claims import (
     execution_job,
     pool,
@@ -71,6 +71,7 @@ class Command(BaseCommand):
         owner = register_owner()
         owner_context = supervisor_owner.set(str(owner.pk))
         futures = set()
+        previous_cli_limit = set_cli_limit(None)
         try:
             with ThreadPoolExecutor(
                 max_workers=execution_slots, thread_name_prefix="review"
@@ -97,6 +98,7 @@ class Command(BaseCommand):
                                 )
                     with transaction.atomic():
                         config = pool()
+                        set_cli_limit(config.cli_account_concurrency)
                         draining = config.draining
                         if (
                             draining
@@ -169,6 +171,7 @@ class Command(BaseCommand):
                         break
                     time.sleep(2)
         finally:
+            set_cli_limit(previous_cli_limit)
             if (
                 not JobClaim.objects.filter(owner=owner).exists()
                 and not WorkerOwner.objects.filter(pk=owner.pk, probe_active=True).exists()

@@ -10,6 +10,9 @@
     <div><label for="concurrent-pr-reviews">Concurrent PR reviews</label><input id="concurrent-pr-reviews" type="number" min="1" max="8" step="1" required name="concurrent_pr_reviews" value="{{ capacity_value }}" aria-describedby="capacity-help{% if capacity_error %} capacity-error{% endif %}"{% if capacity_error %} aria-invalid="true"{% endif %}>
     {% if capacity_error %}<p class="helptext" id="capacity-error">{{ capacity_error }}</p>{% endif %}
     <p class="helptext" id="capacity-help">1–8 reviews at once. Applies to new claims; lowering this limit does not interrupt running reviews. Shared AI account capacity may still queue model calls.</p></div>
+    <div><label for="cli-account-concurrency">Parallel CLI sessions per account</label><input id="cli-account-concurrency" type="number" min="1" max="32" step="1" required name="cli_account_concurrency" value="{{ cli_value }}" aria-describedby="cli-capacity-help{% if cli_error %} cli-capacity-error{% endif %}"{% if cli_error %} aria-invalid="true"{% endif %}>
+    {% if cli_error %}<p class="helptext" id="cli-capacity-error">{{ cli_error }}</p>{% endif %}
+    <p class="helptext" id="cli-capacity-help">1–32 sessions per account across PRs and models. Ready adjudication goes first; running sessions are not interrupted. Changes are picked up shortly for new starts.</p></div>
   </div>
 </section>
 {% for repo in repositories %}

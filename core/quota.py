@@ -10,6 +10,7 @@ from datetime import timezone as dt_timezone
 from django.conf import settings
 from django.utils import timezone
 
+from .cli_queue import admit_cli
 from .models import Provider, SubscriptionQuota
 
 KINDS = {"claude_cli": "Anthropic · Claude", "codex_cli": "OpenAI · Codex"}
@@ -143,7 +144,7 @@ def refresh_due():
     """Worker-only polling: no model calls, no Docker access in the web process."""
     if not settings.CLI_RUNNER_IMAGE:
         return
-    from .capacity import CapacityBusy, CapacityError, Container, cli_scope, limit, permit
+    from .capacity import CapacityBusy, CapacityError, Container, cli_scope
     from .cli import container_arguments, require_auth_coordination
     from .runner import _docker
 
@@ -159,10 +160,8 @@ def refresh_due():
         volume, scope = cli_scope(kind)
         data = {"error": "unavailable"}
         try:
-            with permit(
-                scope, limit("CLI_ACCOUNT_CONCURRENCY", 1), lambda: False, wait=False
-            ) as slot:
-                if limit("CLI_ACCOUNT_CONCURRENCY", 1) > 1:
+            with admit_cli(scope, lambda: False, wait=False, priority=2) as slot:
+                if slot.admission_limit is None or slot.admission_limit > 1:
                     require_auth_coordination()
                 with Container(slot, _docker, volume=volume) as container:
                     _docker(["volume", "inspect", volume])

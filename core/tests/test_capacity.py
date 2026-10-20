@@ -433,3 +433,29 @@ class CapacityTests(TestCase):
             review_cli(SimpleNamespace(kind="codex_cli"), {}, lambda: False)
         self.assertEqual(caught.exception.detail, "cli_setup")
         active.assert_not_called()
+
+
+class LiveCLILimitTests(TestCase):
+    def test_live_limit_overrides_bootstrap_and_can_be_reset(self):
+        from core.capacity import cli_limit, set_cli_limit
+
+        previous = set_cli_limit(None)
+        self.addCleanup(set_cli_limit, previous)
+        with override_settings(CLI_ACCOUNT_CONCURRENCY=3):
+            self.assertEqual(cli_limit(), 3)
+            self.assertIsNone(set_cli_limit(6))
+            self.assertEqual(cli_limit(), 6)
+            with override_settings(CLI_ACCOUNT_CONCURRENCY=1):
+                self.assertEqual(cli_limit(), 6)
+            self.assertEqual(set_cli_limit(None), 6)
+            self.assertEqual(cli_limit(), 3)
+
+    def test_live_limit_rejects_noncanonical_values_without_changing_cap(self):
+        from core.capacity import CapacityError, cli_limit, set_cli_limit
+
+        previous = set_cli_limit(6)
+        self.addCleanup(set_cli_limit, previous)
+        for value in (True, False, 0, 33, 1.5, "6"):
+            with self.subTest(value=value), self.assertRaises(CapacityError):
+                set_cli_limit(value)
+            self.assertEqual(cli_limit(), 6)
