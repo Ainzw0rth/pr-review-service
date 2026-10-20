@@ -1,9 +1,17 @@
 {% extends 'core/base.html' %}
 {% block title %}Settings{% endblock %}
 {% block content %}
-<section class="page-heading"><div><h1>Settings.</h1><p class="lede">Review policy by repository. Automatic approval and merging are separate opt-ins.</p></div></section>
+<section class="page-heading"><div><h1>Settings.</h1><p class="lede">Service capacity and review policy by repository. Automatic approval and merging are separate opt-ins.</p></div></section>
 {% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
 <form method="post" class="policy-form">{% csrf_token %}<input type="hidden" name="version" value="{{ version }}">
+<section class="panel policy-repository" aria-labelledby="service-capacity">
+  <div class="section-heading"><h2 id="service-capacity">Service capacity</h2></div>
+  <div class="policy-options">
+    <div><label for="concurrent-pr-reviews">Concurrent PR reviews</label><input id="concurrent-pr-reviews" type="number" min="1" max="8" step="1" required name="concurrent_pr_reviews" value="{{ capacity_value }}" aria-describedby="capacity-help{% if capacity_error %} capacity-error{% endif %}"{% if capacity_error %} aria-invalid="true"{% endif %}>
+    {% if capacity_error %}<p class="helptext" id="capacity-error">{{ capacity_error }}</p>{% endif %}
+    <p class="helptext" id="capacity-help">1–8 reviews at once. Applies to new claims; lowering this limit does not interrupt running reviews. Shared AI account capacity may still queue model calls.</p></div>
+  </div>
+</section>
 {% for repo in repositories %}
 <section class="panel policy-repository" aria-labelledby="repository-{{ repo.pk }}">
   <div class="section-heading"><h2 id="repository-{{ repo.pk }}">{{ repo.full_name }}</h2>{% if not repo.enabled %}<span class="status">Monitoring disabled</span>{% endif %}</div>

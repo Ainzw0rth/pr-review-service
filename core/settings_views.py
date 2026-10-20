@@ -12,16 +12,19 @@ from django.shortcuts import redirect, render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
-from .models import Repository
+from .models import Repository, ServiceSettings
 from .retries import is_retry_owner
 
 
-def revision(repositories):
+def revision(repositories, capacity):
     return hashlib.sha256(
         json.dumps(
             [
-                (r.pk, r.auto_approve, r.auto_merge, r.merge_method, r.related_item_limit)
-                for r in repositories
+                capacity,
+                [
+                    (r.pk, r.auto_approve, r.auto_merge, r.merge_method, r.related_item_limit)
+                    for r in repositories
+                ],
             ]
         ).encode()
     ).hexdigest()[:16]
@@ -48,8 +51,13 @@ def service_settings(request):
     if not is_retry_owner(request.user):
         return HttpResponseForbidden("Only the configured owner can change service settings.")
     with transaction.atomic():
+        ServiceSettings.objects.get_or_create(pk=1)
+        service = ServiceSettings.objects.select_for_update().get(pk=1)
+        capacity = service.concurrent_pr_reviews
+        capacity_value = request.POST.get("concurrent_pr_reviews", capacity)
+        capacity_error = ""
         repositories = list(Repository.objects.select_for_update().order_by("full_name"))
-        version = revision(repositories)
+        version = revision(repositories, capacity)
         error = ""
         status = 200
         if request.method == "POST":
@@ -79,11 +87,18 @@ def service_settings(request):
                 status = 400
             else:
                 try:
+                    if "concurrent_pr_reviews" in request.POST:
+                        if not re.fullmatch(r"[1-8]", capacity_value):
+                            capacity_error = "Choose a whole number from 1 to 8."
+                            raise ValueError(capacity_error)
+                        capacity = int(capacity_value)
                     limits = {repo.pk: related_limit(request.POST, repo) for repo in repositories}
                 except ValueError as exc:
                     error = str(exc)
                     status = 400
                 else:
+                    service.concurrent_pr_reviews = capacity
+                    service.save(update_fields=["concurrent_pr_reviews"])
                     for repo in repositories:
                         repo.auto_approve = request.POST.get(f"auto_approve_{repo.pk}") == "on"
                         repo.auto_merge = request.POST.get(f"auto_merge_{repo.pk}") == "on"
@@ -101,12 +116,18 @@ def service_settings(request):
                         )
                     messages.success(
                         request,
-                        "Settings saved. Evidence limits apply when collection starts. Approval and merge policies apply as described below.",
+                        "Settings saved. Review capacity applies to new claims. Evidence limits apply when collection starts. Approval and merge policies apply as described below.",
                     )
                     return redirect("service_settings")
     return render(
         request,
         "core/settings.html",
-        {"repositories": repositories, "version": version, "error": error},
+        {
+            "repositories": repositories,
+            "version": version,
+            "error": error,
+            "capacity_value": capacity_value,
+            "capacity_error": capacity_error,
+        },
         status=status,
     )

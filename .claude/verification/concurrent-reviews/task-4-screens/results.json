@@ -1,0 +1,30 @@
+[
+  {
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "overflow": false
+  },
+  {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "overflow": false
+  },
+  {
+    "mobileKeyboardIncrement": true,
+    "mobileSaved": 4
+  },
+  {
+    "keyboardFocus": true,
+    "controlMin44": true,
+    "saved": 3,
+    "invalid400": true,
+    "stale409": true,
+    "advancedDisclosure": true,
+    "reducedMotion": true,
+    "pageErrors": []
+  }
+]

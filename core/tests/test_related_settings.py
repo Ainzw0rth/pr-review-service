@@ -43,7 +43,7 @@ class RelatedSettingsTests(TestCase):
         version = self.client.get("/settings/").context["version"]
         self.save(**{f"related_item_limit_{self.repo.pk}": "75"})
         self.assertEqual(self.client.post("/settings/", {"version": version}).status_code, 409)
-        other = get_user_model().objects.create_user(username="other", is_superuser=True)
+        other = get_user_model().objects.create_user(pk=2, username="other", is_superuser=True)
         self.client.force_login(other)
         self.assertEqual(self.client.get("/settings/").status_code, 403)
         self.assertEqual(
