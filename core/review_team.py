@@ -131,8 +131,10 @@ citations (source section ID and quote), including for rejection. Reject unsuppo
 explicitly; do not silently omit them. A rejected item has finding_index -1. Every kept or
 merged item references its zero-based final findings index. Merge only the same root cause;
 distinct defects on the same line remain distinct. Each final finding must be supported by
-at least one retained candidate and use an anchor from that group. Retained blocking
-candidates cannot be downgraded to suggestions. Write one concise actionable finding per
+at least one retained candidate and use an anchor from that group. Candidate anchors are
+exact pairs: copy both path and integer line unchanged from a kept or merged candidate for
+that final finding. Do not relocate it to another nearby line. Retained blocking candidates
+cannot be downgraded to suggestions. Write one concise actionable finding per
 root cause. Assess all unresolved threads against original evidence using the normal action
 contract. Do not resolve or clear incomplete review coverage. Give concise reviewer_summaries
 for code, security and tests, mentioning relevant coverage limits; these appear on GitHub.
