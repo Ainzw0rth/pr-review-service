@@ -28,11 +28,11 @@
 
 **Interfaces:** Produce singleton `ServiceSettings.concurrent_pr_reviews` (default2, constraints1–8), `claim()` compatible with existing callers, token-aware `current/finish`, explicit release after cleanup, all-worker drain acknowledgment. Keep resource progress codes from Task2 allowlisted. Model/backend settings are Task3; owner form Task4.
 
-- [ ] Write failing behavior tests: two distinct PRs claimed, third queued at limit2; two generations of samePR never overlap even if first cancelled/completed but cleanup not released; lowering2→1 permits no new claim until below1; stale token cannot finish, persist diagnostics/checkpoints or publish; live worker not recovered; abandoned publication gets attention. Use real DB transactions for races when PostgreSQL available.
-- [ ] Implement short globally bounded claim transaction. Lock singleton settings row, choose eligible job with skip-locked/self-only row lock, exclude every PR with retained live claim, create fresh claim token. No transaction surrounds provider/network work.
-- [ ] Implement owner heartbeat, same-host execution lock/deadowner proof, scoped recovery, finally release and bounded supervisor threads with closed per-thread DB connections. Retain claim through terminal Sheets/merge/journal/container cleanup; refuse stale mutation paths.
-- [ ] Replace single-token drain assumptions with all live worker acknowledgments and zero retained claims/probes. Preserve old `worker_token` compatibility as aggregate identity for deploy transition.
-- [ ] Run focused and existing worker/workflow/delivery/merge/deployment tests; record actual red/green commands, commit task.
+- [x] Write failing behavior tests: two distinct PRs claimed, third queued at limit2; two generations of samePR never overlap even if first cancelled/completed but cleanup not released; lowering2→1 permits no new claim until below1; stale token cannot finish, persist diagnostics/checkpoints or publish; live worker not recovered; abandoned publication gets attention. Use real DB transactions for races when PostgreSQL available.
+- [x] Implement short globally bounded claim transaction. Lock singleton settings row, choose eligible job with skip-locked/self-only row lock, exclude every PR with retained live claim, create fresh claim token. No transaction surrounds provider/network work.
+- [x] Implement owner heartbeat, same-host execution lock/deadowner proof, scoped recovery, finally release and bounded supervisor threads with closed per-thread DB connections. Retain claim through terminal Sheets/merge/journal/container cleanup; refuse stale mutation paths.
+- [x] Replace single-token drain assumptions with all live worker acknowledgments and zero retained claims/probes. Preserve old `worker_token` compatibility as aggregate identity for deploy transition.
+- [x] Run focused and existing worker/workflow/delivery/merge/deployment tests; record actual red/green commands, commit task.
 
 Critical claim behavior:
 ```python
@@ -52,11 +52,11 @@ assert claim() is not None
 
 **Interfaces:** Produce `permit(scope, limit, cancelled, *, on_wait=None, wait=True)` and `ActiveBudget(seconds)`; adapters gain optional `on_capacity`/`budget` keywords. Resolve shared identity before API threads; native gate covers each CLI session and retains one active budget across recovery. Shared CLI-volume identity, API account/credential fingerprint identity, bounded graph/tests. Task3 adds env bounds if needed. `Progress` receives allowlisted waiting/ready events; provider thread callbacks stay queued to controller.
 
-- [ ] Write failing tests using independent threads/processes and actual flock files: shared CLI volume/model rows serialize; separate accounts proceed; cap cannot exceed configured count; cancellation releases wait without acquiring/calling provider; probes/quota use same lock; healthy containers never globally cleaned.
-- [ ] Acquire actual slot before starting phase deadline; API phases get active-time clocks per started invocation, synthesis still waits for all reports. Keep timeout/auth/quota precedence, bounded callback queues and controller-thread state writes. Waiting produces no fallback or skipped attempt.
-- [ ] Tag/contain native containers per acquired resource slot. Cleanup only under exclusive ownership; deterministic names or equivalent prevent late orphan create/name races. Cleanup failure fails closed and cannot expose credentials.
-- [ ] Cover review+recovery and all direct CLI/quota/probe paths, graph/tests and warmups. Separate graph/test limits; preserve per-repo graph cache lock and sandbox args.
-- [ ] Run focused and existing native runner/orchestration tests; record evidence, commit task.
+- [x] Write failing tests using independent threads/processes and actual flock files: shared CLI volume/model rows serialize; separate accounts proceed; cap cannot exceed configured count; cancellation releases wait without acquiring/calling provider; probes/quota use same lock; healthy containers never globally cleaned.
+- [x] Acquire actual slot before starting phase deadline; API phases get active-time clocks per started invocation, synthesis still waits for all reports. Keep timeout/auth/quota precedence, bounded callback queues and controller-thread state writes. Waiting produces no fallback or skipped attempt.
+- [x] Tag/contain native containers per acquired resource slot. Cleanup only under exclusive ownership; deterministic names or equivalent prevent late orphan create/name races. Cleanup failure fails closed and cannot expose credentials.
+- [x] Cover review+recovery and all direct CLI/quota/probe paths, graph/tests and warmups. Separate graph/test limits; preserve per-repo graph cache lock and sandbox args.
+- [x] Run focused and existing native runner/orchestration tests; record evidence, commit task.
 
 Capacity waiting behavior:
 ```python
@@ -71,11 +71,11 @@ with slot('cli-volume:shared', 1, cancelled):
 
 **Interfaces:** PostgreSQL selected by explicit environment configuration; SQLite fallback for local development. Backups support selected backend. Transfer from offline SQLite source to fresh migrated PostgreSQL target preserves every table/PK/ciphertext, validates counts/content/FKs, resets sequences and refuses a populated target. Normal deploy accepts reviewed schema migrations only while all writers stopped/drained.
 
-- [ ] Write failing config/backup/deploy/transfer tests; include real PostgreSQL transfer with booleans, UUID, JSON, timezone values, M2M rows, permissions/contenttypes, session/credential/checkpoint/receipt preservation and rollback on mismatch.
-- [ ] Add psycopg3 and private PostgreSQL17 Compose service/volume/healthcheck, no public DB port. Do not place secrets in code/receipts/logs. Add explicit account/graph/test capacity env bounds consumed by Task2.
-- [ ] Implement consistent private backup and a typed offline transfer with complete validation and sequence reset. Never delete/overwrite original SQLite or existing PostgreSQL records. No simultaneous old/new writers.
-- [ ] Adapt drain-aware deploy for all worker identities/migrations, retaining safe image+DB rollback and failclosed paused state. Document staged cutover, incompatible schema rollback limits and downtime/webhook retry behavior.
-- [ ] Run real PostgreSQL queue/transfer/race tests plus focused deployment tests, commit task.
+- [x] Write failing config/backup/deploy/transfer tests; include real PostgreSQL transfer with booleans, UUID, JSON, timezone values, M2M rows, permissions/contenttypes, session/credential/checkpoint/receipt preservation and rollback on mismatch.
+- [x] Add psycopg3 and private PostgreSQL17 Compose service/volume/healthcheck, no public DB port. Do not place secrets in code/receipts/logs. Add explicit account/graph/test capacity env bounds consumed by Task2.
+- [x] Implement consistent private backup and a typed offline transfer with complete validation and sequence reset. Never delete/overwrite original SQLite or existing PostgreSQL records. No simultaneous old/new writers.
+- [x] Adapt drain-aware deploy for all worker identities/migrations, retaining safe image+DB rollback and failclosed paused state. Document staged cutover, incompatible schema rollback limits and downtime/webhook retry behavior.
+- [x] Run real PostgreSQL queue/transfer/race tests plus focused deployment tests, commit task.
 
 Verification examples:
 ```bash
@@ -91,8 +91,8 @@ Use actual test module names from implementation in report.
 
 **Interfaces:** Consume `ServiceSettings.concurrent_pr_reviews` and lock global row before repositories consistently with claims; include value in stale form revision; form omission preserves current value for backwards compatibility. Owner-only validated1–8. Saving applies atomically with existing repository policies.
 
-- [ ] Write failing owner/stale-form/range/atomicity tests. Zero, negative, decimal, malformed, empty and >8 reject400 without changing repository policy; other superusers403; concurrency-only changes invalidate stale forms409.
-- [ ] Add concise Service capacity card with label **Concurrent PR reviews**, numeric field1–8, current active/waiting context only if useful, explanatory copy: new jobs only; lowering doesn't interrupt running reviews; shared account capacity can still serialize model calls. Reuse paper/ink tokens, controls and existing motion/reduced-motion.
-- [ ] Exercise rendered Settings at desktop/mobile with keyboard focus, save/error/success, no overflow and reduced motion; keep previous four technical cards/phase delivery statuses intact.
-- [ ] Run full Django suite on SQLite and PostgreSQL where applicable, Ruff lint/format, migrations/check, browser regressions; independent task/final review. Fix evidence-backed defects, rerun only covering checks after fixes.
+- [x] Write failing owner/stale-form/range/atomicity tests. Zero, negative, decimal, malformed, empty and >8 reject400 without changing repository policy; other superusers403; concurrency-only changes invalidate stale forms409.
+- [x] Add concise Service capacity card with label **Concurrent PR reviews**, numeric field1–8, current active/waiting context only if useful, explanatory copy: new jobs only; lowering doesn't interrupt running reviews; shared account capacity can still serialize model calls. Reuse paper/ink tokens, controls and existing motion/reduced-motion.
+- [x] Exercise rendered Settings at desktop/mobile with keyboard focus, save/error/success, no overflow and reduced motion; keep previous four technical cards/phase delivery statuses intact.
+- [x] Run full Django suite on SQLite and PostgreSQL where applicable, Ruff lint/format, migrations/check, browser regressions; independent task/final review. Fix evidence-backed defects, rerun only covering checks after fixes.
 - [ ] Commit/push, preserve current production checkout private env/override, drain naturally, private backup and verified database cutover with writers stopped, initial cap1 smoke then cap2. Verify owner settings/read-only historical jobs, health/services/restarts, queue resumption. Record deployment receipt without secrets; never fabricate a review to prove concurrency.
