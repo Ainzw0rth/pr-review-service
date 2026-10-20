@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 
+from core.flow import snapshot as progress_snapshot
 from core.models import Job
 from core.providers import ProviderError
 from core.secrets import decrypt
@@ -168,6 +169,12 @@ class WorkerTeamTests(TestCase):
         self.assertFalse(saved["review_team"]["reports"]["tests"]["complete"])
         self.assertTrue(all(not reply["resolve"] for reply in saved["result"]["replies"]))
         self.assertTrue(job.activity.filter(code="tests_incomplete").exists())
+        flow = progress_snapshot(job, list(job.activity.all()))
+        phases = {phase["phase"]: phase for phase in flow["models"][0]["attempts"][0]["phases"]}
+        for name in ("code", "security", "tests", "synthesis"):
+            self.assertEqual(phases[name]["state"], "done")
+        self.assertIs(phases["tests"]["coverage_complete"], False)
+        self.assertIs(phases["synthesis"]["coverage_complete"], False)
 
     def test_cli_cancellation_between_specialists_cannot_publish(self):
         self.first.kind = "codex_cli"

@@ -40,12 +40,20 @@ def attempt_phases(job, attempt, events, next_started=None):
             else None
         )
 
+    tracked_history = any(event.code == "intent_started" for event in history) or any(
+        isinstance(row, dict)
+        and row.get("phase") in ("intent", "code", "security", "tests", "synthesis")
+        and row.get("state") in ("running", "done", "incomplete")
+        and recorded_time(row.get("started_at"))
+        for row in timeline
+    )
     for phase in ("intent", "code", "security", "tests", "synthesis"):
         entered = next((e for e in history if e.code == f"{phase}_started"), None)
         finished = next(
             (e for e in reversed(history) if e.code in {f"{phase}_ready", f"{phase}_incomplete"}),
             None,
         )
+        assessment_delivered = finished is not None
         state = (
             "incomplete"
             if finished and finished.code.endswith("_incomplete")
@@ -77,25 +85,35 @@ def attempt_phases(job, attempt, events, next_started=None):
                 and stored_end >= stored_start
             ):
                 state, ended = stored["state"], stored_end
-            elif stored.get("state") == "running":
+                assessment_delivered = True
+            elif stored.get("state") == "running" and not assessment_delivered:
                 state = "running"
         if began and not ended:
             if attempt.status == "running" and job.status == "running":
                 state = "running"
             else:
                 state = "cancelled" if job.status in {"cancelled", "superseded"} else "attention"
-                if (
-                    attempt.diagnostics.get("phase") == phase
-                    and attempt.diagnostics.get("failure_detail") == "review_incomplete"
-                ):
-                    state = "incomplete"
                 ended = attempt.finished_at
+        coverage_complete = None
+        if phase != "intent":
+            # A validated assessment is completed work, even with coverage caveats.
+            # A stopped call or usage alone does not prove it supplied a review.
+            if assessment_delivered:
+                coverage_complete = state != "incomplete"
+                state = "done"
+            elif state in {"attention", "cancelled"}:
+                state = "skipped"
+            elif state == "pending" and (
+                attempt.status != "running" or job.status not in {"running", "queued", "quota"}
+            ):
+                state = "skipped" if tracked_history else "unknown"
         phases.append(
             {
                 "phase": phase,
                 "state": state,
                 "started_at": began,
                 "finished_at": ended,
+                "coverage_complete": coverage_complete,
             }
         )
     return phases
@@ -189,9 +207,11 @@ def snapshot(job, events):
         if relevant:
             if relevant[-1].code in {f"{prefix}_ready", f"{prefix}_incomplete"}:
                 stage.update(
-                    state="incomplete" if relevant[-1].code.endswith("_incomplete") else "done",
+                    state="done",
                     finished_at=relevant[-1].created_at,
                 )
+                if prefix != "intent":
+                    stage["coverage_complete"] = not relevant[-1].code.endswith("_incomplete")
             else:
                 stage["state"] = (
                     "running"

@@ -186,7 +186,7 @@ footer { border-top:1px solid var(--line); padding:22px 5%; display:flex; justif
 .node-refused,.node-attention,.node-blocked,.node-failed { background:#eee2d9; border-color:#ba9d87; }
 :is(.node-refused,.node-attention,.node-blocked,.node-failed)>:is(.node-topline,summary,.session-heading)>.node-state::before,:is(.node-refused,.node-attention,.node-blocked,.node-failed):where(summary)>.node-state::before { content:'!'; }
 .node-unavailable,.node-quota,.node-incomplete { background:#eee8d8; border-color:#b6a780; }
-.node-pending,.node-unused,.node-unknown { background:transparent; border-style:dashed; }
+.node-pending,.node-unused,.node-unknown,.review-session.node-skipped { background:transparent; border-style:dashed; }
 .model-name { font-size:17px; font-weight:500; margin:20px 0 5px; letter-spacing:-.7px; }
 .model-id { color:var(--muted); font-size:8px; overflow-wrap:anywhere; margin:0 0 16px; }
 .model-backend { font-size:8px; border:1px solid #aaa496; border-radius:5px; display:inline-block; padding:4px 7px; margin:0 0 12px; }

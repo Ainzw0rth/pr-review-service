@@ -846,8 +846,13 @@ checkpoint and its final compact audit. Delivery-only retries reuse saved analys
 without any model calls. Job progress uses four compact expandable cards: Evidence,
 Checks, Review and GitHub. Review expands to a service-managed session tree: three
 specialists followed by adjudication, with model labels, recorded timing, reported
-phase usage and recent phase-scoped public activity. Model-attempt history remains
-available, including failures and fallback. Allowlisted phase timestamps persist
+phase usage and recent phase-scoped public activity. A session is Complete once it
+delivers a validated assessment, even if it reports coverage caveats. A stopped team
+shows Skipped for sessions that supplied no assessment; active sessions remain
+In progress or Waiting, and missing historical records remain Not recorded.
+Coverage caveats stay in expanded details and the GitHub review; completion does
+not mean approval or remove incomplete-review publication safeguards. Model-attempt
+history remains available, including failures and fallback. Allowlisted phase timestamps persist
 independently of transcript retention; older missing history is labeled unrecorded,
 never invented. Expanded state and keyboard focus survive polling. Existing tokens,
 purposeful motion and reduced-motion behavior are reused. Private report content

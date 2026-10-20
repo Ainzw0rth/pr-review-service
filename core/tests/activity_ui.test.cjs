@@ -90,7 +90,8 @@ test('progress cards retain accessible disclosures, reviewer attribution and his
     assert.equal(await code.getAttribute('open'), '');
     assert.equal(await code.locator(':scope > summary').evaluate(node => node === document.activeElement), true);
 
-    data.flow.models[0].attempts[0].phases = [{phase:'code',state:'attention',started_at:'2026-10-19T09:00:00Z',finished_at:'2026-10-19T09:00:05Z'}];
+    data.flow.models[0].attempts[0].phase = 'code';
+    data.flow.models[0].attempts[0].phases = [{phase:'intent',state:'done',started_at:'2026-10-19T09:00:00Z',finished_at:'2026-10-19T09:00:01Z'},{phase:'code',state:'skipped',started_at:'2026-10-19T09:00:01Z',finished_at:'2026-10-19T09:00:05Z'},...['security','tests','synthesis'].map(phase => ({phase,state:'skipped',started_at:null,finished_at:null}))];
     // Per-attempt records override global stages; old sessions must not inherit the latest run.
     data.flow.models[1].attempts[0].phases = [{phase:'code',state:'done',started_at:start,finished_at:end},{phase:'security',state:'done',started_at:start,finished_at:end},{phase:'tests',state:'running',started_at:end,finished_at:null}];
     await page.evaluate(() => window.activityPoll());
@@ -100,13 +101,16 @@ test('progress cards retain accessible disclosures, reviewer attribution and his
     assert.match(await history.innerText(), /Continued with Test API/);
     const oldPhases = history.locator('[data-flow-key="attempt-phases-1"]');
     await oldPhases.locator(':scope > summary').click();
-    assert.equal(await oldPhases.locator('[data-phase="code"]').getAttribute('data-state'), 'attention');
-    assert.equal(await oldPhases.locator('[data-phase="security"]').getAttribute('data-state'), 'pending');
+    assert.equal(await oldPhases.locator('[data-phase="code"]').getAttribute('data-state'), 'skipped');
+    assert.match(await oldPhases.locator('[data-phase="code"] > summary').innerText(), /Skipped/);
+    assert.doesNotMatch(await oldPhases.locator('[data-phase="code"] > summary').innerText(), /quota/);
+    assert.equal(await oldPhases.locator('[data-phase="security"]').getAttribute('data-state'), 'skipped');
     const currentPhases = review.locator(':scope > .progress-content > .review-tree');
     assert.equal(await currentPhases.locator('[data-phase="tests"]').getAttribute('data-state'), 'running');
-    assert.match(await oldPhases.locator('[data-phase="code"]').innerText(), /5s/);
+    assert.match(await oldPhases.locator('[data-phase="code"]').innerText(), /4s/);
     const oldCode = oldPhases.locator('[data-phase="code"] > summary');
     await oldCode.click();
+    assert.match(await oldPhases.locator('[data-phase="code"]').innerText(), /No review was delivered/);
     await oldCode.focus();
     await page.evaluate(() => window.activityPoll());
     assert.equal(await oldCode.evaluate(node => node === document.activeElement), true);
@@ -118,10 +122,33 @@ test('progress cards retain accessible disclosures, reviewer attribution and his
     assert.equal(await history.getAttribute('open'), '');
 
     const codePhase = data.flow.models[1].attempts[0].phases.find(row => row.phase === 'code');
-    codePhase.state = 'incomplete';
+    codePhase.coverage_complete = false;
     await page.evaluate(() => window.activityPoll());
-    assert.match(await currentPhases.locator('[data-phase="code"] > summary').innerText(), /Limited review/);
+    assert.match(await currentPhases.locator('[data-phase="code"] > summary').innerText(), /Complete/);
+    assert.doesNotMatch(await currentPhases.locator('[data-phase="code"] > summary').innerText(), /Limited review/);
     assert.doesNotMatch(await currentPhases.locator('[data-phase="code"] > summary').innerText(), /Incomplete evidence/);
+    assert.match(await currentPhases.locator('[data-phase="code"]').innerText(), /Coverage caveats/);
+
+    // Delivery status is independent of the assessment's coverage confidence.
+    data.status = 'completed';
+    data.status_label = 'Completed';
+    data.flow.models[1].state = 'success';
+    data.flow.models[1].attempts[0].state = 'success';
+    data.flow.models[1].attempts[0].finished_at = end;
+    data.flow.models[1].attempts[0].phases = ['code','security','tests','synthesis'].map(phase => ({phase,state:'done',coverage_complete:phase === 'tests',started_at:start,finished_at:end}));
+    await page.evaluate(() => window.activityPoll());
+    assert.equal(await review.getAttribute('data-state'), 'done');
+    assert.match(await review.locator(':scope > summary').innerText(), /Complete/);
+    assert.equal(await currentPhases.locator('.review-session.node-done').count(), 4);
+    assert.match(await currentPhases.locator('.review-orchestrator .node-state').innerText(), /Complete/);
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({width, height: 900});
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      if (process.env.ACTIVITY_SCREENSHOT_DIR) {
+        mkdirSync(process.env.ACTIVITY_SCREENSHOT_DIR, {recursive: true});
+        await page.screenshot({path: join(process.env.ACTIVITY_SCREENSHOT_DIR, `review-complete-${width}.png`), fullPage: true});
+      }
+    }
 
     // Usage with missing historical timing stays unknown, never complete or running.
     data.status = 'completed';

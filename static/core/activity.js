@@ -177,12 +177,12 @@
     if (Array.isArray(current?.attempt.phases)) {
       stages = stages.map(stage => {
         const recorded = current.attempt.phases.find(item => item.phase === phases[stage.id]);
-        return {...stage,state:recorded?.state || 'pending',started_at:recorded?.started_at || null,finished_at:recorded?.finished_at || null};
+        return {...stage,state:recorded?.state || 'pending',started_at:recorded?.started_at || null,finished_at:recorded?.finished_at || null,coverage_complete:recorded?.coverage_complete ?? null};
       });
     }
     const root = element('article',`review-orchestrator node-${state}`);
     const heading = element('div','session-heading');
-    heading.append(element('h3','','Review orchestrator'),element('span','node-state',stateLabel(state,current?.attempt.phase)));
+    heading.append(element('h3','','Review orchestrator'),element('span','node-state',state === 'success' ? 'Complete' : stateLabel(state,current?.attempt.phase)));
     root.append(heading,element('p','orchestrator-note','Service-managed sessions'));
     root.append(element('p','session-model',current ? `${current.model.title} · ${current.model.model}` : 'Model not assigned'));
     root.append(element('p','session-elapsed',current ? duration(current.attempt.started_at,current.attempt.finished_at,state) || 'Timing not recorded' : 'Not started'));
@@ -199,13 +199,16 @@
       details.dataset.state = state;
       details.dataset.stageId = stage.id;
       const title = element('span','session-title',stage.title);
-      const status = element('span','node-state',state === 'incomplete' ? 'Limited review' : labels[state] || 'Needs attention');
+      const status = element('span','node-state',state === 'skipped' ? 'Skipped' : labels[state] || 'Needs attention');
       const previous = graph.querySelector(`[data-flow-key="${key}"]`);
       if (previous && previous.dataset.state !== state) status.classList.add('motion-enter');
       const timing = duration(stage.started_at,stage.finished_at || current?.attempt.finished_at,state);
       summary.append(title,status,element('span','session-model',current?.model.model || 'Model not assigned'),element('span','session-elapsed',timing || (state === 'unknown' || stage.started_at ? 'Timing not recorded' : 'Not started')));
       const body = element('div','session-content');
-      body.append(element('p','node-detail',stage.detail),phaseUsage(current?.attempt,phase),phaseActivity(current?.model,current?.attempt,phase,scope));
+      body.append(element('p','node-detail',stage.detail));
+      if (stage.coverage_complete === false) body.append(element('p','node-detail','Assessment delivered. Coverage caveats are retained in the final review.'));
+      if (state === 'skipped') body.append(element('p','node-detail','No review was delivered to the orchestrator for this session. See model-attempt history for recorded failures or cancellation.'));
+      body.append(phaseUsage(current?.attempt,phase),phaseActivity(current?.model,current?.attempt,phase,scope));
       details.append(body);
       if (phase === 'synthesis') {
         adjudication = element('div','review-adjudication');
