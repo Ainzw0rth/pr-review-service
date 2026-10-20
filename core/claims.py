@@ -67,48 +67,49 @@ def claim(owner=None):
                 .exclude(pr_id__in=JobClaim.objects.values("pr_id"))
                 .order_by("created_at")
             )
-            # Admission mutex serializes claimers; PR precedes Job in lifecycle lock order.
-            candidate = candidates.first()
-            if candidate is None:
-                return None
-            PullRequest.objects.select_for_update().get(pk=candidate.pr_id)
+            # Admission mutex serializes claimers; skip both lock levels in PR→Job order.
+            # Bound queue scanning so a busy head cannot hold global admission indefinitely.
             options = (
                 {"skip_locked": True, "of": ("self",)}
                 if connection.features.has_select_for_update_skip_locked
                 else {}
             )
-            job = (
-                candidates.select_for_update(**options)
-                .filter(pk=candidate.pk)
-                .select_related("pr__repository", "provider")
-                .first()
-            )
-            if job is None:
-                return None
-            if job.generation != job.pr.generation or job.head_sha != job.pr.head_sha:
-                Job.objects.filter(pk=job.pk).update(status="superseded")
-                return None
-            token = uuid.uuid4()
-            handle = execution_lock(token)
-            if handle is None:
-                return None
-            JobClaim.objects.create(
-                job=job,
-                pr_id=job.pr_id,
-                owner=owner,
-                token=token,
-                expires_at=Now() + timedelta(seconds=LEASE_SECONDS),
-            )
-            job.status = "running"
-            job.started_at = job.started_at or timezone.now()
-            job.next_retry_at = None
-            job.reason = ""
-            job.save(update_fields=["status", "started_at", "next_retry_at", "reason"])
-            job.claim_token = token
-            job.claim_owner_id = owner.pk
-            job.execution_lock = handle
-            job.claim_owner = owner
-            return job
+            for job_id, pr_id in list(candidates.values_list("pk", "pr_id")[:100]):
+                pr = PullRequest.objects.select_for_update(**options).filter(pk=pr_id).first()
+                if pr is None:
+                    continue
+                job = (
+                    candidates.select_for_update(**options)
+                    .filter(pk=job_id)
+                    .select_related("pr__repository", "provider")
+                    .first()
+                )
+                if job is None:
+                    continue
+                if job.generation != pr.generation or job.head_sha != pr.head_sha:
+                    Job.objects.filter(pk=job.pk).update(status="superseded")
+                    continue
+                token = uuid.uuid4()
+                handle = execution_lock(token)
+                if handle is None:
+                    return None
+                JobClaim.objects.create(
+                    job=job,
+                    pr_id=job.pr_id,
+                    owner=owner,
+                    token=token,
+                    expires_at=Now() + timedelta(seconds=LEASE_SECONDS),
+                )
+                job.status = "running"
+                job.started_at = job.started_at or timezone.now()
+                job.next_retry_at = None
+                job.reason = ""
+                job.save(update_fields=["status", "started_at", "next_retry_at", "reason"])
+                job.claim_token = token
+                job.claim_owner_id = owner.pk
+                job.execution_lock = handle
+                job.claim_owner = owner
+                return job
     except BaseException:
         if handle:
             handle.close()
@@ -170,10 +171,23 @@ def release(job):
         return False
     with transaction.atomic():
         PullRequest.objects.select_for_update().get(pk=job.pr_id)
-        Job.objects.select_for_update().get(pk=job.pk)
-        deleted, _ = JobClaim.objects.filter(
-            job_id=job.pk, token=token, owner_id=job.claim_owner_id
-        ).delete()
+        row = Job.objects.select_for_update().get(pk=job.pk)
+        retained = JobClaim.objects.filter(
+            job_id=job.pk, pr_id=job.pr_id, token=token, owner_id=job.claim_owner_id
+        )
+        if retained.exists() and row.status == "running":
+            # Teardown is a separate, narrowly token-checked authority: all execution
+            # and finally cleanup already returned. An expired lease must neither
+            # revive external-write authority nor strand a claimless running job.
+            row.status = "attention"
+            row.reason = (
+                "Execution ended without confirmed finalization; inspect GitHub before retrying."
+            )
+            row.save(update_fields=["status", "reason"])
+            ModelAttempt.objects.filter(job=row, status="running").update(
+                status="interrupted", finished_at=timezone.now()
+            )
+        deleted, _ = retained.delete()
     handle = getattr(job, "execution_lock", None)
     if handle:
         handle.close()

@@ -114,6 +114,7 @@ class ClaimTests(TestCase):
         with self.assertRaises(StaleReview):
             save_review(old, {}, {}, {})
         self.assertFalse(finish(old, "completed"))
+        self.assertFalse(release(old))
         self.assertTrue(current(replacement))
 
     def test_abandoned_publication_needs_attention(self):
@@ -169,6 +170,31 @@ class ClaimTests(TestCase):
         self.assertEqual(cleanup, [owner.pk])
         self.assertTrue(owner.retired)
         self.assertFalse(owner.probe_active)
+
+    def test_real_worker_expired_lease_teardown_leaves_attention_not_running(self):
+        from unittest.mock import patch
+
+        from core.models import JobClaim, ModelAttempt
+        from core.worker import run_job
+
+        self.job(1)
+        job = claim()
+        attempt = ModelAttempt.objects.create(job=job, provider_name="test", model="test")
+        JobClaim.objects.filter(job=job).update(expires_at=timezone.now() - timedelta(seconds=1))
+        with (
+            patch("core.github.GitHub") as github,
+            patch("core.activity.Progress.start"),
+            patch("core.activity.Progress.close"),
+        ):
+            run_job(job)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "attention")
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, "interrupted")
+        self.assertFalse(JobClaim.objects.filter(job=job).exists())
+        self.assertIsNone(claim())
+        github.return_value.post.assert_not_called()
+        github.return_value.put.assert_not_called()
 
 
 class ClaimRaceTests(TransactionTestCase):
@@ -269,3 +295,58 @@ class ClaimRaceTests(TransactionTestCase):
         lock.close()
         job.refresh_from_db()
         self.assertEqual(job.status, "attention")
+
+    def assert_skips_locked_queue_head(self, model):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from django.db import connections, transaction
+
+        from core.claims import register_owner, release
+
+        first, second = self.job(1), self.job(2)
+        locked, unlock = Event(), Event()
+        selected = []
+        owner = register_owner()
+
+        def hold_head():
+            try:
+                with transaction.atomic():
+                    model.objects.select_for_update().get(
+                        pk=first.pk if model is Job else first.pr_id
+                    )
+                    locked.set()
+                    if not unlock.wait(timeout=10):
+                        raise AssertionError("Lock holder was not released")
+            finally:
+                connections.close_all()
+
+        def acquire():
+            try:
+                job = claim(owner)
+                if job:
+                    selected.append(job)
+                return job
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            holder = executor.submit(hold_head)
+            try:
+                self.assertTrue(locked.wait(timeout=10))
+                job = executor.submit(acquire).result(timeout=2)
+                self.assertIsNotNone(job)
+                self.assertEqual(job.pk, second.pk)
+            finally:
+                unlock.set()
+            holder.result(timeout=10)
+        for job in selected:
+            release(job)
+
+    @skipUnlessDBFeature("has_select_for_update_skip_locked")
+    def test_locked_oldest_job_does_not_block_another_pr(self):
+        self.assert_skips_locked_queue_head(Job)
+
+    @skipUnlessDBFeature("has_select_for_update_skip_locked")
+    def test_locked_oldest_pr_does_not_block_another_pr(self):
+        self.assert_skips_locked_queue_head(PullRequest)

@@ -49,3 +49,26 @@ Existing tests were adapted where they deliberately changed terminal status/dele
 6. No real GitHub/model request was made for verification. Deployment test output is mocked script behavior, not a deployment.
 
 Unrelated plan/audit files were not included in the implementation commit.
+
+## Independent-review fixes — round 1
+
+Both findings from `task-1-review.md` addressed on base `6e7a4a1`.
+
+- **P1:** `release` now has a narrowly scoped teardown transition under PR→Job locks and the exact retained job/PR/owner/token identity. If execution and all normal finally cleanup have returned but the job remains running, teardown records **attention** and marks its remaining running model attempts **interrupted** before deleting occupancy. This does not renew an expired lease, authorize external requests, or relax normal mutation fences. A stale prior execution's release cannot mutate a replacement token's job. The regression runs real `run_job` after lease expiry, mocking only GitHub construction and heartbeat-thread start/close; no model or network call occurs.
+- **P2:** Admission examines a bounded pass of up to 100 eligible candidates, skipping unavailable PR rows first and Job rows second. Both PostgreSQL row acquisitions use `SKIP LOCKED`, Job locks remain self-only, and locked/stale candidates do not end the pass prematurely. Global admission retains PR→Job lock order without waiting on an unrelated queued PR/job lock. Separate PostgreSQL regressions coordinate independent lock-holder and claimer connections using events (no sleeps), covering both locked oldest Job and locked oldest PR.
+
+### Red evidence
+
+Before fixes:
+
+- New real-worker expiry regression: **1 failed** — actual job status `running`, expected `attention`.
+- New PostgreSQL locked-head regressions: **1 failed + 1 error** — locked Job yielded no claim; locked PR blocked acquisition until the bounded future wait timed out. Event cleanup released the lock holder in both cases.
+
+### Green evidence
+
+After fixes:
+
+- `python manage.py test core.tests.test_claims core.tests.test_worker --noinput`: **91 tests, 6.804s, OK; 5 PostgreSQL-only skips**. Log: `task-1-fix1-sqlite.log`.
+- `PYTHONPATH="$PWD/.claude/verification/concurrent-reviews:$PWD" python manage.py test core.tests.test_claims --settings=postgres_settings --noinput`: **15 tests, 5.294s, OK**. Log: `task-1-fix1-postgres.log`.
+- Ruff check/format for both changed Python files: **passed**. `git diff --check`: **passed**.
+- No full-suite rerun (requested focused validation), push, deployment or production changes. Existing Task 2 native-cleanup integration boundaries remain unchanged.
