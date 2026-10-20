@@ -442,6 +442,9 @@ class WorkerTests(WorkflowTests):
         job = workflow.claim()
         save_review(job, RESULT, {}, {"passed": True, "summary": "Pass"})
         workflow.finish(job, "attention")
+        from core.claims import release
+
+        release(job)  # Explicitly complete cleanup before the same-job retry.
         job.refresh_from_db()
         queue_retry(job)
         gh = FakeGitHub(self.snapshot(sha="b" * 40))
@@ -459,7 +462,13 @@ class WorkerTests(WorkflowTests):
         self.reconcile(self.event("labeled"), self.snapshot())
         job = workflow.claim()
         ReviewCheckpoint.objects.create(job=job, stage="done", encrypted_payload="saved")
-        recover_interrupted()
+        from datetime import timedelta
+
+        from core.models import JobClaim
+
+        JobClaim.objects.filter(job=job).update(expires_at=timezone.now() - timedelta(seconds=1))
+        job.execution_lock.close()  # Simulate confirmed process death, not a live lease timeout.
+        recover_interrupted(cleanup=lambda claim: None)
         job.refresh_from_db()
         self.assertEqual(job.status, "completed")
-        self.assertIn("delivery completed", job.reason)
+        self.assertIn("optional integrations", job.reason)

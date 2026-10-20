@@ -8,7 +8,8 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from .models import Job, ReviewCheckpoint
+from .claims import fenced, mutation, receipt
+from .models import Job, PullRequest, ReviewCheckpoint
 from .secrets import decrypt, encrypt
 
 
@@ -16,6 +17,7 @@ class DeliveryPaused(Exception):
     pass
 
 
+@fenced()
 def save_review(job, result, context, checks):
     payload = {"result": result, "context": context, "checks": checks, "head_sha": job.head_sha}
     ReviewCheckpoint.objects.create(job=job, encrypted_payload=encrypt(json.dumps(payload)))
@@ -26,6 +28,7 @@ def checkpoint_state(job):
     return (checkpoint.stage, checkpoint.state) if checkpoint else ("", {})
 
 
+@fenced()
 def update_cursor(job, stage, **state):
     checkpoint = ReviewCheckpoint.objects.filter(job=job).first()
     if checkpoint:
@@ -81,19 +84,16 @@ def deliver(github, job, publisher, progress):
 
     checkpoint, data = load_review(job)
     for attempt in range(3):
-        checkpoint.refresh_from_db()
-        checkpoint.delivery_attempts += 1
-        checkpoint.save(update_fields=["delivery_attempts"])
+        with mutation(job):
+            checkpoint.refresh_from_db()
+            checkpoint.delivery_attempts += 1
+            checkpoint.save(update_fields=["delivery_attempts"])
         try:
             if checkpoint.delivery_attempts > 1:
                 if checkpoint.stage in ("review", "labels"):
-                    from .models import Receipt
-
                     existing = find_review(github, job, checkpoint.state["blocked"])
                     if existing:
-                        Receipt.objects.get_or_create(
-                            job=job, key="review", defaults={"remote_id": str(existing["id"])}
-                        )
+                        receipt(job=job, key="review", defaults={"remote_id": str(existing["id"])})
                 verify_inputs(github, job, data["context"], data["result"])
             outcome = publisher(github, job, data["result"], data["context"], data["checks"])
             # Keep a concise record, not a permanent copy of all source files.
@@ -111,7 +111,8 @@ def deliver(github, job, publisher, progress):
                 record["review_team"] = data["context"]["review_team"]
             checkpoint.encrypted_payload = encrypt(json.dumps(record))
             checkpoint.stage = "done"
-            checkpoint.save(update_fields=["encrypted_payload", "stage"])
+            with mutation(job):
+                checkpoint.save(update_fields=["encrypted_payload", "stage"])
             return outcome
         except (IntegrationError, LabelCleanupError) as exc:
             reason = safe_error(exc)
@@ -147,7 +148,12 @@ def queue_retry(job):
     from .retries import RetryRejected
 
     with transaction.atomic():
-        row = Job.objects.select_for_update().select_related("pr__repository").get(pk=job.pk)
+        PullRequest.objects.select_for_update().get(pk=job.pr_id)
+        row = (
+            Job.objects.select_for_update(of=("self",))
+            .select_related("pr__repository")
+            .get(pk=job.pk)
+        )
         if not retry_available(row):
             raise RetryRejected(
                 "Saved delivery is unavailable or superseded. Request a new review."
@@ -241,7 +247,7 @@ def verify_inputs(github, job, context, result):
                 and not resolved_by_job
                 and resolution_confirmed(github, job, original, reply, latest)
             ):
-                Receipt.objects.get_or_create(
+                receipt(
                     job=job, key=f"resolve:{original['id']}", defaults={"remote_id": original["id"]}
                 )
                 resolved_by_job = True

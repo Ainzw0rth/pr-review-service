@@ -170,6 +170,9 @@ class AutomaticApprovalTests(PublicationTests):
         gh.snapshot["user"] = {"login": "developer"}
         publish(gh, job, self.result(), {}, {"passed": True, "summary": "Pass"})
         number = job.pr.number
+        from core.claims import release
+
+        release(job)
         job.delete()
         gh.snapshot["head"]["sha"] = "c" * 40
         with patch.object(gh, "put", create=True, side_effect=RuntimeError("private")):

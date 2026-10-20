@@ -1,12 +1,14 @@
-"""Drain job intake without cancelling the active review or touching GitHub."""
+"""Drain all supervisors, including terminal cleanup and connection probes."""
 
-import fcntl
+import hashlib
 import json
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import transaction
 
-from core.models import Job
+from core.claims import pool
+from core.models import JobClaim, WorkerOwner
 
 
 class Command(BaseCommand):
@@ -17,37 +19,56 @@ class Command(BaseCommand):
         parser.add_argument("--json", action="store_true")
 
     def handle(self, *args, **options):
-        flag = settings.DATA_DIR / "worker.drain"
-        acknowledged = settings.DATA_DIR / "worker.drained"
-        with open(settings.DATA_DIR / "worker.intake.lock", "a") as intake:
-            fcntl.flock(intake, fcntl.LOCK_EX)
-            if options["action"] == "drain":
-                if not flag.exists():
-                    acknowledged.unlink(missing_ok=True)
-                flag.touch(mode=0o600, exist_ok=True)
-            elif options["action"] == "resume":
-                flag.unlink(missing_ok=True)
-                acknowledged.unlink(missing_ok=True)
-            active = Job.objects.filter(status="running").count()
-            draining = flag.exists()
-            token = acknowledged.read_text().strip() if acknowledged.exists() else ""
-            idle = draining and bool(token) and active == 0
-        if options.get("json"):
-            self.stdout.write(
-                json.dumps(
-                    {
-                        "draining": draining,
-                        "active_jobs": active,
-                        "idle": idle,
-                        "worker_token": token,
-                    }
+        with transaction.atomic():
+            config = pool()
+            if options["action"] in ("drain", "resume"):
+                requested = options["action"] == "drain"
+                flag = settings.DATA_DIR / "worker.drain"
+                if requested:
+                    flag.touch(mode=0o600, exist_ok=True)
+                else:
+                    flag.unlink(missing_ok=True)
+                (settings.DATA_DIR / "worker.drained").unlink(missing_ok=True)
+                if requested != config.draining:
+                    config.draining = requested
+                    config.drain_generation += 1
+                    config.save(update_fields=["draining", "drain_generation"])
+            owners = list(WorkerOwner.objects.filter(retired=False))
+            if not owners:
+                owners = list(
+                    WorkerOwner.objects.filter(
+                        retired=True, drain_ack=config.drain_generation
+                    ).order_by("-heartbeat_at")[:1]
+                )
+            active = JobClaim.objects.count()
+            # Unresponsive supervisors are not assumed dead; acknowledgment stays fail-closed.
+            idle = (
+                config.draining
+                and bool(owners)
+                and not active
+                and all(
+                    not o.probe_active and o.drain_ack == config.drain_generation for o in owners
                 )
             )
-            return
-        self.stdout.write(
-            f"Intake: {'draining' if flag.exists() else 'enabled'}. Active jobs: {active}."
-        )
-        if idle:
-            self.stdout.write("Worker acknowledged idle; review and cleanup finished.")
-        elif draining:
-            self.stdout.write("Waiting for worker acknowledgment; do not restart yet.")
+            identity = ":".join(sorted(str(o.pk) for o in owners))
+            token = hashlib.sha256(identity.encode()).hexdigest() if owners else ""
+            result = dict(
+                draining=config.draining,
+                active_jobs=active,
+                idle=idle,
+                worker_token=token,
+                concurrent_pr_reviews=config.concurrent_pr_reviews,
+                supervisors=[str(o.pk) for o in owners],
+            )
+        if options["json"]:
+            self.stdout.write(json.dumps(result))
+        else:
+            self.stdout.write(
+                f"Intake: {'draining' if config.draining else 'enabled'}. Active jobs: {active}."
+            )
+            if config.draining:
+                self.stdout.write(
+                    "Worker acknowledged idle; review and cleanup finished."
+                    if idle
+                    else "Waiting for worker acknowledgment; do not restart yet."
+                )

@@ -11,6 +11,7 @@ from django.db.models import F
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from .claims import fenced
 from .models import Credential, JournalEntry
 from .secrets import decrypt, encrypt
 
@@ -60,6 +61,7 @@ def enqueue(event, repository, job=None):
     return entry
 
 
+@fenced(terminal=True)
 def queue_job(job, result=None, outcome=None):
     job.refresh_from_db()
     repository = job.pr.repository.full_name

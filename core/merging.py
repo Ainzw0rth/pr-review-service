@@ -6,6 +6,7 @@ An intent receipt prevents blind replay after a lost response or process crash.
 
 from django.conf import settings
 
+from .claims import admission, fenced, job_rows, receipt
 from .github import check_required
 from .models import ApprovalRecord, Job, Receipt
 
@@ -26,13 +27,17 @@ def merge_approved(github, job, outcome):
     if Receipt.objects.filter(job=row, key__in=["merge", "merge-intent"]).exists():
         return
 
-    def note(message):
+    @fenced(terminal=True, silent=True)
+    def save_note(job, message):
         # Preserve unrelated optional-integration warnings, while keeping the bounded reason.
         fresh = Job.objects.get(pk=row.pk)
         prefix = fresh.reason if fresh.reason and not fresh.reason.startswith("Auto-merge") else ""
-        Job.objects.filter(pk=row.pk).update(
+        job_rows(job, terminal=True).update(
             reason=(message + (" " + prefix if prefix else ""))[:250]
         )
+
+    def note(message):
+        return save_note(job, message)
 
     try:
         if row.status != "completed" or row.generation != row.pr.generation or not repo.enabled:
@@ -99,39 +104,39 @@ def merge_approved(github, job, outcome):
                 "Auto-merge skipped: GitHub has not confirmed clean mergeability and required approval. Check conflicts, reviews and branch rules."
             )
             return
-        # Owner disable, cancellation or supersession during the network checks must win.
-        if not Job.objects.filter(
-            pk=row.pk,
-            status="completed",
-            auto_merge=True,
-            pr__generation=row.generation,
-            pr__repository__enabled=True,
-            pr__repository__auto_merge=True,
-            pr__repository__auto_approve=True,
-        ).exists():
-            return
-        if not ApprovalRecord.objects.filter(
-            pk=record.pk, dismissed_at__isnull=True, revoke_requested=False
-        ).exists():
-            return
-        _, created = Receipt.objects.get_or_create(job=row, key="merge-intent")
-        if not created:
-            return
-        note(
-            "Auto-merge outcome could not be confirmed yet. Inspect GitHub before retrying; the merge request is not replayed automatically."
-        )
-        result = github.put(
-            f"/pulls/{row.pr.number}/merge", {"sha": row.head_sha, "merge_method": row.merge_method}
-        )
-        if result.get("merged") is not True:
+        with admission(job, terminal=True):
+            # Owner disable, cancellation or supersession during the network checks must win.
+            if not Job.objects.filter(
+                pk=row.pk,
+                status="completed",
+                auto_merge=True,
+                pr__generation=row.generation,
+                pr__repository__enabled=True,
+                pr__repository__auto_merge=True,
+                pr__repository__auto_approve=True,
+            ).exists():
+                return
+            if not ApprovalRecord.objects.filter(
+                pk=record.pk, dismissed_at__isnull=True, revoke_requested=False
+            ).exists():
+                return
+            _, created = receipt(job=job, key="merge-intent")
+            if not created:
+                return
             note(
-                "Auto-merge: GitHub did not merge the PR. Inspect branch rules, permissions and enabled merge methods; manual action required."
+                "Auto-merge outcome could not be confirmed yet. Inspect GitHub before retrying; the merge request is not replayed automatically."
             )
-            return
-        Receipt.objects.get_or_create(
-            job=row, key="merge", defaults={"remote_id": result.get("sha", "")}
-        )
-        note("Auto-merge completed: reviewed commit merged using " + row.merge_method + ".")
+            result = github.put(
+                f"/pulls/{row.pr.number}/merge",
+                {"sha": row.head_sha, "merge_method": row.merge_method},
+            )
+            if result.get("merged") is not True:
+                note(
+                    "Auto-merge: GitHub did not merge the PR. Inspect branch rules, permissions and enabled merge methods; manual action required."
+                )
+                return
+            receipt(job=job, key="merge", defaults={"remote_id": result.get("sha", "")})
+            note("Auto-merge completed: reviewed commit merged using " + row.merge_method + ".")
     except Exception:
         # Never expose transport secrets or convert a published review into a failed analysis.
         if Receipt.objects.filter(job=row, key="merge-intent").exists():

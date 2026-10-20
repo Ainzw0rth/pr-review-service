@@ -331,6 +331,7 @@ class ReviewCheckpoint(models.Model):
 
 
 class ModelProbe(models.Model):
+    owner = models.ForeignKey("WorkerOwner", null=True, on_delete=models.PROTECT)
     provider = models.ForeignKey(Provider, on_delete=models.CASCADE)
     configuration = models.JSONField(default=dict)
     status = models.CharField(max_length=20, default="queued")
@@ -367,3 +368,52 @@ class ApprovalRecord(models.Model):
     checked_at = models.DateTimeField(null=True)
     dismissed_at = models.DateTimeField(null=True)
     error = models.CharField(max_length=200, blank=True)
+
+
+class ServiceSettings(models.Model):
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    concurrent_pr_reviews = models.PositiveSmallIntegerField(default=2)
+    draining = models.BooleanField(default=False)
+    drain_generation = models.PositiveIntegerField(default=0)
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if type(self.concurrent_pr_reviews) is not int or not 1 <= self.concurrent_pr_reviews <= 8:
+            raise ValidationError({"concurrent_pr_reviews": "Choose a whole number from 1 to 8."})
+        if self.pk != 1:
+            raise ValidationError("Service settings is a singleton.")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+    def full_clean(self, *args, **kwargs):
+        self.clean()  # Validate before IntegerField coerces bool/string/fractional input.
+        return super().full_clean(*args, **kwargs)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(id=1), name="service_settings_singleton"),
+            models.CheckConstraint(
+                condition=models.Q(concurrent_pr_reviews__gte=1, concurrent_pr_reviews__lte=8),
+                name="concurrent_reviews_bounds",
+            ),
+        ]
+
+
+class WorkerOwner(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    heartbeat_at = models.DateTimeField(default=timezone.now)
+    retired = models.BooleanField(default=False)
+    drain_ack = models.PositiveIntegerField(default=0)
+    probe_active = models.BooleanField(default=False)
+
+
+class JobClaim(models.Model):
+    job = models.OneToOneField(Job, on_delete=models.PROTECT, related_name="execution_claim")
+    pr = models.OneToOneField(PullRequest, on_delete=models.PROTECT, related_name="execution_claim")
+    owner = models.ForeignKey(WorkerOwner, on_delete=models.PROTECT)
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    heartbeat_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField()

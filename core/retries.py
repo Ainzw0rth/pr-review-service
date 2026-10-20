@@ -52,8 +52,12 @@ def retry_job(job, actor):
     finally:
         github.close()
     with transaction.atomic():
-        job = Job.objects.select_for_update().select_related("pr__repository").get(pk=job.pk)
         pr = PullRequest.objects.select_for_update().get(pk=job.pr_id)
+        job = (
+            Job.objects.select_for_update(of=("self",))
+            .select_related("pr__repository")
+            .get(pk=job.pk)
+        )
         existing = Job.objects.filter(retry_of=job).first()
         if existing:
             return existing

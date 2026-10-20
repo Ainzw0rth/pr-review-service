@@ -30,27 +30,28 @@ class DrainTests(TestCase):
             self.assertFalse((Path(directory) / "worker.drained").exists())
 
     def test_acknowledgment_happens_after_job_cleanup_returns(self):
-        from core.management.commands import review_worker
+        from core.claims import register_owner, release
+        from core.models import ServiceSettings, WorkerOwner
+        from core.tests.test_claims import ClaimTests
+        from core.workflow import claim, finish
 
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            override_settings(DATA_DIR=Path(directory), CLI_RUNNER_IMAGE=""),
-        ):
-
-            def run_job(job):
-                # Simulate a job with terminal DB status, still inside finally cleanup.
-                self.assertFalse(self.status("drain")["idle"])
-                self.assertFalse((Path(directory) / "worker.drained").exists())
-
-            with (
-                patch.object(review_worker, "claim", return_value=object()),
-                patch.object(review_worker, "run_job", side_effect=run_job),
-                patch("core.quota.refresh_due"),
-                patch.object(review_worker.time, "sleep", side_effect=KeyboardInterrupt),
-            ):
-                with self.assertRaises(KeyboardInterrupt):
-                    call_command("review_worker")
-            self.assertTrue(self.status("status")["idle"])
+        ClaimTests.setUp(self)
+        ClaimTests.job(self, 1)
+        owner = register_owner()
+        job = claim(owner)
+        finish(job, "completed")
+        self.assertFalse(self.status("drain")["idle"])
+        generation = ServiceSettings.objects.get(pk=1).drain_generation
+        WorkerOwner.objects.filter(pk=owner.pk).update(drain_ack=generation)
+        self.assertFalse(self.status("status")["idle"])  # Terminal status is not cleanup.
+        release(job)
+        self.assertTrue(self.status("status")["idle"])
+        second = register_owner()
+        self.assertFalse(self.status("status")["idle"])  # Every supervisor must acknowledge.
+        WorkerOwner.objects.filter(pk=second.pk).update(drain_ack=generation)
+        self.assertTrue(self.status("status")["idle"])
+        self.status("resume")
+        self.assertFalse(self.status("drain")["idle"])  # Old acknowledgment cannot be reused.
 
 
 class DeployScriptTests(TestCase):

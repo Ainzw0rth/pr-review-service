@@ -3,6 +3,7 @@
 from django.conf import settings
 from django.utils import timezone
 
+from .claims import fenced
 from .models import ApprovalRecord, Job, Repository
 
 
@@ -14,6 +15,11 @@ def enabled_for(job):
 
 
 def remember(github, job, tag):
+    return _remember(job, tag, github.identity())
+
+
+@fenced()
+def _remember(job, tag, actor):
     record, _ = ApprovalRecord.objects.get_or_create(
         job=job,
         defaults={
@@ -21,7 +27,7 @@ def remember(github, job, tag):
             "number": job.pr.number,
             "head_sha": job.head_sha,
             "marker": tag,
-            "actor": github.identity(),
+            "actor": actor,
         },
     )
     return record

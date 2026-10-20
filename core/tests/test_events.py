@@ -34,20 +34,14 @@ class EventTests(WorkflowTests):
             process_event(second)
         self.assertEqual(Job.objects.count(), 1)
 
-    def test_worker_orphan_cleanup_precedes_recovery(self):
+    def test_starting_supervisor_never_bulk_cleans_live_resources(self):
         from core.management.commands import review_worker
 
-        self.repo.test_command = ["true"]
-        self.repo.save(update_fields=["test_command"])
-        calls = []
         with (
-            patch.object(
-                review_worker, "cleanup_orphans", side_effect=lambda: calls.append("cleanup")
-            ),
-            patch.object(
-                review_worker, "recover_interrupted", side_effect=lambda: calls.append("recover")
-            ),
+            patch("core.runner.cleanup_orphans") as cleanup,
+            patch("core.cli.cleanup_cli_orphans") as cli_cleanup,
             patch.object(review_worker, "claim", return_value=None),
         ):
             review_worker.Command().handle(once=True)
-        self.assertEqual(calls, ["cleanup", "recover"])
+        cleanup.assert_not_called()
+        cli_cleanup.assert_not_called()

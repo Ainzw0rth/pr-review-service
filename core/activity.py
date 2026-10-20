@@ -6,6 +6,7 @@ import time
 from django.db import DatabaseError, close_old_connections, connections
 from django.utils import timezone
 
+from .claims import fenced, heartbeat
 from .models import Job, JobActivity
 from .workflow import current
 
@@ -124,6 +125,7 @@ def message(event):
     return text if event.count is None else f"{text}: {event.count}."
 
 
+@fenced(terminal=True, silent=True)
 def record(job, code, *, count=None, detail="", source=""):
     from .transcript import CODES
 
@@ -179,9 +181,10 @@ class Progress:
             while not self.stop.wait(10):
                 try:
                     close_old_connections()
-                    Job.objects.filter(pk=self.job.pk, status="running").update(
-                        heartbeat_at=timezone.now()
-                    )
+                    if heartbeat(self.job):
+                        from .claims import job_rows
+
+                        job_rows(self.job).update(heartbeat_at=timezone.now())
                 except DatabaseError:
                     # Leave the old timestamp visible; never fabricate a fresh heartbeat.
                     pass
@@ -201,6 +204,9 @@ class Progress:
             return True
         now = time.monotonic()
         if self.last_heartbeat is None or now - self.last_heartbeat >= 10:
-            Job.objects.filter(pk=self.job.pk, status="running").update(heartbeat_at=timezone.now())
+            if heartbeat(self.job):
+                from .claims import job_rows
+
+                job_rows(self.job).update(heartbeat_at=timezone.now())
             self.last_heartbeat = now
         return False

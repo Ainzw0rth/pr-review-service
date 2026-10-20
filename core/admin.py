@@ -124,11 +124,21 @@ class JobAdmin(admin.ModelAdmin):
 
     @admin.action(description="Interrupt selected active attempts")
     def interrupt(self, request, queryset):
-        count = queryset.filter(status__in=["queued", "running", "quota", "attention"]).update(
-            status=Job.Status.CANCELLED,
-            finished_at=timezone.now(),
-            reason="Interrupted by platform administrator.",
-        )
+        from django.db import transaction
+
+        from .models import PullRequest
+
+        count = 0
+        for job in queryset.order_by("pr_id", "pk"):
+            with transaction.atomic():
+                PullRequest.objects.select_for_update().get(pk=job.pr_id)
+                count += Job.objects.filter(
+                    pk=job.pk, status__in=["queued", "running", "quota", "attention"]
+                ).update(
+                    status=Job.Status.CANCELLED,
+                    finished_at=timezone.now(),
+                    reason="Interrupted by platform administrator.",
+                )
         self.message_user(request, f"{count} active attempt(s) interrupted.")
 
 

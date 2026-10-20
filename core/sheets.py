@@ -2,6 +2,7 @@
 
 import json
 import re
+from contextlib import nullcontext
 from urllib.parse import quote
 
 import httpx
@@ -358,7 +359,7 @@ def _target_status(github, repository, task, number, outcome):
     return status
 
 
-def sync_status(github, repository, number, outcome, before_write=None):
+def sync_status(github, repository, number, outcome, before_write=None, write_gate=None):
     if not repository.sheet_config:
         return
     config = _configuration(repository)
@@ -394,6 +395,7 @@ def sync_status(github, repository, number, outcome, before_write=None):
         # the concurrent-edit window; no unrelated cells are ever sent for update.
         if _target_status(github, repository, task, number, outcome) != status:
             raise IntegrationError("Required pull request state changed; no status written.")
-        if before_write is not None:
-            before_write()
-        sheet.update(cell, target)
+        with write_gate() if write_gate is not None else nullcontext():
+            if before_write is not None:
+                before_write()
+            sheet.update(cell, target)

@@ -265,6 +265,9 @@ class PublicationTests(WorkflowTests):
                 with self.assertRaises(StaleReview):
                     publish(gh, job, result, context, {"passed": True, "summary": "Pass"})
                 self.assertNotIn({"name": "approved"}, gh.snapshot["labels"])
+                from core.claims import release
+
+                release(job)
 
     def test_comment_review_still_stops_for_new_commit(self):
         def new_commit(job, gh):

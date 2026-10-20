@@ -27,13 +27,18 @@ class JournalTests(TestCase):
     reconcile = test_workflow.WorkflowTests.reconcile
     prepare = test_publication.PublicationTests.prepare
 
-    def queued(self, *, status="completed"):
+    def queued(self, *, status="completed", release_claim=True):
         job, _ = self.prepare()
         job.status = status
         job.save()
-        return journal.queue_job(
+        entry = journal.queue_job(
             job, {**RESULT, "summary": "Verified `guard()` now handles empty inputs."}, "ready"
         )
+        from core.claims import release
+
+        if release_claim:
+            release(job)
+        return entry
 
     def event_data(self):
         return {
@@ -53,7 +58,7 @@ class JournalTests(TestCase):
         return Credential.objects.create(name="journal", encrypted_value=encrypt("a" * 43))
 
     def test_summary_is_encrypted_and_duplicate_capture_is_idempotent(self):
-        entry = self.queued()
+        entry = self.queued(release_claim=False)
         self.assertNotIn("empty inputs", entry.encrypted_payload)
         event = json.loads(decrypt(entry.encrypted_payload))
         self.assertIn("Final review summary:", event["summary"])

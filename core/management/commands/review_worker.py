@@ -1,75 +1,139 @@
-import fcntl
+"""Bounded supervisor; durable claims include every worker's finally cleanup."""
+
 import time
-import uuid
+from concurrent.futures import ThreadPoolExecutor
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import close_old_connections, connection, connections, transaction
+from django.utils import timezone
 
-from core.models import Repository
-from core.runner import cleanup_orphans
-from core.worker import recover_interrupted, run_job
-from core.workflow import claim
+from core.claims import execution_job, pool, register_owner, release, supervisor_owner
+from core.models import JobClaim, WorkerOwner
+from core.worker import run_job
+from core.workflow import claim, finish
+
+
+def execute(job):
+    close_old_connections()
+    token = execution_job.set(job)
+    try:
+        run_job(job)
+    except Exception:
+        # Unknown cleanup outcome is quarantined: do not silently free its slot.
+        finish(
+            job,
+            "attention",
+            "Worker cleanup could not be confirmed; administrator recovery required.",
+        )
+        raise
+    else:
+        release(job)
+    finally:
+        execution_job.reset(token)
+        try:
+            connections.close_all()
+        finally:
+            # The thread is quiescent even if its exception traceback retains Job.
+            # Keep the DB claim quarantined; scoped recovery must clean child resources.
+            handle = getattr(job, "execution_lock", None)
+            if handle:
+                handle.close()
 
 
 class Command(BaseCommand):
-    help = "Run the single serial review worker. Never start without the shared data volume."
+    help = __doc__
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true")
 
     def handle(self, *args, **options):
-        with open(settings.DATA_DIR / "worker.lock", "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            worker_token = uuid.uuid4().hex
-            (settings.DATA_DIR / "worker.drained").unlink(missing_ok=True)
-            if any(
-                isinstance(command, list) and command
-                for command in Repository.objects.values_list("test_command", flat=True)
-            ):
-                cleanup_orphans()
-            if settings.CLI_RUNNER_IMAGE:
-                from core.cli import cleanup_cli_orphans
+        from core.model_probe import claim_probe, run_probe
 
-                cleanup_cli_orphans()
-            recover_interrupted()
-            from core.model_probe import claim_probe, run_probe
-            from core.models import ModelProbe
+        owner = register_owner()
+        owner_context = supervisor_owner.set(str(owner.pk))
+        futures = set()
+        try:
+            with ThreadPoolExecutor(max_workers=8, thread_name_prefix="review") as executor:
+                while True:
+                    if not connection.in_atomic_block:
+                        close_old_connections()
+                    WorkerOwner.objects.filter(pk=owner.pk).update(heartbeat_at=timezone.now())
+                    for future in list(futures):
+                        if future.done():
+                            futures.remove(future)
+                            try:
+                                future.result()
+                            except Exception:
+                                self.stderr.write(
+                                    "Worker execution failed; retained claim requires recovery."
+                                )
+                    with transaction.atomic():
+                        config = pool()
+                        draining = config.draining
+                        if (
+                            draining
+                            and not futures
+                            and not JobClaim.objects.filter(owner=owner).exists()
+                        ):
+                            WorkerOwner.objects.filter(pk=owner.pk, probe_active=False).update(
+                                drain_ack=config.drain_generation
+                            )
+                    if not draining:
+                        while len(futures) < 8:
+                            job = claim(owner)
+                            if job is None:
+                                break
+                            try:
+                                futures.add(executor.submit(execute, job))
+                            except Exception:
+                                finish(
+                                    job,
+                                    "attention",
+                                    "Executor submission failed before review started.",
+                                )
+                                release(job)
+                                raise
+                        # One global auxiliary slot covers quota refresh and probes.
+                        if not futures:
+                            with transaction.atomic():
+                                config = pool()
+                                auxiliary = (
+                                    not config.draining
+                                    and not JobClaim.objects.exists()
+                                    and not WorkerOwner.objects.filter(probe_active=True).exists()
+                                )
+                                if auxiliary:
+                                    WorkerOwner.objects.filter(pk=owner.pk).update(
+                                        probe_active=True
+                                    )
+                            if auxiliary:
+                                try:
+                                    from core.quota import refresh_due
 
-            ModelProbe.objects.filter(status="running").update(
-                status="failed", reason="Worker restarted during connection test; test again."
-            )
-            while True:
-                with open(settings.DATA_DIR / "worker.intake.lock", "a") as intake:
-                    fcntl.flock(intake, fcntl.LOCK_EX)
-                    draining = (settings.DATA_DIR / "worker.drain").exists()
-                    if draining:
-                        # Reached only after run_job and all of its finally cleanup.
-                        (settings.DATA_DIR / "worker.drained").write_text(worker_token)
-                    else:
-                        (settings.DATA_DIR / "worker.drained").unlink(missing_ok=True)
-                if draining:
+                                    refresh_due()
+                                    with transaction.atomic():
+                                        config = pool()
+                                        probe = None if config.draining else claim_probe()
+                                        if probe:
+                                            probe.owner = owner
+                                            probe.save(update_fields=["owner"])
+                                    if probe:
+                                        run_probe(probe)
+                                finally:
+                                    WorkerOwner.objects.filter(pk=owner.pk).update(
+                                        probe_active=False
+                                    )
                     if options["once"]:
-                        return
+                        break
                     time.sleep(2)
-                    continue
-                from core.quota import refresh_due
-
-                refresh_due()
-                if (settings.DATA_DIR / "worker.drain").exists():
-                    continue
-                # Serialize the final drain check and claim with worker_control.
-                # Once drain returns, no job can slip through a check/claim race.
-                with open(settings.DATA_DIR / "worker.intake.lock", "a") as intake:
-                    fcntl.flock(intake, fcntl.LOCK_EX)
-                    probe = None
-                    job = None if (settings.DATA_DIR / "worker.drain").exists() else claim()
-                    if not job and not (settings.DATA_DIR / "worker.drain").exists():
-                        probe = claim_probe()
-                if job:
-                    run_job(job)
-                elif probe:
-                    run_probe(probe)
-                if options["once"]:
-                    return
-                if not job:
-                    time.sleep(2)
+        finally:
+            if not JobClaim.objects.filter(owner=owner).exists():
+                with transaction.atomic():
+                    config = pool()
+                    WorkerOwner.objects.filter(pk=owner.pk).update(
+                        retired=True, drain_ack=config.drain_generation if config.draining else 0
+                    )
+            supervisor_owner.reset(owner_context)
+            owner.execution_lock.close()
+            if not connection.in_atomic_block:
+                connections.close_all()

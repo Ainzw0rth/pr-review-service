@@ -208,6 +208,9 @@ class ThreadResolutionTests(TestCase):
                 self.assertEqual(gh.writes, [])
                 job.status = "superseded"
                 job.save()
+                from core.claims import release
+
+                release(job)
 
     def test_comment_arriving_after_reply_stops_resolution(self):
         job, gh, result, context, thread, mutations = self.setup_thread()

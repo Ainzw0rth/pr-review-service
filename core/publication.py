@@ -2,6 +2,7 @@
 
 import copy
 import hashlib
+from contextlib import nullcontext
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -10,9 +11,12 @@ from django.utils import timezone
 
 from core.delivery import checkpoint_state, safe_error, update_cursor
 from core.github import IntegrationError
-from core.models import ExpectedLabel, Job, Receipt
+from core.models import Job, Receipt
 from core.workflow import canonical_cycle, current
 from core.workflow_schema import GROUNDED_REVISIONS
+
+from .claims import admission, expect_label, mutation, owned
+from .claims import receipt as persist_receipt
 
 
 def _progress(job, category, status, count=None):
@@ -89,7 +93,14 @@ def guard(github, job):
 
 
 def transition(
-    github, repo, number, target, check=lambda: None, after_write=lambda action, label: None
+    github,
+    repo,
+    number,
+    target,
+    check=lambda: None,
+    after_write=lambda action, label: None,
+    *,
+    job=None,
 ):
     """Only touch our three labels, preserving unrelated human labels."""
     if not settings.LIVE_WRITES:
@@ -104,37 +115,41 @@ def transition(
         raise ValueError("Service cannot initiate a review")
     for label in labels:
         if label == target and label not in present:
-            check()
-            expectation = ExpectedLabel.objects.create(
-                repository=repo,
-                number=number,
-                label=label,
-                action="labeled",
-                actor=actor,
-                expires_at=timezone.now() + timedelta(minutes=5),
-            )
-            try:
-                github.post(f"/issues/{number}/labels", {"labels": [label]})
-                after_write("labeled", label)
-            except Exception:
-                expectation.delete()
-                raise
+            with admission(job) if job is not None else nullcontext():
+                check()
+                expectation = expect_label(
+                    job=job,
+                    repository=repo,
+                    number=number,
+                    label=label,
+                    action="labeled",
+                    actor=actor,
+                    expires_at=timezone.now() + timedelta(minutes=5),
+                )
+                try:
+                    github.post(f"/issues/{number}/labels", {"labels": [label]})
+                    after_write("labeled", label)
+                except Exception:
+                    expectation.delete()
+                    raise
         elif label != target and label in present:
-            check()
-            expectation = ExpectedLabel.objects.create(
-                repository=repo,
-                number=number,
-                label=label,
-                action="unlabeled",
-                actor=actor,
-                expires_at=timezone.now() + timedelta(minutes=5),
-            )
-            try:
-                github.delete(f"/issues/{number}/labels/{quote(label, safe='')}")
-                after_write("unlabeled", label)
-            except Exception:
-                expectation.delete()
-                raise
+            with admission(job) if job is not None else nullcontext():
+                check()
+                expectation = expect_label(
+                    job=job,
+                    repository=repo,
+                    number=number,
+                    label=label,
+                    action="unlabeled",
+                    actor=actor,
+                    expires_at=timezone.now() + timedelta(minutes=5),
+                )
+                try:
+                    github.delete(f"/issues/{number}/labels/{quote(label, safe='')}")
+                    after_write("unlabeled", label)
+                except Exception:
+                    expectation.delete()
+                    raise
 
 
 def marker(job, key):
@@ -156,17 +171,18 @@ def once(github, job, key, body, endpoint, listing, extra=None):
         None,
     )
     if existing:
-        Receipt.objects.get_or_create(job=job, key=key, defaults={"remote_id": str(existing["id"])})
+        persist_receipt(job=job, key=key, defaults={"remote_id": str(existing["id"])})
         return
     guard(github, job)
-    posted = github.post(
-        endpoint,
-        {
-            **(extra or {}),
-            "body": f"**Automated review · Auto Reviewer**\n\n{body}\n\n{tag}",
-        },
-    )
-    Receipt.objects.get_or_create(job=job, key=key, defaults={"remote_id": str(posted["id"])})
+    with admission(job):
+        posted = github.post(
+            endpoint,
+            {
+                **(extra or {}),
+                "body": f"**Automated review · Auto Reviewer**\n\n{body}\n\n{tag}",
+            },
+        )
+        persist_receipt(job=job, key=key, defaults={"remote_id": str(posted["id"])})
 
 
 RESOLVE_THREAD = """mutation($id:ID!) {
@@ -258,7 +274,7 @@ def _fresh_thread(github, job, original, reply):
             None,
         )
         if own:
-            receipt, _ = Receipt.objects.get_or_create(
+            receipt, _ = persist_receipt(
                 job=job, key=f"reply:{root}", defaults={"remote_id": str(own["databaseId"])}
             )
     if receipt:
@@ -356,21 +372,22 @@ def publish_threads(github, job, replies):
         if fresh["isResolved"] or not fresh.get("viewerCanResolve"):
             continue
         guard(github, job)
-        try:
-            data = github.graphql(RESOLVE_THREAD, {"id": thread["id"]})
-            resolved = (data.get("resolveReviewThread") or {}).get("thread") or {}
-            if resolved.get("id") != thread["id"] or resolved.get("isResolved") is not True:
-                raise IntegrationError("GitHub did not confirm discussion resolution.")
-        except IntegrationError:
-            from .context import review_thread
+        with admission(job):
+            try:
+                data = github.graphql(RESOLVE_THREAD, {"id": thread["id"]})
+                resolved = (data.get("resolveReviewThread") or {}).get("thread") or {}
+                if resolved.get("id") != thread["id"] or resolved.get("isResolved") is not True:
+                    raise IntegrationError("GitHub did not confirm discussion resolution.")
+            except IntegrationError:
+                from .context import review_thread
 
-            fresh = review_thread(github, thread["id"])
-            if not resolution_confirmed(github, job, thread, reply, fresh):
-                raise
-            guard(github, job)
-        Receipt.objects.get_or_create(
-            job=job, key=f"resolve:{thread['id']}", defaults={"remote_id": thread["id"]}
-        )
+                fresh = review_thread(github, thread["id"])
+                if not resolution_confirmed(github, job, thread, reply, fresh):
+                    raise
+                guard(github, job)
+            persist_receipt(
+                job=job, key=f"resolve:{thread['id']}", defaults={"remote_id": thread["id"]}
+            )
 
 
 def publish(github, job, result, context, checks):
@@ -569,44 +586,43 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
                 raise IntegrationError("Required checks changed during review")
             remember(github, job, tag)
             guard(github, job)
-        if blocked or event == "APPROVE":
-            ExpectedLabel.objects.create(
-                repository=job.pr.repository,
-                number=number,
-                label="",
-                action="review_request_removed",
-                actor=github.identity(),
-                expires_at=timezone.now() + timedelta(minutes=5),
+        with admission(job):
+            if blocked or event == "APPROVE":
+                expect_label(
+                    job=job,
+                    repository=job.pr.repository,
+                    number=number,
+                    label="",
+                    action="review_request_removed",
+                    actor=github.identity(),
+                    expires_at=timezone.now() + timedelta(minutes=5),
+                )
+            posted = github.post(
+                f"/pulls/{number}/reviews",
+                {
+                    "commit_id": job.head_sha,
+                    "event": event,
+                    "body": f"Automated review. See summary above.\n\n{tag}",
+                    "comments": inline,
+                },
             )
-        posted = github.post(
-            f"/pulls/{number}/reviews",
-            {
-                "commit_id": job.head_sha,
-                "event": event,
-                "body": f"Automated review. See summary above.\n\n{tag}",
-                "comments": inline,
-            },
-        )
-        Receipt.objects.get_or_create(
-            job=job, key="review", defaults={"remote_id": str(posted["id"])}
-        )
+            persist_receipt(job=job, key="review", defaults={"remote_id": str(posted["id"])})
     elif existing:
-        Receipt.objects.get_or_create(
-            job=job, key="review", defaults={"remote_id": str(existing["id"])}
-        )
+        persist_receipt(job=job, key="review", defaults={"remote_id": str(existing["id"])})
 
     if inline and Receipt.objects.filter(job=job, key="review").exclude(remote_id="").exists():
         _progress(job, "inline", "done", len(inline))
 
     if event == "APPROVE" and Receipt.objects.filter(job=job, key="review").exists():
         record = remember(github, job, tag)
-        record.review_id = Receipt.objects.get(job=job, key="review").remote_id
-        record.save(update_fields=["review_id"])
+        with mutation(job):
+            record.review_id = Receipt.objects.get(job=job, key="review").remote_id
+            record.save(update_fields=["review_id"])
         # Catch a push racing the approval POST; the webhook/sweeper also repairs this.
         dismiss_stale(github, job.pr.repository, number)
 
     if blocked and Receipt.objects.filter(job=job, key="review").exists():
-        Receipt.objects.get_or_create(job=job, key="request_changes")
+        persist_receipt(job=job, key="request_changes")
 
     update_cursor(job, "labels")
     try:
@@ -648,6 +664,8 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
     }
 
     def terminal_guard():
+        if not owned(job):
+            raise StaleReview("Execution ownership lost")
         timeline = github.pages(f"/issues/{number}/timeline")
         fresh = copy.deepcopy(github.pull(number))
         row = Job.objects.select_related("pr__repository").get(pk=job.pk)
@@ -736,6 +754,7 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
         job.pr.repository.feedback_label if blocked else job.pr.repository.approved_label,
         terminal_guard,
         record_transition,
+        job=job,
     )
     terminal_guard()
     _progress(job, "labels", "done", len(own_transitions))

@@ -1,7 +1,6 @@
 """Deterministic lifecycle. Models never decide eligibility or status transitions."""
 
 from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from core.models import ExpectedLabel, Job, PullRequest, Webhook
@@ -121,6 +120,7 @@ def reconcile(event, snapshot, *, canonical):
     pr, _ = PullRequest.objects.get_or_create(
         repository=repo, number=number, defaults={"head_sha": snapshot["head"]["sha"]}
     )
+    pr = PullRequest.objects.select_for_update().get(pk=pr.pk)
     old_sha = pr.head_sha
     pr.head_sha = snapshot["head"]["sha"]
     pr.is_open = snapshot["state"] == "open"
@@ -204,37 +204,33 @@ def reconcile(event, snapshot, *, canonical):
     event.save(update_fields=["processed_at", "payload", "error"])
 
 
-@transaction.atomic
-def claim():
-    if Job.objects.filter(status="running").exists():
-        return None
-    job = (
-        Job.objects.select_related("pr__repository", "provider")
-        .filter(Q(status="queued") | Q(status="quota", next_retry_at__lte=timezone.now()))
-        .order_by("created_at")
-        .first()
-    )
-    if not job:
-        return None
-    job.status = "running"
-    job.started_at = job.started_at or timezone.now()
-    job.next_retry_at = None
-    job.reason = ""
-    job.save(update_fields=["status", "started_at", "next_retry_at", "reason"])
-    return job
+def claim(owner=None):
+    from .claims import claim as acquire
+
+    return acquire(owner)
 
 
 def finish(job, status, reason="", retry_at=None):
-    # A worker may never overwrite a cancellation made by the admin/event process.
-    return Job.objects.filter(pk=job.pk, status="running").update(
-        status=status,
-        reason=reason[:250],
-        next_retry_at=retry_at,
-        finished_at=None if status in ["quota", "attention"] else timezone.now(),
-    )
+    from .claims import mutation
+    from .publication import StaleReview
+
+    try:
+        with mutation(job, terminal=True):
+            return Job.objects.filter(pk=job.pk, status="running").update(
+                status=status,
+                reason=reason[:250],
+                next_retry_at=retry_at,
+                finished_at=None if status in ["quota", "attention"] else timezone.now(),
+            )
+    except StaleReview:
+        return 0
 
 
 def current(job):
+    from .claims import owned
+
+    if not owned(job):
+        return False
     return Job.objects.filter(
         pk=job.pk,
         status="running",

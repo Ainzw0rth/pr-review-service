@@ -7,6 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.activity import Progress
+from core.claims import admission, attempt_rows, create_attempt, fenced, job_rows, owned
 from core.models import Job, ModelAttempt, Receipt, ReviewCheckpoint
 from core.publication import (
     LabelCleanupError,
@@ -22,6 +23,21 @@ from core.workflow_schema import GROUNDED_REVISIONS, TEAM_REVISIONS
 
 
 def run_job(job):
+    """Keep the execution lock through every finalizer, including direct callers."""
+    from .claims import execution_job, release
+
+    token = execution_job.set(job)
+    try:
+        _run_job(job)
+    except BaseException:
+        raise
+    else:
+        release(job)
+    finally:
+        execution_job.reset(token)
+
+
+def _run_job(job):
     from core.context import build_context, failure_reason
     from core.delivery import DeliveryPaused, load_review, save_review
     from core.github import GitHub, IntegrationError, check_required
@@ -114,7 +130,7 @@ def run_job(job):
             exhausted_until = blocked_until(provider)
             if exhausted_until:
                 quota_waits.append(exhausted_until)
-                ModelAttempt.objects.create(
+                create_attempt(
                     job=job,
                     provider=provider,
                     provider_name=provider.name,
@@ -129,10 +145,8 @@ def run_job(job):
                 )
                 progress("model_skipped")
                 continue
-            Job.objects.filter(pk=job.pk, status="running").update(
-                provider=provider, provider_diagnostics={}
-            )
-            model_attempt = ModelAttempt.objects.create(
+            job_rows(job).update(provider=provider, provider_diagnostics={})
+            model_attempt = create_attempt(
                 job=job, provider=provider, provider_name=provider.name, model=provider.model
             )
 
@@ -141,7 +155,8 @@ def run_job(job):
             phase_reports = {}
             phase_history = {}
 
-            def team_progress(code):
+            @fenced()
+            def team_progress_impl(job, code):
                 progress(code)
                 name, _, event = code.rpartition("_")
                 if (
@@ -163,12 +178,14 @@ def run_job(job):
                     data["phase_timeline"] = [
                         {"phase": key, **value} for key, value in phase_history.items()
                     ]
-                    ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
-                    Job.objects.filter(pk=job.pk, status="running").update(
-                        provider_diagnostics=data
-                    )
+                    attempt_rows(job, pk=model_attempt.pk).update(diagnostics=data)
+                    job_rows(job).update(provider_diagnostics=data)
 
-            def save_diagnostics(data):
+            def team_progress(code):
+                return team_progress_impl(job, code)
+
+            @fenced()
+            def save_diagnostics_impl(job, data):
                 from .activity import cli_progress
                 from .usage import usage_counters
 
@@ -194,8 +211,11 @@ def run_job(job):
                     data["phase_timeline"] = [
                         {"phase": name, **values} for name, values in phase_history.items()
                     ]
-                Job.objects.filter(pk=job.pk, status="running").update(provider_diagnostics=data)
-                ModelAttempt.objects.filter(pk=model_attempt.pk).update(diagnostics=data)
+                job_rows(job).update(provider_diagnostics=data)
+                attempt_rows(job, pk=model_attempt.pk).update(diagnostics=data)
+
+            def save_diagnostics(data):
+                return save_diagnostics_impl(job, data)
 
             def save_activity(code, text):
                 from .activity import record
@@ -277,7 +297,7 @@ def run_job(job):
                     context["intent"] = intent
                 if team:
                     context["review_team"] = audit
-                ModelAttempt.objects.filter(pk=model_attempt.pk).update(
+                attempt_rows(job, pk=model_attempt.pk).update(
                     status="success", finished_at=timezone.now()
                 )
                 progress("result")
@@ -315,7 +335,7 @@ def run_job(job):
                         "quota": "quota",
                     }.get(exc.kind, "attention")
                 )
-                ModelAttempt.objects.filter(pk=model_attempt.pk).update(
+                attempt_rows(job, pk=model_attempt.pk).update(
                     status=state, finished_at=timezone.now()
                 )
                 if incomplete or review_failed or exc.kind in ("unavailable", "attention"):
@@ -430,32 +450,35 @@ def run_job(job):
         )
 
     finally:
-        if model_attempt is not None:
-            ModelAttempt.objects.filter(pk=model_attempt.pk, status="running").update(
-                status=(
-                    "cancelled"
-                    if Job.objects.filter(
-                        pk=job.pk, status__in=["cancelled", "superseded"]
-                    ).exists()
-                    else "attention"
-                ),
-                finished_at=timezone.now(),
-            )
-        progress.close()
-        if github is not None and hasattr(github, "close"):
-            github.close()
-        progress("ended")
         try:
-            from core.journal import queue_job
-
-            if queue_job(job, result, outcome):
-                progress("journal_queued")
-        except Exception:
-            # Journaling never changes the GitHub outcome or exposes payload/credential errors.
+            if model_attempt is not None:
+                attempt_rows(job, pk=model_attempt.pk, status="running").update(
+                    status=(
+                        "cancelled"
+                        if Job.objects.filter(
+                            pk=job.pk, status__in=["cancelled", "superseded"]
+                        ).exists()
+                        else "attention"
+                    ),
+                    finished_at=timezone.now(),
+                )
+            if github is not None and hasattr(github, "close"):
+                github.close()
+            progress("ended")
             try:
-                progress("journal_attention")
+                from core.journal import queue_job
+
+                if queue_job(job, result, outcome):
+                    progress("journal_queued")
             except Exception:
-                pass
+                # Journaling never changes the GitHub outcome or exposes payload/credential errors.
+                try:
+                    progress("journal_attention")
+                except Exception:
+                    pass
+
+        finally:
+            progress.close()
 
 
 def _deliver_and_finish(github, job, progress):
@@ -475,10 +498,11 @@ def _deliver_and_finish(github, job, progress):
             job.pr.number,
             outcome,
             before_write=lambda: completed_guard(github, job, outcome),
+            write_gate=lambda: admission(job, terminal=True),
         )
     except Exception:
         progress("sheet_attention")
-        Job.objects.filter(pk=job.pk, status="completed").update(
+        job_rows(job, terminal=True).filter(status="completed").update(
             reason="Review published; Sheet update needs admin attention."
         )
     from core.merging import merge_approved
@@ -487,24 +511,15 @@ def _deliver_and_finish(github, job, progress):
     return outcome
 
 
-def recover_interrupted():
-    # Confirmed delivery is not an interrupted analysis; never run it again.
-    Job.objects.filter(status="running", review_checkpoint__stage="done").update(
-        status="completed",
-        finished_at=timezone.now(),
-        reason="GitHub delivery completed before restart; optional timeline synchronization may need attention.",
-    )
-    # Never replay uncertain external publication automatically after a process crash.
-    Job.objects.filter(status="running").update(
-        status="attention",
-        reason="Worker restarted during review. Inspect GitHub, then retoggle to retry.",
-    )
-    ModelAttempt.objects.filter(status="running").update(
-        status="interrupted", finished_at=timezone.now()
-    )
+def recover_interrupted(cleanup=None):
+    from core.claims import recover_dead_owners
+
+    return recover_dead_owners(cleanup)
 
 
 def completed_guard(github, job, outcome):
+    if not owned(job):
+        raise StaleReview("Execution ownership lost")
     row = Job.objects.select_related("pr__repository").get(pk=job.pk)
     fresh = github.pull(job.pr.number)
     expected = (
