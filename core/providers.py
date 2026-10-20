@@ -161,7 +161,7 @@ def _validation_limit(value, rule):
         isinstance(rule, str)
         and rule in _NUMERIC_VALIDATION_RULES
         and type(value) is int
-        and 0 <= value <= 10_000_000
+        and (-10_000_000 if rule in {"minimum", "maximum"} else 0) <= value <= 10_000_000
     ):
         return value
     return None

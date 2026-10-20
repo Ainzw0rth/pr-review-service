@@ -109,6 +109,24 @@ class ValidationDiagnosticsTests(TestCase):
         self.assertEqual(caught.exception.validation_error, "synthesis_assessments")
         self.assertEqual(caught.exception.validation_path, ["assessments"])
 
+    def test_negative_adjudication_minimum_is_retained(self):
+        from core.review_team import validate_synthesis_shape
+
+        value = synthesis()
+        value["assessments"] = [
+            {
+                "finding_id": "code:F1",
+                "decision": "reject",
+                "reason": "Unsupported candidate.",
+                "finding_index": -2,
+                "evidence": [{"source": "files_0", "quote": "secret"}],
+            }
+        ]
+        with self.assertRaises(providers.ProviderError) as caught:
+            validate_synthesis_shape(value)
+        self.assertEqual(caught.exception.validation_rule, "minimum")
+        self.assertEqual(caught.exception.validation_limit, -1)
+
     def test_cli_completed_response_preserves_detailed_validation_error(self):
         value = report(finding=True)
         value["findings"][0]["impact"] = None
