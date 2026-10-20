@@ -99,6 +99,45 @@ class WorkerTeamTests(TestCase):
             list(job.model_attempts.values_list("status", flat=True)), ["unavailable", "success"]
         )
 
+    def test_rejected_citation_persists_safe_reason_and_location_without_publication(self):
+        self.first.kind = "codex_cli"
+        self.first.save()
+        self.second.enabled = False
+        self.second.save()
+
+        def call(provider, evidence, cancelled, **kwargs):
+            if kwargs["task"] == "review_security":
+                value = report(finding=True)
+                value["findings"][0]["evidence"][0]["quote"] = "private-unmatched-excerpt"
+                return value
+            return self.complete(provider, evidence, cancelled, **kwargs)
+
+        evidence = {
+            "complete": True,
+            "head_sha": "a" * 40,
+            "pr": {**self.snapshot(), "body": "Fix login only."},
+            "files": [{"filename": "widget.py", "valid_lines": [3], "content": "secret"}],
+            "threads": [],
+            "issues": [],
+            "related_prs": [],
+        }
+        job, gh, model = test_worker.WorkerTests.run_case(self, call, v2=True, context=evidence)
+        self.assertEqual(job.status, "attention")
+        self.assertEqual(gh.writes, [])
+        self.assertFalse(hasattr(job, "review_checkpoint"))
+        self.assertNotIn("review_synthesis", [c.kwargs["task"] for c in model.call_args_list])
+        diagnostics = job.model_attempts.get().diagnostics
+        self.assertEqual(diagnostics["failure_detail"], "output_invalid")
+        self.assertEqual(diagnostics["validation_error"], "citation_quote")
+        self.assertEqual(diagnostics["validation_path"], ["findings", 0, "evidence", 0, "quote"])
+        public = progress_snapshot(job, list(job.activity.all()))
+        reason = public["models"][0]["attempts"][0]["failure_reason"]
+        self.assertIn("quote", reason.lower())
+        self.assertIn("$.findings[0].evidence[0].quote", reason)
+        self.assertNotIn(
+            "private-unmatched-excerpt", json.dumps(diagnostics) + json.dumps(public, default=str)
+        )
+
     def test_concurrent_api_quota_waits_without_fallback_or_publication(self):
         barrier = threading.Barrier(3)
 

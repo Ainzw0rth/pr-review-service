@@ -32,7 +32,18 @@ class ProviderError(Exception):
         "invalid": "Provider configuration or review output is invalid or incomplete.",
     }
 
-    def __init__(self, kind, message=None, retry_at=None, *, detail=None, validation_error=None):
+    def __init__(
+        self,
+        kind,
+        message=None,
+        retry_at=None,
+        *,
+        detail=None,
+        validation_error=None,
+        validation_path=None,
+        validation_rule=None,
+        validation_limit=None,
+    ):
         self.kind = kind
         self.retry_at = retry_at
         self.detail = detail if detail in ERROR_REASONS else None
@@ -41,6 +52,15 @@ class ProviderError(Exception):
             if isinstance(validation_error, str) and validation_error in VALIDATION_REASONS
             else None
         )
+        self.validation_path = _validation_path(validation_path) if self.validation_error else None
+        self.validation_rule = (
+            validation_rule
+            if self.validation_error
+            and isinstance(validation_rule, str)
+            and validation_rule in VALIDATION_RULES
+            else None
+        )
+        self.validation_limit = _validation_limit(validation_limit, self.validation_rule)
         super().__init__(ERROR_REASONS.get(self.detail, self.MESSAGES[kind]))
 
 
@@ -69,7 +89,120 @@ VALIDATION_REASONS = {
     "intent_schema": "Grounded intent failed JSON/schema validation. Nothing was published.",
     "intent_empty_claim": "Grounded intent contained an empty claim. Nothing was published.",
     "intent_unknown_source": "Grounded intent cited unknown evidence IDs. Nothing was published.",
+    "report_schema": "Specialist report failed schema validation. Nothing was published.",
+    "report_empty_text": "Specialist report contained whitespace-only text. Nothing was published.",
+    "report_duplicate_id": "Specialist report reused a finding ID. Nothing was published.",
+    "finding_path": "Finding targets a file outside the supplied changed files. Nothing was published.",
+    "finding_line": "Finding targets a line outside the supplied changed lines. Nothing was published.",
+    "citation_source": "Citation source ID is not supplied original evidence. Nothing was published.",
+    "citation_quote": "Citation quote does not match its original source verbatim. Nothing was published.",
+    "synthesis_schema": "Orchestrator output failed schema validation. Nothing was published.",
+    "synthesis_empty_text": "Orchestrator output contained an empty explanation. Nothing was published.",
+    "synthesis_reports": "Orchestrator is missing a required specialist report. Nothing was published.",
+    "synthesis_assessments": "Orchestrator did not assess every candidate exactly once. Nothing was published.",
+    "synthesis_index": "Orchestrator assessment has an invalid final-finding index. Nothing was published.",
+    "synthesis_support": "Final finding has no retained specialist support. Nothing was published.",
+    "synthesis_anchor": "Final finding changed its supporting candidate's anchor. Nothing was published.",
+    "synthesis_severity": "Orchestrator downgraded a retained blocking finding. Nothing was published.",
+    "review_schema": "Review failed schema validation. Nothing was published.",
+    "review_unsafe_path": "Finding contains an unsafe file path. Nothing was published.",
+    "review_blocking": "Review contradicts a blocking finding. Nothing was published.",
+    "review_resolution": "Incomplete review attempted to resolve a discussion. Nothing was published.",
+    "review_duplicates": "Review repeats a discussion or related-item target. Nothing was published.",
+    "reply_action": "Discussion assessment contains inconsistent action fields. Nothing was published.",
+    "action_plan": "Review action plan contradicts its proposed writes. Nothing was published.",
+    "thread_targets": "Review does not match the supplied unresolved discussions. Nothing was published.",
+    "related_target": "Review targets an item outside supplied related evidence. Nothing was published.",
+    "thread_context": "Supplied discussion context lacks a valid root comment. Nothing was published.",
+    "review_consistency": "Review failed contextual consistency validation. Nothing was published.",
+    "review_contract": "Unsupported review output contract was requested. Nothing was published.",
 }
+
+# Trusted schema vocabulary only. Never retain ValidationError.message, instance,
+# unknown property names, actual source IDs, file paths or rejected text.
+_VALIDATION_FIELDS = frozenset(
+    """
+summary blocking complete findings path line body severity replies comment_id resolve
+related_comments number coverage reviewed limitations id scenario evidence source quote impact fix
+assessments finding_id decision reason finding_index reviewer_summaries code security tests
+action action_plan inline_findings discussion_replies related_pr_comments related_issue_comments
+goal text sources certainty requirements non_goals unknowns
+""".split()
+)
+VALIDATION_RULES = frozenset(
+    """
+type enum pattern required additionalProperties minLength maxLength minimum maximum
+minItems maxItems uniqueItems
+""".split()
+)
+_NUMERIC_VALIDATION_RULES = frozenset(
+    {"minLength", "maxLength", "minimum", "maximum", "minItems", "maxItems"}
+)
+
+
+def _validation_path(value):
+    if not isinstance(value, (list, tuple)) or len(value) > 16:
+        return None
+    if any(
+        not (
+            type(item) is int
+            and 0 <= item <= 1_000_000
+            or isinstance(item, str)
+            and item in _VALIDATION_FIELDS
+        )
+        for item in value
+    ):
+        return None
+    return list(value)
+
+
+def _validation_limit(value, rule):
+    if (
+        isinstance(rule, str)
+        and rule in _NUMERIC_VALIDATION_RULES
+        and type(value) is int
+        and (-10_000_000 if rule in {"minimum", "maximum"} else 0) <= value <= 10_000_000
+    ):
+        return value
+    return None
+
+
+def validation_diagnostics(error):
+    """Only classified metadata crosses validator/adapter/worker boundaries."""
+    code = getattr(error, "validation_error", None)
+    if not isinstance(code, str) or code not in VALIDATION_REASONS:
+        return {}
+    result = {"validation_error": code}
+    path = _validation_path(getattr(error, "validation_path", None))
+    if path is not None:
+        result["validation_path"] = path
+    rule = getattr(error, "validation_rule", None)
+    if isinstance(rule, str) and rule in VALIDATION_RULES:
+        result["validation_rule"] = rule
+        limit = _validation_limit(getattr(error, "validation_limit", None), rule)
+        if limit is not None:
+            result["validation_limit"] = limit
+    return result
+
+
+def validate_schema(value, schema, code, *, detail="output_invalid"):
+    error = next(Draft202012Validator(schema).iter_errors(value), None)
+    if error is not None:
+        path = list(error.absolute_path)
+        if error.validator == "required" and isinstance(error.instance, dict):
+            path.append(
+                next(field for field in error.validator_value if field not in error.instance)
+            )
+        raise ProviderError(
+            "invalid",
+            detail=detail,
+            validation_error=code,
+            validation_path=path,
+            validation_rule=error.validator,
+            validation_limit=error.validator_value,
+        ) from None
+    return value
+
 
 REFUSAL_CATEGORIES = {
     "cyber": "Cybersecurity",
@@ -118,8 +251,22 @@ def failure_description(diagnostics, state):
     code = diagnostics.get("failure_detail") or diagnostics.get("error_reason")
     reason = ERROR_REASONS.get(code) if isinstance(code, str) else None
     validation = diagnostics.get("validation_error")
-    if code == "output_invalid" and isinstance(validation, str):
+    if (
+        code == "output_invalid" or (not code and diagnostics.get("failure_kind") == "invalid")
+    ) and isinstance(validation, str):
         reason = VALIDATION_REASONS.get(validation, reason)
+        if validation in VALIDATION_REASONS:
+            path = _validation_path(diagnostics.get("validation_path"))
+            if path is not None:
+                location = "$" + "".join(
+                    f"[{part}]" if type(part) is int else "." + part for part in path
+                )
+                reason += f" Location: {location}."
+            rule = diagnostics.get("validation_rule")
+            if isinstance(rule, str) and rule in VALIDATION_RULES:
+                limit = _validation_limit(diagnostics.get("validation_limit"), rule)
+                reason += f" Schema rule: {rule}"
+                reason += f" (limit {limit})." if limit is not None else "."
     stream_reasons = {
         "cli_stream_malformed": "CLI emitted malformed JSON; the output stream could not be decoded.",
         "cli_stream_truncated": "CLI output ended mid-message; the structured response was truncated.",
@@ -290,9 +437,8 @@ def _wire_schema(value):
 
 
 def validate_result(result):
-    if not VALIDATOR.is_valid(result):
-        raise ProviderError("invalid")
-    for finding in result["findings"]:
+    validate_schema(result, SCHEMA, "review_schema", detail=None)
+    for index, finding in enumerate(result["findings"]):
         path = finding["path"]
         if (
             path.startswith("/")
@@ -300,20 +446,31 @@ def validate_result(result):
             or ".." in PurePosixPath(path).parts
             or any(ord(char) < 32 for char in path)
         ):
-            raise ProviderError("invalid")
+            raise ProviderError(
+                "invalid",
+                validation_error="review_unsafe_path",
+                validation_path=["findings", index, "path"],
+            )
     if (
         any(item["severity"] == "blocking" for item in result["findings"])
         and not result["blocking"]
     ):
-        raise ProviderError("invalid")
+        raise ProviderError(
+            "invalid", validation_error="review_blocking", validation_path=["blocking"]
+        )
     if not result["complete"] and any(reply["resolve"] for reply in result["replies"]):
-        raise ProviderError("invalid")
-    for items, key in [
-        (result["replies"], "comment_id"),
-        (result["related_comments"], "number"),
+        raise ProviderError(
+            "invalid", validation_error="review_resolution", validation_path=["replies"]
+        )
+    for field, key in [
+        ("replies", "comment_id"),
+        ("related_comments", "number"),
     ]:
+        items = result[field]
         if len({item[key] for item in items}) != len(items):
-            raise ProviderError("invalid")
+            raise ProviderError(
+                "invalid", validation_error="review_duplicates", validation_path=[field]
+            )
     return result
 
 
@@ -436,7 +593,7 @@ def review_contract(task="review"):
 
         return contract(task)
     if task not in {"intent", "review_v2"}:
-        raise ProviderError("invalid", detail="output_invalid")
+        raise ProviderError("invalid", detail="output_invalid", validation_error="review_contract")
     from .review_v2 import contract
 
     return contract(task)
@@ -665,5 +822,5 @@ def _review(
         return validator(result)
     except ProviderError as exc:
         raise ProviderError(
-            "invalid", detail="output_invalid", validation_error=exc.validation_error
+            "invalid", detail="output_invalid", **validation_diagnostics(exc)
         ) from None

@@ -2,9 +2,15 @@
 
 from copy import deepcopy
 
-from jsonschema import Draft202012Validator
-
-from .providers import SCHEMA, SYSTEM, TEXT, ProviderError, _object, validate_result
+from .providers import (
+    SCHEMA,
+    SYSTEM,
+    TEXT,
+    ProviderError,
+    _object,
+    validate_result,
+    validate_schema,
+)
 
 SOURCES = {
     "type": "array",
@@ -102,9 +108,12 @@ def _nonempty(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def _invalid(code, path=()):
+    raise ProviderError("invalid", validation_error=code, validation_path=path)
+
+
 def validate_intent_shape(result):
-    if not Draft202012Validator(INTENT_SCHEMA).is_valid(result):
-        raise ProviderError("invalid", detail="output_invalid", validation_error="intent_schema")
+    validate_schema(result, INTENT_SCHEMA, "intent_schema")
     claims = [result["goal"], *result["requirements"], *result["non_goals"], *result["unknowns"]]
     if any(not _nonempty(claim["text"]) for claim in claims):
         raise ProviderError(
@@ -168,8 +177,7 @@ def validate_intent(result, context):
 
 
 def validate_review_shape(result):
-    if not Draft202012Validator(V2_SCHEMA).is_valid(result):
-        raise ProviderError("invalid")
+    validate_schema(result, V2_SCHEMA, "review_schema", detail=None)
     # Reuse legacy safety rules without modifying the historical contract.
     legacy = {key: value for key, value in result.items() if key != "action_plan"}
     legacy["replies"] = [
@@ -180,23 +188,24 @@ def validate_review_shape(result):
     validate_result(legacy)
     replies = result["replies"]
     if len({item["comment_id"] for item in replies}) != len(replies):
-        raise ProviderError("invalid")
-    for reply in replies:
+        _invalid("review_duplicates", ["replies"])
+    for index, reply in enumerate(replies):
         if (
             not _nonempty(reply["reason"])
             or (reply["action"] == "not_needed" and (reply["resolve"] or reply["body"]))
             or (reply["action"] == "reply" and not _nonempty(reply["body"]))
             or (reply["blocking"] and not result["blocking"])
         ):
-            raise ProviderError("invalid")
-    if any(not _nonempty(item["reason"]) for item in result["action_plan"].values()):
-        raise ProviderError("invalid")
+            _invalid("reply_action", ["replies", index])
+    for category, item in result["action_plan"].items():
+        if not _nonempty(item["reason"]):
+            _invalid("action_plan", ["action_plan", category, "reason"])
     for category, present in (
         ("inline_findings", bool(result["findings"])),
         ("discussion_replies", any(item["action"] == "reply" for item in replies)),
     ):
         if (result["action_plan"][category]["decision"] == "publish") != present:
-            raise ProviderError("invalid")
+            _invalid("action_plan", ["action_plan", category, "decision"])
     return result
 
 
@@ -210,22 +219,25 @@ def validate_actions(result, context):
         if isinstance(comments, dict):
             comments = comments.get("nodes", [])
         if not comments or type(comments[0].get("databaseId")) is not int:
-            raise ProviderError("invalid")
+            _invalid("thread_context")
         roots.add(comments[0]["databaseId"])
     if {item["comment_id"] for item in result["replies"]} != roots:
-        raise ProviderError("invalid")
+        _invalid("thread_targets", ["replies"])
     files = {item["filename"]: item.get("valid_lines", []) for item in context.get("files", [])}
-    if any(item["line"] not in files.get(item["path"], []) for item in result["findings"]):
-        raise ProviderError("invalid")
+    for index, item in enumerate(result["findings"]):
+        if item["path"] not in files:
+            _invalid("finding_path", ["findings", index, "path"])
+        if item["line"] not in files[item["path"]]:
+            _invalid("finding_line", ["findings", index, "line"])
     current = context.get("pr", {}).get("number")
     prs = {item["number"] for item in context.get("related_prs", [])} - {current}
     issues = {item["number"] for item in context.get("issues", [])} - {current} - prs
     numbers = {item["number"] for item in result["related_comments"]}
     if not numbers <= prs | issues:
-        raise ProviderError("invalid")
+        _invalid("related_target", ["related_comments"])
     for category, targets in (("related_pr_comments", prs), ("related_issue_comments", issues)):
         if (result["action_plan"][category]["decision"] == "publish") != bool(numbers & targets):
-            raise ProviderError("invalid")
+            _invalid("action_plan", ["action_plan", category, "decision"])
     return result
 
 
@@ -236,4 +248,4 @@ def contract(task):
         return INTENT_SCHEMA, INTENT_SYSTEM, validate_intent_shape
     if task == "review_v2":
         return V2_SCHEMA, V2_SYSTEM, validate_review_shape
-    raise ProviderError("invalid")
+    _invalid("review_contract")

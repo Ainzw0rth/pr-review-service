@@ -17,6 +17,7 @@ from .providers import (
     ProviderError,
     ReviewCancelled,
     review_contract,
+    validation_diagnostics,
 )
 
 
@@ -239,11 +240,9 @@ class CLIStream:
             value = json.loads(self.output) if isinstance(self.output, str) else self.output
             return self.validator(value)
         except ProviderError as exc:
-            if exc.validation_error:
-                self.diagnostics["validation_error"] = exc.validation_error
-            raise ProviderError(
-                "invalid", detail="output_invalid", validation_error=exc.validation_error
-            ) from None
+            details = validation_diagnostics(exc)
+            self.diagnostics.update(details)
+            raise ProviderError("invalid", detail="output_invalid", **details) from None
         except (ValueError, TypeError, RecursionError):
             self.diagnostics["validation_error"] = "invalid_json"
             raise ProviderError(
