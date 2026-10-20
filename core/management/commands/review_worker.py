@@ -3,7 +3,7 @@
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections, connection, connections, transaction
 from django.utils import timezone
 
@@ -54,15 +54,27 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true")
+        parser.add_argument(
+            "--allow-sqlite",
+            action="store_true",
+            help="Local development/tests only; one execution thread",
+        )
 
     def handle(self, *args, **options):
         from core.model_probe import claim_probe, run_probe
 
+        if connection.vendor != "postgresql" and not options.get("allow_sqlite"):
+            raise CommandError(
+                "Production review workers require PostgreSQL; --allow-sqlite is local/test only"
+            )
+        execution_slots = 8 if connection.vendor == "postgresql" else 1
         owner = register_owner()
         owner_context = supervisor_owner.set(str(owner.pk))
         futures = set()
         try:
-            with ThreadPoolExecutor(max_workers=8, thread_name_prefix="review") as executor:
+            with ThreadPoolExecutor(
+                max_workers=execution_slots, thread_name_prefix="review"
+            ) as executor:
                 while True:
                     if not connection.in_atomic_block:
                         close_old_connections()
@@ -110,7 +122,7 @@ class Command(BaseCommand):
 
                             refresh_due()  # Failure retains auxiliary ownership for recovery.
                             WorkerOwner.objects.filter(pk=owner.pk).update(probe_active=False)
-                        while len(futures) < 8:
+                        while len(futures) < execution_slots:
                             job = claim(owner)
                             if job is None:
                                 break

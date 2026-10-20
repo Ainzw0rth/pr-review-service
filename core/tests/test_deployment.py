@@ -22,7 +22,7 @@ class DrainTests(TestCase):
         ):
             self.assertFalse(self.status("drain")["idle"])
             with patch("core.management.commands.review_worker.claim") as claim:
-                call_command("review_worker", once=True)
+                call_command("review_worker", allow_sqlite=True, once=True)
             claim.assert_not_called()
             self.assertTrue(self.status("status")["idle"])
             self.assertTrue(self.status("drain")["idle"])
@@ -55,7 +55,7 @@ class DrainTests(TestCase):
 
 
 class DeployScriptTests(TestCase):
-    def execute(self, failure=None, ready=True):
+    def execute(self, failure=None, ready=True, legacy_graph=False):
         from scripts.deploy import deploy
 
         calls = []
@@ -68,6 +68,8 @@ class DeployScriptTests(TestCase):
             calls.append(args)
             if failure and failure(args):
                 raise RuntimeError("simulated deployment failure")
+            if legacy_graph and args[-1] == "name=^/pr-review-graph-[0-9a-f]{32}$":
+                return "legacy-graph-container"
             if args[-2:] == ("status", "--json"):
                 # Initial preflight, then worker cleanup still running, then acknowledged.
                 if len([x for x in calls if x[-2:] == ("status", "--json")]) == 1:
@@ -126,3 +128,47 @@ class DeployScriptTests(TestCase):
                 with self.assertRaises(RuntimeError):
                     deploy(run=run)
                 self.assertEqual(run.call_count, 1)
+
+    def test_backup_and_migrate_only_after_all_writers_stopped(self):
+        calls = self.execute()
+        stop = next(i for i, c in enumerate(calls) if "stop" in c)
+        backup = next(i for i, c in enumerate(calls) if "backup" in c)
+        migrate = next(i for i, c in enumerate(calls) if "migrate" in c and "--noinput" in c)
+        self.assertLess(stop, backup)
+        self.assertLess(backup, migrate)
+        self.assertIn("-1", calls[stop])
+        self.assertTrue(any("deployment_control" in c and "pause" in c for c in calls[:stop]))
+
+    def test_failed_migration_never_starts_candidate(self):
+        calls = self.execute(lambda c: "migrate" in c and "--noinput" in c)
+        self.assertTrue(any("stop" in c for c in calls))
+        self.assertFalse(any("up" in c or "resume" in c for c in calls))
+
+    def test_unlabelled_legacy_graph_refuses_backup_and_rollout(self):
+        calls = self.execute(legacy_graph=True)
+        self.assertTrue(any("stop" in c for c in calls))
+        self.assertTrue(any("name=^/pr-review-graph-[0-9a-f]{32}$" in c for c in calls))
+        self.assertFalse(any("backup" in c or "up" in c or "resume" in c for c in calls))
+
+    def test_failed_backup_never_migrates(self):
+        calls = self.execute(lambda c: "backup" in c)
+        self.assertFalse(any("migrate" in c and "--noinput" in c for c in calls))
+        self.assertFalse(any("resume" in c for c in calls))
+
+
+class MaintenanceGateTests(TestCase):
+    def test_gate_blocks_webhook_and_session_writes_but_allows_health(self):
+        from django.http import HttpResponse
+        from django.test import RequestFactory
+
+        from core.deployment import MaintenanceMiddleware
+
+        with tempfile.TemporaryDirectory() as temp, override_settings(DATA_DIR=Path(temp)):
+            downstream = Mock(return_value=HttpResponse("ok"))
+            middleware = MaintenanceMiddleware(downstream)
+            call_command("deployment_control", "pause")
+            self.assertEqual(middleware(RequestFactory().post("/webhooks/")).status_code, 503)
+            downstream.assert_not_called()
+            self.assertEqual(middleware(RequestFactory().get("/healthz/")).status_code, 200)
+            call_command("deployment_control", "open")
+            self.assertEqual(middleware(RequestFactory().get("/")).status_code, 200)

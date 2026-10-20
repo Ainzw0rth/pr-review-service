@@ -5,3 +5,4 @@ whitenoise>=6.9,<7
 cryptography>=44
 jsonschema>=4.23,<5
 google-auth[requests]>=2.40,<3
+psycopg[binary]>=3.2,<4

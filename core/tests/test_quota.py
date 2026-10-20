@@ -20,7 +20,7 @@ class QuotaTests(TestCase):
         ):
             call_command("worker_control", "drain", stdout=StringIO())
             with patch("core.management.commands.review_worker.claim") as claim:
-                call_command("review_worker", once=True, stdout=StringIO())
+                call_command("review_worker", allow_sqlite=True, once=True, stdout=StringIO())
                 claim.assert_not_called()
             self.assertTrue((Path(directory) / "worker.drain").exists())
             call_command("worker_control", "resume", stdout=StringIO())

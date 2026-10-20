@@ -10,7 +10,9 @@ from core.models import Provider
 class WorkflowEditorTests(TestCase):
     def setUp(self):
         self.owner = get_user_model().objects.create_user(pk=1, username="owner", is_superuser=True)
-        self.member = get_user_model().objects.create_user(username="member", is_superuser=True)
+        self.member = get_user_model().objects.create_user(
+            pk=2, username="member", is_superuser=True
+        )
         self.first = Provider.objects.create(name="Sol", kind="codex_cli", model="sol", order=0)
         self.second = Provider.objects.create(name="Opus", kind="claude_cli", model="opus", order=1)
         self.client.force_login(self.owner)

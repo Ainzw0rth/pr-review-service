@@ -168,7 +168,7 @@ class WorkerTests(WorkflowTests):
         self.assertEqual(gh.writes, [])
 
     def test_public_cli_output_is_persisted_with_its_model_source(self):
-        def effect(provider, context, cancelled, *, on_response, on_activity):
+        def effect(provider, context, cancelled, *, on_response, on_activity, on_capacity=None):
             on_activity("cli_output_text", "Checking the changed handler.")
             raise ProviderError("attention")
 
@@ -185,7 +185,9 @@ class WorkerTests(WorkflowTests):
     def test_each_refusal_keeps_its_diagnostics_without_publication(self):
         metadata = {"http_status": 200, "stop_reason": "refusal", "refusal_category": "cyber"}
 
-        def effect(provider, context, cancelled, *, on_response, on_activity=None):
+        def effect(
+            provider, context, cancelled, *, on_response, on_activity=None, on_capacity=None
+        ):
             on_response(metadata)
             raise ProviderError("attention")
 

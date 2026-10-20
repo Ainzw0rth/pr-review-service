@@ -42,6 +42,6 @@ class EventTests(WorkflowTests):
             patch("core.cli.cleanup_cli_orphans") as cli_cleanup,
             patch.object(review_worker, "claim", return_value=None),
         ):
-            review_worker.Command().handle(once=True)
+            review_worker.Command().handle(once=True, allow_sqlite=True)
         cleanup.assert_not_called()
         cli_cleanup.assert_not_called()

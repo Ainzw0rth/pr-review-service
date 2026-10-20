@@ -443,31 +443,24 @@ After running the test/lint checks, from the VPS checkout run:
 python3 scripts/deploy.py
 ```
 
-The command serializes deployments, saves a rollback image, builds the current checkout, and
-checks Django deployment settings and migration compatibility **before** pausing job starts.
-It then drains the worker, waits for its explicit idle acknowledgment (including final cleanup),
-backs up SQLite, replaces the app containers, checks web health and the replacement worker's
-readiness, and resumes the queue. It does not push Git or rebuild/change the pinned CLI image.
-There is no deadline that kills an active review; interrupt a stuck review through the existing
-admin controls only when that is intended.
+The command serializes deployments, retains the previous image, builds and checks the candidate,
+then drains **all supervisors**, including cleanup and probes. It closes a durable ingress gate,
+gracefully stops web/events/maintenance/worker (no forced-kill deadline), checks for residual
+native containers, creates a backend-appropriate backup, applies reviewed migrations, and starts
+web/worker paused. Database readiness and a new all-idle supervisor generation are required before
+events/maintenance restart and intake reopens. A private phase journal lives at `var/deployment.json`.
+Do not run independent one-off writers, manual restarts or resumes during deployment.
 
-This is a **drain-and-restart**, not zero downtime: the dashboard/webhook endpoint can briefly
-be unavailable during web replacement. Already accepted requests are retained. Check failed GitHub
-webhook deliveries during this interval and redeliver them; this command does not automatically
-recover deliveries GitHub could not send. Fully uninterrupted webhook ingress needs a separate
-always-on receiver or a rolling web setup.
+This is a maintenance window, not zero downtime. Accepted requests remain queued. GitHub failed
+webhook deliveries may require explicit redelivery/reconciliation; automatic retry is not assumed.
+Failures keep the durable maintenance/drain gates closed. A prior image alone may be incompatible
+with migrated schema: never blindly retag/restart it or restore a database that would discard
+post-backup writes. Inspect the journal, database and image compatibility before recovery.
 
-Failures or Ctrl-C after draining leave intake paused, with recovery instructions and the saved
-rollback image printed. Inspect health before manually resuming:
-
-```sh
-docker compose exec web python manage.py worker_control status --json
-docker compose exec web python manage.py worker_control resume
-```
-
-Pending schema migrations are rejected before drain: plan and back up schema upgrades separately.
-The rollback image restores application code only, not environment changes, database schema, or
-CLI authentication/configuration. Do not run concurrent manual restarts/resumes during deployment.
+PostgreSQL production uses `compose.postgres.yaml` in addition to the base Compose file, with the
+site's private override **last**. Keep the project name `auto-reviewer`, existing `.env`, secret keys,
+data/auth volumes and private tunnel network. See [PostgreSQL cutover](docs/postgres-cutover.md)
+for the one-time SQLite transfer, cap-1/cap-2 gates, backups and rollback boundaries.
 
 **One-time rollout:** older installed workers support the drain flag but not the new idle
 acknowledgment/JSON protocol. Install this release using the supervised drain procedure first:

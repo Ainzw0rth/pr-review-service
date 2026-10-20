@@ -64,10 +64,12 @@ class CIRefreshTests(TestCase):
 
     def run_review(self, results, *, local_tests=None):
         from core.models import Credential, Provider
+        from core.secrets import encrypt
 
-        Provider.objects.create(
-            name="test", kind="openai", model="test", credential=Credential.objects.first()
-        )
+        credential = Credential.objects.first()
+        credential.encrypted_value = encrypt("test-api-key")
+        credential.save(update_fields=["encrypted_value"])
+        Provider.objects.create(name="test", kind="openai", model="test", credential=credential)
         self.repo.required_checks = ["required"]
         if local_tests is not None:
             self.repo.test_command = ["test"]

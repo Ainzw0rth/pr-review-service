@@ -13,7 +13,7 @@ class ApprovalSettingsTests(TestCase):
 
         WorkflowTests.setUp(self)
         owner = get_user_model().objects.create_user(pk=1, username="owner", is_superuser=True)
-        other = get_user_model().objects.create_user(username="other", is_superuser=True)
+        other = get_user_model().objects.create_user(pk=2, username="other", is_superuser=True)
         self.client.force_login(other)
         self.assertEqual(self.client.get("/settings/").status_code, 403)
         self.assertEqual(self.client.post("/settings/", {}).status_code, 403)

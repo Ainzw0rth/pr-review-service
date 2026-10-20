@@ -93,7 +93,7 @@ def access(request, token):
     # Serial transaction makes consumption atomic, including password/membership writes.
     with transaction.atomic():
         link = (
-            AccessLink.objects.select_for_update()
+            AccessLink.objects.select_for_update(of=("self",))
             .select_related("user", "organization")
             .filter(
                 digest=digest, revoked=False, used_at__isnull=True, expires_at__gt=timezone.now()

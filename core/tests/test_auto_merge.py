@@ -230,7 +230,7 @@ class MergeSettingsTests(TestCase):
         from django.contrib.auth import get_user_model
 
         self.client.force_login(
-            get_user_model().objects.create_user(username="other", is_superuser=True)
+            get_user_model().objects.create_user(pk=2, username="other", is_superuser=True)
         )
         self.assertEqual(
             self.client.post("/settings/", {f"auto_merge_{self.repo.pk}": "on"}).status_code, 403

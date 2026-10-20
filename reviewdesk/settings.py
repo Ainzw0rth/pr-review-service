@@ -1,3 +1,4 @@
+import json as _json
 import os
 from pathlib import Path
 
@@ -20,6 +21,7 @@ INSTALLED_APPS = [
     "core",
 ]
 MIDDLEWARE = [
+    "core.deployment.MaintenanceMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -55,6 +57,26 @@ DATABASES = {
         "OPTIONS": {"timeout": 30, "transaction_mode": "IMMEDIATE"},
     }
 }
+DB_ENGINE = os.environ.get("DB_ENGINE", "sqlite")
+if DB_ENGINE == "postgresql":
+    required = ("DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST")
+    if any(not os.environ.get(key) for key in required):
+        raise RuntimeError("PostgreSQL requires DB_NAME, DB_USER, DB_PASSWORD and DB_HOST")
+    port = os.environ.get("DB_PORT", "5432")
+    if not port.isascii() or not port.isdigit() or not 1 <= int(port) <= 65535:
+        raise RuntimeError("DB_PORT must be an integer from 1 through 65535")
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            **{key: os.environ["DB_" + key] for key in ("NAME", "USER", "PASSWORD", "HOST")},
+            "PORT": port,
+            "CONN_MAX_AGE": 0,
+            "OPTIONS": {"connect_timeout": 5},
+        }
+    }
+elif DB_ENGINE != "sqlite":
+    raise RuntimeError("DB_ENGINE must be sqlite or postgresql")
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
@@ -142,3 +164,31 @@ GRAPH_TIMEOUT_SECONDS = int(os.environ.get("GRAPH_TIMEOUT_SECONDS", "1200"))
 
 # Read-only graph cache mount for dashboard readiness; never the Docker socket.
 GRAPH_STATUS_DIR = os.environ.get("GRAPH_STATUS_DIR", "")
+
+# Shared process resource gates. Invalid configuration must fail at startup.
+
+for _name, _default in (
+    ("API_ACCOUNT_CONCURRENCY", 3),
+    ("GRAPH_CONCURRENCY", 1),
+    ("TEST_CONCURRENCY", 1),
+):
+    _raw = os.environ.get(_name, str(_default))
+    if not _raw.isascii() or not _raw.isdigit() or not 1 <= int(_raw) <= 32:
+        raise RuntimeError(f"{_name} must be an integer from 1 through 32")
+    globals()[_name] = int(_raw)
+try:
+    API_ACCOUNT_GROUPS = _json.loads(os.environ.get("API_ACCOUNT_GROUPS", "{}"))
+    if not isinstance(API_ACCOUNT_GROUPS, dict) or any(
+        not key.isascii()
+        or not key.isdigit()
+        or int(key) < 1
+        or not isinstance(value, str)
+        or not value.strip()
+        or len(value) > 128
+        for key, value in API_ACCOUNT_GROUPS.items()
+    ):
+        raise ValueError
+except (ValueError, TypeError):
+    raise RuntimeError(
+        "API_ACCOUNT_GROUPS must map positive credential IDs to nonempty account aliases"
+    ) from None

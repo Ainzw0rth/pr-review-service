@@ -293,7 +293,7 @@ class ExpectedLabel(models.Model):
     repository = models.ForeignKey(Repository, on_delete=models.CASCADE)
     number = models.PositiveIntegerField()
     label = models.CharField(max_length=60)
-    action = models.CharField(max_length=20)
+    action = models.CharField(max_length=32)
     actor = models.CharField(max_length=100)
     expires_at = models.DateTimeField()
 
