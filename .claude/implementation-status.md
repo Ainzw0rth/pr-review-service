@@ -1,5 +1,26 @@
 # Implementation status
 
+## Current production — 2026-10-20
+
+Deployed source `2b7741b` with PostgreSQL 17 and coordinated parallel CLI specialists.
+Owner Settings now exposes **Concurrent PR reviews**, currently **2** (range 1–8).
+`CLI_ACCOUNT_CONCURRENCY=3` bounds model sessions per shared auth volume across PRs/models/quota probes.
+Code/security/test specialists run concurrently; synthesis waits for validated reports.
+
+Stopped-writer SQLite transfer validated 34 tables / 52,950 rows, 211 encrypted values and 13 sessions.
+Original SQLite, final snapshot, private configuration, CLI auth archives and PostgreSQL backup retained;
+backup restore matched all 34 table manifests. Both secret keys and repository/integration policies preserved.
+Full latest PostgreSQL suite: 681 tests, 222.728s, OK (2 optional skips).
+New supervisor acknowledged drain at cap1 before activation; owner browser saved cap2 and verified
+1440px/390px layouts, keyboard focus and no JavaScript errors. Public health HTTP200, all four app
+services healthy with zero restarts. Original queued work resumed; live specialist-stage speedup not
+measured during rollout. No artificial production review or provider probe initiated.
+
+Private production receipt and screenshots: `.claude/verification/parallel-rollout-20261020T071829Z/`.
+Deployment crossed the PostgreSQL write boundary; do not restore old SQLite without reconciling
+post-cutover writes and publication. Earlier release notes below are historical.
+
+
 ## Local release
 
 Implemented and running on this VPS at **127.0.0.1:8040**. Expected public hostname:

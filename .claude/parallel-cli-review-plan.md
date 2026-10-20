@@ -33,3 +33,10 @@ Architecture: retain the existing controller-thread callback queue and three-wor
 - No live OAuth/provider/GitHub writes, production settings changes, database changes, retries or deployment performed.
 
 Production currently uses the older serial SQLite app and has not rolled out the separately approved concurrent-PR/PostgreSQL subsystem already present in the source base. Do not deploy the whole source tree as a small hotfix: follow the existing stopped-writer PostgreSQL cutover, or separately backport this feature to the deployed serial release. Deploy the coordinated runner digest together with app support, then explicitly set CLI_ACCOUNT_CONCURRENCY=3 under a full drain. Keep default1 until that coordinated rollout. Adding new specialist roles remains a later change.
+
+## Production rollout completed — 2026-10-20
+
+The pre-deploy state above is historical. Source `2b7741b` now runs on PostgreSQL after the full
+stopped-writer cutover. PR concurrency is 2; CLI account concurrency is 3. Settings control was
+verified and saved through the live owner UI. Original SQLite/config/auth and validated PostgreSQL
+backup retained. See `implementation-status.md` and the private rollout receipt for actual checks.
