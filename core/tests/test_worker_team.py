@@ -1,13 +1,14 @@
 import copy
 import json
 import threading
+import time
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
 
 from core.flow import snapshot as progress_snapshot
 from core.models import Job
-from core.providers import ProviderError
+from core.providers import ProviderError, ReviewCancelled
 from core.secrets import decrypt
 from core.tests import test_worker, test_worker_v2
 from core.tests.test_review_team import report, synthesis
@@ -156,6 +157,80 @@ class WorkerTeamTests(TestCase):
         self.assertEqual(gh.writes, [])
         self.assertEqual({c.args[0].pk for c in model.call_args_list}, {self.first.pk})
         self.assertEqual(job.model_attempts.get().status, "quota")
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_concurrent_cli_progress_and_failure_preserve_failing_role(self):
+        from core.review_orchestration import run_team
+
+        self.first.kind = "codex_cli"
+        self.first.save()
+        self.second.enabled = False
+        self.second.save()
+        barrier = threading.Barrier(3)
+        observed = []
+
+        def inspect_team(*args, **kwargs):
+            response = kwargs["on_response"]
+
+            def inspect_response(phase, data):
+                response(phase, data)
+                if phase in {"code", "security", "tests"}:
+                    observed.append(Job.objects.get(status="running").provider_diagnostics["phase"])
+
+            return run_team(*args, **{**kwargs, "on_response": inspect_response})
+
+        def call(provider, evidence, cancelled, **kwargs):
+            if kwargs["task"] == "intent":
+                return copy.deepcopy(INTENT)
+            barrier.wait(timeout=2)
+            if kwargs["task"] == "review_security":
+                raise ProviderError("invalid", detail="output_invalid")
+            kwargs["on_response"]({"input_tokens": 20})
+            return report()
+
+        with patch("core.review_orchestration.run_team", side_effect=inspect_team):
+            job, gh, _ = self.run_v2(call)
+        self.assertEqual(job.status, "attention", job.reason)
+        self.assertEqual(gh.writes, [])
+        self.assertTrue(observed)
+        self.assertEqual(set(observed), {"specialists"})
+        self.assertEqual(job.model_attempts.get().diagnostics["failed_phase"], "security")
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_cli_peer_quota_joins_all_peers_before_fallback(self):
+        self.first.kind = "claude_cli"
+        self.first.save()
+        barrier = threading.Barrier(3)
+        exited = set()
+
+        def call(provider, evidence, cancelled, **kwargs):
+            if provider.pk != self.first.pk:
+                self.assertEqual(exited, {"review_code", "review_security", "review_tests"})
+                return self.complete(provider, evidence, cancelled, **kwargs)
+            task = kwargs["task"]
+            if task == "intent":
+                return copy.deepcopy(INTENT)
+            barrier.wait(timeout=2)
+            try:
+                if task == "review_security":
+                    raise ProviderError("unavailable")
+                if task == "review_code":
+                    threading.Event().wait(0.03)
+                    raise ProviderError("quota")
+                deadline = time.monotonic() + 2
+                while not cancelled() and time.monotonic() < deadline:
+                    threading.Event().wait(0.01)
+                self.assertTrue(cancelled())
+                raise ReviewCancelled()
+            finally:
+                exited.add(task)
+
+        job, gh, _ = self.run_v2(call)
+        self.assertEqual(job.status, "completed", job.reason)
+        self.assertEqual(job.provider_id, self.second.pk)
+        self.assertEqual(
+            list(job.model_attempts.values_list("status", flat=True)), ["quota", "success"]
+        )
 
     def test_one_security_blocker_produces_one_request_changes_review(self):
         def call(provider, evidence, cancelled, **kwargs):

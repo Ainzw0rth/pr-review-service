@@ -3,6 +3,7 @@ import {artifacts,missingEvidence,evidenceManifest} from './evidence.mjs';
 import {spawn} from 'node:child_process';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {createEventOutput} from './output.mjs';
+import {createCodexAuth} from './auth.mjs';
 const output=createEventOutput(process.stdout);
 const emit = data => output.emit(data);
 let raw='';
@@ -12,17 +13,25 @@ for await (const chunk of process.stdin) {
 }
 let request;
 try {request=JSON.parse(raw);} catch {await emit({type:'runner_error',code:'invalid_input'});process.exit(1);}
+async function codexAuth(){
+  try{return await createCodexAuth({onFailure:code=>emit({type:'runner_error',code})});}
+  catch(error){await emit({type:'runner_error',code:error.code==='auth_refresh_unavailable'?'auth_refresh_unavailable':'auth_missing'});process.exit(1);}
+}
 if(request.action==='quota') {
   const {quotaSnapshot}=await import('./quota.mjs');
-  await emit(await quotaSnapshot(request.kind));
+  const auth=request.kind==='codex_cli'?await codexAuth():null;
+  try{await emit(await quotaSnapshot(request.kind,auth));}
+  finally{if(auth)await auth.close();}
   process.exit(0);
 }
 if ((request.effort && !['low','medium','high','xhigh'].includes(request.effort)) || !['claude_cli','codex_cli'].includes(request.kind) || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/.test(request.model)) {
   await emit({type:'runner_error',code:'invalid_input'});process.exit(1);
 }
 try {
-  const auth=JSON.parse(await readFile(request.kind==='codex_cli'?'/auth/auth.json':'/auth/.credentials.json','utf8'));
-  if(request.kind==='codex_cli' ? auth.auth_mode!=='chatgpt'||!auth.tokens : !auth.claudeAiOauth) throw Error('auth');
+  if(request.kind==='claude_cli'){
+    const auth=JSON.parse(await readFile('/auth/.credentials.json','utf8'));
+    if(!auth.claudeAiOauth)throw Error('auth');
+  }
 } catch {await emit({type:'runner_error',code:'auth_missing'});process.exit(1);}
 await mkdir('/tmp/review',{recursive:true});
 await mkdir('/tmp/home',{recursive:true});
@@ -42,7 +51,12 @@ if (request.recovery !== null && request.recovery !== undefined) {
   prompt += '\n\nEvidence recovery pass (one additional pass only). The previous session ended before reading all evidence. Its history is NOT available in this fresh session. Prioritize the missing IDs below, then read EVERY other non-inline artifact fully as well. Follow next_offset until eof; do not guess lengths or stop after the changed files. Coverage starts fresh. Return the complete structured review only after all evidence has been inspected. Missing IDs from the previous pass: '+JSON.stringify(request.recovery);
 }
 await writeFile('/tmp/review/schema.json',JSON.stringify(request.schema),{mode:0o600});
-const env={PATH:process.env.PATH,HOME:'/tmp/home',LANG:'C.UTF-8',TERM:'dumb',NO_COLOR:'1',CODEX_HOME:'/auth',CLAUDE_CONFIG_DIR:'/auth',CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1'};
+const authSession=request.kind==='codex_cli'?await codexAuth():null;
+await mkdir('/tmp/claude',{recursive:true,mode:0o700});
+const env={PATH:process.env.PATH,HOME:'/tmp/home',LANG:'C.UTF-8',TERM:'dumb',NO_COLOR:'1',
+  CODEX_HOME:authSession?.home??'/tmp/codex',
+  ...(authSession?{CODEX_REFRESH_TOKEN_URL_OVERRIDE:authSession.refreshUrl}:{}),
+  CLAUDE_CONFIG_DIR:'/tmp/claude',CLAUDE_SECURESTORAGE_CONFIG_DIR:'/auth',CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1'};
 let command,args;
 if(request.kind==='codex_cli') {
   command='codex';
@@ -101,4 +115,5 @@ try {
   process.exitCode=1;
 } finally {
   clearInterval(timer);
+  if(authSession)await authSession.close();
 }

@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 
 const window = (name, value, percent, reset) => ({name, used_percent:value?.[percent], resets_at:reset});
 
-export async function quotaSnapshot(kind) {
+export async function quotaSnapshot(kind, auth=null) {
   try {
     await mkdir('/tmp/home', {recursive:true});
     if (kind === 'claude_cli') {
@@ -30,7 +30,7 @@ export async function quotaSnapshot(kind) {
     if (kind !== 'codex_cli') return {error:'unsupported'};
     return await new Promise(resolve=>{
       const child=spawn('codex',['app-server','--listen','stdio://'], {
-        env:{PATH:process.env.PATH,HOME:'/tmp/home',CODEX_HOME:'/auth',LANG:'C.UTF-8'},
+        env:{PATH:process.env.PATH,HOME:'/tmp/home',CODEX_HOME:auth?.home??'/auth',...(auth?{CODEX_REFRESH_TOKEN_URL_OVERRIDE:auth.refreshUrl}:{}),LANG:'C.UTF-8'},
         cwd:'/tmp',stdio:['pipe','pipe','ignore']
       });
       let pending='',bytes=0,settled=false;

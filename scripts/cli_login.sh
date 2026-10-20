@@ -2,7 +2,7 @@
 set -euo pipefail
 provider=${1:?Usage: scripts/cli_login.sh codex|claude}
 case "$provider" in
-  codex) login_args=(codex login --device-auth); config_name=CODEX_HOME;;
+  codex) login_args=(flock --exclusive /auth/.codex-refresh.lock codex login --device-auth); config_name=CODEX_HOME;;
   claude) login_args=(claude auth login); config_name=CLAUDE_CONFIG_DIR;;
   *) echo 'Choose codex or claude.' >&2; exit 1;;
 esac

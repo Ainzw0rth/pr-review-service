@@ -4,11 +4,12 @@ import json
 
 
 class DockerFake:
-    def __init__(self, *, exit_code=0, volumes=None):
+    def __init__(self, *, exit_code=0, volumes=None, image_labels=None):
         self.commands = []
         self.objects = {}
         self.exit_code = exit_code
         self.volumes = volumes
+        self.image_labels = image_labels or {}
         self.counter = 0
         self.fail_remove = False
 
@@ -39,7 +40,7 @@ class DockerFake:
         if args[:2] == ["volume", "inspect"]:
             return "[]"
         if args[:2] == ["image", "inspect"]:
-            return json.dumps([{"Config": {"Volumes": self.volumes}}])
+            return json.dumps([{"Config": {"Volumes": self.volumes, "Labels": self.image_labels}}])
         if args[0] == "create":
             name = args[args.index("--name") + 1]
             if any(item["Name"] == "/" + name for item in self.objects.values()):

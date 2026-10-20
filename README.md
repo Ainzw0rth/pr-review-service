@@ -813,12 +813,34 @@ reviews against the same original commit-pinned evidence and intent:
 | Test | Concrete missing scenarios, edge cases, regressions, test quality and failure-path coverage |
 
 Direct API specialists run concurrently with a maximum of three calls. Subscription
-CLI specialists run sequentially because sessions share a writable authentication
-volume. Specialists never receive their peers' reports. Each reports coverage and
+CLI specialists also run concurrently when `CLI_ACCOUNT_CONCURRENCY` is greater than
+one (recommended: three). Default one preserves serial execution until rollout.
+The cap applies across PRs, model rows and quota probes sharing an auth volume;
+waiting for a slot does not consume the active analysis budget. Synthesis waits for
+all three validated specialist reports. Specialists never receive their peers' reports. Each reports coverage and
 limitations, plus structured candidate findings anchored to supplied changed lines.
 Finding citations use exact original-artifact IDs and verbatim source excerpts.
 Unknown artifacts, invented excerpts, duplicate IDs and incomplete required coverage
 fail validation. Citation matching proves source presence, not semantic correctness.
+
+CLI auth coordination is separate from inference: Codex uses a private per-session
+`CODEX_HOME` and a loopback refresh bridge. A stable shared `flock` protects credential
+reread, token rotation and atomic persistence only; stale sessions adopt already-rotated
+tokens without overwriting shared state. Account changes fail closed. Quota probes use
+the same bridge. Claude Code 2.1.284 supplies native cross-process refresh locks,
+authoritative reread and compare-and-save; its secure credential directory remains
+shared while ordinary per-session config is private. Re-audit these guarantees when
+upgrading either pinned CLI. No access/refresh tokens enter model evidence or progress.
+
+To enable parallel CLI reviews, build `cli/Dockerfile`, pin its image digest in
+`CLI_RUNNER_IMAGE`, and set `CLI_ACCOUNT_CONCURRENCY=3`. The app refuses concurrent
+sessions unless the pinned image declares `auto-reviewer.auth-coordination=v1`.
+Drain all workers and probes before changing runner images or slot limits; never
+replace/unlink live lock files. Keep native-container resource ceilings in mind:
+each session permits up to 2 GiB and 2 CPUs, and each distinct auth volume has its
+own cap. Drain reviews before manual credential replacement; Codex login uses the
+same refresh lock. Existing generation, cleanup, cancellation and publication guards
+still apply. Parallel execution changes latency, not subscription quota or token cost.
 
 One synthesis pass receives all three reports **and the full original evidence**.
 It must keep, merge or explicitly reject every candidate, with a reason and original

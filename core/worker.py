@@ -221,7 +221,10 @@ def _run_job(job):
                         **data,
                         "phase": "specialists"
                         if team
-                        and not provider.kind.endswith("_cli")
+                        and (
+                            not provider.kind.endswith("_cli")
+                            or settings.CLI_ACCOUNT_CONCURRENCY > 1
+                        )
                         and phase in {"code", "security", "tests"}
                         else phase,
                         "phase_usage": [
@@ -340,6 +343,8 @@ def _run_job(job):
                 result = None
                 metadata = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
                 metadata.update(failure_kind=exc.kind, failure_detail=exc.detail)
+                if team:
+                    metadata["failed_phase"] = phase
                 metadata.update(validation_diagnostics(exc))
                 save_diagnostics(metadata)
                 incomplete = exc.detail == "cli_coverage"

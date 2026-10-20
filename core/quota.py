@@ -143,8 +143,8 @@ def refresh_due():
     """Worker-only polling: no model calls, no Docker access in the web process."""
     if not settings.CLI_RUNNER_IMAGE:
         return
-    from .capacity import CapacityBusy, CapacityError, Container, cli_scope, permit
-    from .cli import container_arguments
+    from .capacity import CapacityBusy, CapacityError, Container, cli_scope, limit, permit
+    from .cli import container_arguments, require_auth_coordination
     from .runner import _docker
 
     now = timezone.now()
@@ -159,7 +159,11 @@ def refresh_due():
         volume, scope = cli_scope(kind)
         data = {"error": "unavailable"}
         try:
-            with permit(scope, 1, lambda: False, wait=False) as slot:
+            with permit(
+                scope, limit("CLI_ACCOUNT_CONCURRENCY", 1), lambda: False, wait=False
+            ) as slot:
+                if limit("CLI_ACCOUNT_CONCURRENCY", 1) > 1:
+                    require_auth_coordination()
                 with Container(slot, _docker, volume=volume) as container:
                     _docker(["volume", "inspect", volume])
                     identifier = container.create(

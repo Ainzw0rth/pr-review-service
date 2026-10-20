@@ -67,6 +67,8 @@ class CLIStream:
             )
         elif code in ("rate_limit", "rate_limit_error", "usage_limit_reached"):
             error = ProviderError("quota", detail="cli_quota")
+        elif code == "auth_refresh_unavailable":
+            error = ProviderError("unavailable")
         elif code == "auth_missing":
             error = ProviderError("auth", detail="cli_auth")
         elif code in ("content_policy_violation", "content_filter", "refusal"):
@@ -342,14 +344,29 @@ def review_cli(
                 )
 
 
+def require_auth_coordination():
+    """Fail closed before any concurrent session can use an old runner image."""
+    from .runner import RunnerError, _docker
+
+    try:
+        info = json.loads(_docker(["image", "inspect", settings.CLI_RUNNER_IMAGE]))
+        if info[0]["Config"].get("Labels", {}).get("auto-reviewer.auth-coordination") != "v1":
+            raise ValueError
+    except (RunnerError, ValueError, KeyError, IndexError, TypeError, AttributeError):
+        raise ProviderError("invalid", detail="cli_setup") from None
+
+
 def _review_cli_once(provider, context, cancelled, *, on_capacity=None, budget=None, **kwargs):
     from contextlib import nullcontext
 
-    from .capacity import Container, cli_scope, permit
+    from .capacity import Container, cli_scope, limit, permit
     from .runner import _docker
 
     volume, scope = cli_scope(provider.kind)
-    with permit(scope, 1, cancelled, on_wait=on_capacity) as slot:
+    slots = limit("CLI_ACCOUNT_CONCURRENCY", 1)
+    with permit(scope, slots, cancelled, on_wait=on_capacity) as slot:
+        if slots > 1:
+            require_auth_coordination()
         container = Container(slot, _docker, volume=volume)
         container.cleanup()  # Admission housekeeping is not model active time.
         with budget.active() if budget else nullcontext():

@@ -10,6 +10,7 @@ from unittest import TestCase, skipUnless
 from unittest.mock import patch
 
 import httpx
+from django.test import override_settings
 
 from core.cli import CLIStream
 from core.providers import ProviderError, ReviewCancelled, review_contract
@@ -285,6 +286,157 @@ class TeamExecutionTests(TestCase):
         self.assertEqual(
             {phase for phase, _ in callbacks}, {"code", "security", "tests", "synthesis"}
         )
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_cli_parallel_roles_preserve_claim_context_and_isolated_evidence(self):
+        from core.claims import execution_job, supervisor_owner
+
+        for kind in ("codex_cli", "claude_cli"):
+            barrier = threading.Barrier(3)
+            controller = threading.get_ident()
+            callbacks = []
+            budgets = []
+            job = object()
+            job_token = execution_job.set(job)
+            owner_token = supervisor_owner.set("test-supervisor")
+
+            def call(provider, evidence, cancelled, **kwargs):
+                self.assertIs(execution_job.get(), job)
+                self.assertEqual(supervisor_owner.get(), "test-supervisor")
+                self.assertEqual(evidence["pr"]["body"], "Must preserve old widgets")
+                budgets.append(kwargs["budget"])
+                if kwargs["task"] == "review_synthesis":
+                    self.assertEqual(
+                        set(evidence["reviewer_reports"]), {"code", "security", "tests"}
+                    )
+                    return synthesis()
+                self.assertNotIn("reviewer_reports", evidence)
+                evidence["pr"]["body"] = kwargs["task"]
+                barrier.wait(timeout=1)
+                kwargs["on_response"]({"input_tokens": 10})
+                kwargs["on_activity"]("cli_output_status", "Checking affected flow.")
+                kwargs["on_capacity"](False)
+                return report()
+
+            try:
+                with self.subTest(kind=kind):
+                    final, _ = self.run_team(
+                        call,
+                        kind=kind,
+                        on_response=lambda *args: callbacks.append(threading.get_ident()),
+                        on_activity=lambda *args: callbacks.append(threading.get_ident()),
+                        progress=lambda *args: callbacks.append(threading.get_ident()),
+                    )
+                    self.assertTrue(final["complete"])
+                    self.assertEqual(len({id(budget) for budget in budgets}), 4)
+                    self.assertTrue(all(thread == controller for thread in callbacks))
+            finally:
+                execution_job.reset(job_token)
+                supervisor_owner.reset(owner_token)
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_cli_failed_reviewer_joins_cancelled_peers_before_returning(self):
+        for kind in ("codex_cli", "claude_cli"):
+            barrier = threading.Barrier(3)
+            exited = set()
+
+            def call(provider, evidence, cancelled, **kwargs):
+                task = kwargs["task"]
+                self.assertNotEqual(task, "review_synthesis")
+                barrier.wait(timeout=1)
+                if task == "review_security":
+                    raise ProviderError("unavailable")
+                deadline = time.monotonic() + 2
+                while not cancelled() and time.monotonic() < deadline:
+                    threading.Event().wait(0.01)
+                self.assertTrue(cancelled())
+                exited.add(task)
+                raise ReviewCancelled()
+
+            with self.subTest(kind=kind):
+                with self.assertRaises(ProviderError) as caught:
+                    self.run_team(call, kind=kind)
+                self.assertEqual(caught.exception.kind, "unavailable")
+                self.assertEqual(exited, {"review_code", "review_tests"})
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_parallel_cli_auth_precedes_peer_quota_and_preserves_diagnostics(self):
+        for kind in ("codex_cli", "claude_cli"):
+            barrier = threading.Barrier(3)
+            responses = []
+
+            def call(provider, evidence, cancelled, **kwargs):
+                barrier.wait(timeout=2)
+                if kwargs["task"] == "review_code":
+                    raise ProviderError("quota")
+                if kwargs["task"] == "review_security":
+                    threading.Event().wait(0.03)
+                    kwargs["on_response"]({"exit_code": 1})
+                    raise ProviderError("auth")
+                raise ProviderError("unavailable")
+
+            with self.subTest(kind=kind):
+                with self.assertRaises(ProviderError) as caught:
+                    self.run_team(
+                        call, kind=kind, on_response=lambda p, data: responses.append((p, data))
+                    )
+                self.assertEqual(caught.exception.kind, "auth")
+                self.assertEqual(responses[-1], ("security", {"exit_code": 1}))
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_parallel_cli_user_cancellation_joins_all_started_reviewers(self):
+        for kind in ("codex_cli", "claude_cli"):
+            barrier = threading.Barrier(3)
+            cancellation = threading.Event()
+            exited = set()
+
+            def call(provider, evidence, cancelled, **kwargs):
+                task = kwargs["task"]
+                barrier.wait(timeout=2)
+                cancellation.set()
+                deadline = time.monotonic() + 2
+                while not cancelled() and time.monotonic() < deadline:
+                    threading.Event().wait(0.01)
+                self.assertTrue(cancelled())
+                exited.add(task)
+                raise ReviewCancelled()
+
+            with self.subTest(kind=kind):
+                with self.assertRaises(ReviewCancelled):
+                    self.run_team(call, kind=kind, cancelled=cancellation.is_set)
+                self.assertEqual(exited, {"review_code", "review_security", "review_tests"})
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3)
+    def test_parallel_cli_budgets_count_active_time_per_phase_not_waiting_time(self):
+        for kind in ("codex_cli", "claude_cli"):
+            for seconds in (1200, 1801):
+                clock = threading.local()
+                barrier = threading.Barrier(3)
+
+                def call(provider, evidence, cancelled, **kwargs):
+                    if kwargs["task"] != "review_synthesis":
+                        barrier.wait(timeout=2)
+                    with kwargs["budget"].active():
+                        clock.now = getattr(clock, "now", 0) + seconds
+                        kwargs["budget"].check()
+                    # Time spent outside an active subprocess/request does not consume budget.
+                    clock.now += 7200
+                    kwargs["budget"].check()
+                    return synthesis() if kwargs["task"] == "review_synthesis" else report()
+
+                with (
+                    self.subTest(kind=kind, seconds=seconds),
+                    patch(
+                        "core.capacity.time.monotonic", side_effect=lambda: getattr(clock, "now", 0)
+                    ),
+                ):
+                    if seconds == 1200:
+                        final, _ = self.run_team(call, kind=kind)
+                        self.assertTrue(final["complete"])
+                    else:
+                        with self.assertRaises(ProviderError) as caught:
+                            self.run_team(call, kind=kind)
+                        self.assertEqual(caught.exception.detail, "review_timeout")
 
     def test_failed_required_reviewer_never_reaches_synthesis(self):
         for failure in (

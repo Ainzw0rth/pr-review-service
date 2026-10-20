@@ -3,7 +3,10 @@
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from copy import deepcopy
+
+from django.conf import settings
 
 from .capacity import ActiveBudget, CapacityError
 from .providers import ProviderError, ReviewCancelled, resolve_capacity_scope
@@ -24,8 +27,8 @@ def run_team(
 ):
     """Return a publishable v2-shaped result and a private adjudication audit.
 
-    API calls fan out at most three ways. CLI calls share a writable subscription
-    auth volume, so run sequentially. All stateful callbacks run on this thread.
+    Fan out at most three ways when account concurrency permits it. CLI accounts
+    default to serial execution. All stateful callbacks run on this thread.
     """
     reports = {}
     diagnostics = {}
@@ -67,7 +70,7 @@ def run_team(
         check()
         return value
 
-    if provider.kind.endswith("_cli"):
+    if provider.kind.endswith("_cli") and settings.CLI_ACCOUNT_CONCURRENCY == 1:
         for phase in ROLES:
             reports[phase] = validate_report(serial(phase, context), context)
             emit(phase, "ready" if reports[phase]["complete"] else "incomplete")
@@ -124,7 +127,7 @@ def run_team(
                         check()
                         emit(phase, "started")
                         response(phase, {})
-                        pool.submit(run, phase)
+                        pool.submit(copy_context().run, run, phase)
                     while len(reports) < len(ROLES):
                         check()
                         for budget in budgets.values():
@@ -156,7 +159,7 @@ def run_team(
             if not isinstance(caught, ProviderError):
                 raise
             # Threads are joined now. Preserve observed account errors even if a peer
-            # failed first: API quota must wait, auth must stop, neither may fall forward.
+            # failed first. The worker applies each transport's quota/fallback policy.
             for name in ROLES:
                 if name in latest_reports:
                     response(name, latest_reports[name])
@@ -173,6 +176,7 @@ def run_team(
                     name, error = fatal
                     response(name, latest_reports.get(name, {}))
                     raise error from None
+            response(phase, latest_reports.get(phase, diagnostics.get(phase, {})))
             raise
     # Stable report order makes synthesis input, audits and provider fallbacks reproducible.
     reports = {phase: reports[phase] for phase in ROLES}

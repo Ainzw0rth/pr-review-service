@@ -169,6 +169,7 @@ GRAPH_STATUS_DIR = os.environ.get("GRAPH_STATUS_DIR", "")
 
 for _name, _default in (
     ("API_ACCOUNT_CONCURRENCY", 3),
+    ("CLI_ACCOUNT_CONCURRENCY", 1),
     ("GRAPH_CONCURRENCY", 1),
     ("TEST_CONCURRENCY", 1),
 ):

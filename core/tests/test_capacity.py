@@ -366,3 +366,70 @@ class CapacityTests(TestCase):
             scopes = [resolve_capacity_scope(provider) for provider in (first, second)]
         self.assertEqual(scopes[0][0], scopes[1][0])
         self.assertNotEqual(scopes[0][1], scopes[1][1])
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3, CLI_CODEX_AUTH_VOLUME="parallel-auth")
+    def test_cli_slots_overlap_across_calls_but_fourth_waits(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from core.cli import review_cli
+        from core.tests.docker_fake import DockerFake
+
+        barrier = threading.Barrier(4)
+        release, waiting, cancelled = threading.Event(), threading.Event(), threading.Event()
+        indices = []
+
+        def active(provider, context, check, **kwargs):
+            indices.append(kwargs["container"].slot.index)
+            barrier.wait(timeout=3)
+            self.assertTrue(release.wait(3))
+            return {"complete": True}
+
+        with (
+            patch(
+                "core.runner._docker",
+                side_effect=DockerFake(image_labels={"auto-reviewer.auth-coordination": "v1"}),
+            ),
+            patch("core.cli._review_cli_active", side_effect=active),
+            ThreadPoolExecutor(max_workers=4) as pool,
+        ):
+            first = [
+                pool.submit(review_cli, SimpleNamespace(kind="codex_cli"), {}, lambda: False)
+                for _ in range(3)
+            ]
+            try:
+                barrier.wait(timeout=3)
+                fourth = pool.submit(
+                    review_cli,
+                    SimpleNamespace(kind="codex_cli"),
+                    {},
+                    cancelled.is_set,
+                    on_capacity=lambda state: waiting.set() if state else None,
+                )
+                self.assertTrue(waiting.wait(3))
+                cancelled.set()
+                with self.assertRaises(ReviewCancelled):
+                    fourth.result(timeout=3)
+                self.assertEqual(set(indices), {0, 1, 2})
+            finally:
+                release.set()
+            self.assertTrue(all(future.result(timeout=3)["complete"] for future in first))
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=3, CLI_CODEX_AUTH_VOLUME="parallel-auth")
+    def test_parallel_cli_refuses_runner_without_auth_capability_before_inference(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from core.cli import review_cli
+        from core.providers import ProviderError
+        from core.tests.docker_fake import DockerFake
+
+        with (
+            patch("core.runner._docker", side_effect=DockerFake()),
+            patch("core.cli._review_cli_active") as active,
+            self.assertRaises(ProviderError) as caught,
+        ):
+            review_cli(SimpleNamespace(kind="codex_cli"), {}, lambda: False)
+        self.assertEqual(caught.exception.detail, "cli_setup")
+        active.assert_not_called()

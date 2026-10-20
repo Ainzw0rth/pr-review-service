@@ -41,6 +41,7 @@ async function wrapper(scenario) {
   `;
   const hook=`import {registerHooks} from 'node:module';
     registerHooks({load(url,context,next){
+      if(url.endsWith('/auth.mjs'))return {format:'module',source:"export async function createCodexAuth(){return {home:'/tmp/codex',refreshUrl:'http://127.0.0.1:1234/token',close:async()=>{}};}",shortCircuit:true};
       if(url==='node:fs/promises')return {format:'module',source:${JSON.stringify(fakeFs)},shortCircuit:true};
       if(url==='node:child_process')return {format:'module',source:${JSON.stringify(fakeProcess)},shortCircuit:true};
       return next(url,context);
