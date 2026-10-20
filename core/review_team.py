@@ -3,9 +3,7 @@
 import json
 from copy import deepcopy
 
-from jsonschema import Draft202012Validator
-
-from .providers import TEXT, ProviderError, _object, validate_result
+from .providers import TEXT, ProviderError, _object, validate_result, validate_schema
 from .review_v2 import V2_SCHEMA, V2_SYSTEM, validate_actions, validate_review_shape
 
 ROLES = {"code": "Code", "security": "Security", "tests": "Test"}
@@ -93,6 +91,11 @@ missing or truncated, or conflicting requirements prevent a grounded assessment.
 specific gap in coverage.limitations; do not claim coverage merely because all items were read.
 Do not claim tests ran unless supplied evidence proves it. CI status alone is not a defect.
 Do not publish, draft discussion actions, resolve threads, or claim approval.
+Local output limits still apply when provider schemas omit these bounds: at most 100 findings;
+1-100 coverage.reviewed entries and at most 100 coverage.limitations entries; 1-20 citations
+per finding. Every text field is nonempty and at most 12000 characters; finding IDs at most
+64 characters, paths at most 1000 and evidence source IDs at most 128. Keep quotes short and
+verbatim. Group reviewed areas instead of listing every artifact as a separate coverage entry.
 """
 ROLE_POLICIES = {
     "code": """You are Code Reviewer. Own logical correctness, requirements compliance and
@@ -135,23 +138,29 @@ Valid incomplete specialist assessments still require adjudication. If any speci
 incomplete, preserve its limitations, set complete false and blocking true, and set every
 thread resolution false. Return useful evidence-backed findings and clarification needs;
 never turn an incomplete assessment into clearance merely because no defect was confirmed.
+Local output limits still apply when provider schemas omit bounds: at most 100 final findings,
+1000 discussion assessments, 30 related comments and 300 candidate assessments; 1-20 citations
+per candidate assessment. Every summary, reason, reviewer summary, body or quote is at most
+12000 characters. Keep citations short and verbatim; never truncate a citation into a false quote.
 """
 )
 
 
-def _invalid():
-    raise ProviderError("invalid", detail="output_invalid")
+def _invalid(code, path=()):
+    raise ProviderError(
+        "invalid", detail="output_invalid", validation_error=code, validation_path=path
+    )
 
 
-def _strings(value):
+def _strings(value, path=()):
     if isinstance(value, str):
-        yield value
+        yield path, value
     elif isinstance(value, dict):
-        for item in value.values():
-            yield from _strings(item)
+        for key, item in value.items():
+            yield from _strings(item, (*path, key))
     elif isinstance(value, list):
-        for item in value:
-            yield from _strings(item)
+        for index, item in enumerate(value):
+            yield from _strings(item, (*path, index))
 
 
 def _excerpt(text, limit):
@@ -159,13 +168,13 @@ def _excerpt(text, limit):
 
 
 def validate_report_shape(value):
-    if not Draft202012Validator(REPORT_SCHEMA).is_valid(value):
-        _invalid()
-    if any(not text.strip() for text in _strings(value)):
-        _invalid()
+    validate_schema(value, REPORT_SCHEMA, "report_schema")
+    for path, text in _strings(value):
+        if not text.strip():
+            _invalid("report_empty_text", path)
     findings = value["findings"]
     if len({item["id"] for item in findings}) != len(findings):
-        _invalid()
+        _invalid("report_duplicate_id", ["findings"])
     validate_result(
         {
             "summary": value["summary"],
@@ -185,7 +194,7 @@ def validate_report_shape(value):
     return value
 
 
-def _citations(citations, context):
+def _citations(citations, context, path):
     artifacts = {}
     # Match cli/evidence.mjs artifact IDs for both CLI and direct API transports.
     for key, value in context.items():
@@ -195,28 +204,28 @@ def _citations(citations, context):
             artifacts.update({f"{key}_{i}": item for i, item in enumerate(value)})
         else:
             artifacts[key] = value
-    for citation in citations:
+    for index, citation in enumerate(citations):
         source = artifacts.get(citation["source"])
         quote = citation["quote"]
-        if (
-            source is None
-            or not quote.strip()
-            or not (
-                any(quote in text for text in _strings(source))
-                or quote in json.dumps(source, ensure_ascii=False)
-                or quote in json.dumps(source, ensure_ascii=False, separators=(",", ":"))
-            )
+        if source is None:
+            _invalid("citation_source", [*path, index, "source"])
+        if not quote.strip() or not (
+            any(quote in text for _, text in _strings(source))
+            or quote in json.dumps(source, ensure_ascii=False)
+            or quote in json.dumps(source, ensure_ascii=False, separators=(",", ":"))
         ):
-            _invalid()
+            _invalid("citation_quote", [*path, index, "quote"])
 
 
 def validate_report(value, context):
     validate_report_shape(value)
     files = {item["filename"]: item.get("valid_lines", []) for item in context.get("files", [])}
-    for item in value["findings"]:
-        if item["line"] not in files.get(item["path"], []):
-            _invalid()
-        _citations(item["evidence"], context)
+    for index, item in enumerate(value["findings"]):
+        if item["path"] not in files:
+            _invalid("finding_path", ["findings", index, "path"])
+        if item["line"] not in files[item["path"]]:
+            _invalid("finding_line", ["findings", index, "line"])
+        _citations(item["evidence"], context, ["findings", index, "evidence"])
     return value
 
 
@@ -227,12 +236,13 @@ def _review(value):
 
 
 def validate_synthesis_shape(value):
-    if not Draft202012Validator(SYNTHESIS_SCHEMA).is_valid(value):
-        _invalid()
-    if any(not item["reason"].strip() for item in value["assessments"]) or any(
-        not text.strip() for text in value["reviewer_summaries"].values()
-    ):
-        _invalid()
+    validate_schema(value, SYNTHESIS_SCHEMA, "synthesis_schema")
+    for index, item in enumerate(value["assessments"]):
+        if not item["reason"].strip():
+            _invalid("synthesis_empty_text", ["assessments", index, "reason"])
+    for role, text in value["reviewer_summaries"].items():
+        if not text.strip():
+            _invalid("synthesis_empty_text", ["reviewer_summaries", role])
     validate_review_shape(_review(value))
     return value
 
@@ -240,7 +250,7 @@ def validate_synthesis_shape(value):
 def finalize(value, reports, context):
     validate_synthesis_shape(value)
     if set(reports) != set(ROLES):
-        _invalid()
+        _invalid("synthesis_reports")
     candidates = {}
     for role, report in reports.items():
         validate_report(report, context)
@@ -249,27 +259,29 @@ def finalize(value, reports, context):
     if len(assessments) != len(candidates) or {a["finding_id"] for a in assessments} != set(
         candidates
     ):
-        _invalid()
+        _invalid("synthesis_assessments", ["assessments"])
     final = deepcopy(_review(value))
     groups = {index: [] for index in range(len(final["findings"]))}
-    for assessment in assessments:
-        _citations(assessment["evidence"], context)
+    for assessment_index, assessment in enumerate(assessments):
+        _citations(assessment["evidence"], context, ["assessments", assessment_index, "evidence"])
         index = assessment["finding_index"]
         if assessment["decision"] == "reject":
             if index != -1:
-                _invalid()
+                _invalid("synthesis_index", ["assessments", assessment_index, "finding_index"])
             continue
         if index not in groups:
-            _invalid()
+            _invalid("synthesis_index", ["assessments", assessment_index, "finding_index"])
         groups[index].append(candidates[assessment["finding_id"]])
     for index, group in groups.items():
         item = final["findings"][index]
-        if not group or (item["path"], item["line"]) not in {
+        if not group:
+            _invalid("synthesis_support", ["findings", index])
+        if (item["path"], item["line"]) not in {
             (candidate["path"], candidate["line"]) for _, candidate in group
         }:
-            _invalid()
+            _invalid("synthesis_anchor", ["findings", index])
         if any(c["severity"] == "blocking" for _, c in group) and item["severity"] != "blocking":
-            _invalid()
+            _invalid("synthesis_severity", ["findings", index, "severity"])
         reviewers = ", ".join(ROLES[role] for role in ROLES if any(r == role for r, _ in group))
         item["body"] += f"\n\n_Reviewers: {reviewers}._"
     perspectives = "\n\n**Review perspectives**\n" + "\n".join(
@@ -313,4 +325,4 @@ def contract(task):
     for role in ROLES:
         if task == f"review_{role}":
             return REPORT_SCHEMA, COMMON_POLICY + ROLE_POLICIES[role], validate_report_shape
-    _invalid()
+    _invalid("review_contract")

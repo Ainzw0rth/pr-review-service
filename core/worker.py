@@ -25,7 +25,13 @@ def run_job(job):
     from core.context import build_context, failure_reason
     from core.delivery import DeliveryPaused, load_review, save_review
     from core.github import GitHub, IntegrationError, check_required
-    from core.providers import ProviderError, ReviewCancelled, failure_description, review
+    from core.providers import (
+        ProviderError,
+        ReviewCancelled,
+        failure_description,
+        review,
+        validation_diagnostics,
+    )
     from core.quota import blocked_until, record_exhausted
     from core.runner import run_tests
 
@@ -236,7 +242,7 @@ def run_job(job):
                         raise ProviderError(
                             "invalid",
                             detail="output_invalid",
-                            validation_error=getattr(exc, "validation_error", None),
+                            **validation_diagnostics(exc),
                         ) from None
                     team_progress("intent_ready")
                     guard(github, job)
@@ -271,8 +277,11 @@ def run_job(job):
                     if grounded:
                         validate_actions(result, review_context)
                     thread_replies(result, context)
-                except (ProviderError, ValueError, KeyError, TypeError):
-                    raise ProviderError("invalid", detail="output_invalid") from None
+                except (ProviderError, ValueError, KeyError, TypeError) as exc:
+                    details = validation_diagnostics(exc)
+                    if not details:
+                        details = {"validation_error": "review_consistency"}
+                    raise ProviderError("invalid", detail="output_invalid", **details) from None
                 if grounded:
                     context["intent"] = intent
                 if team:
@@ -289,8 +298,7 @@ def run_job(job):
                 result = None
                 metadata = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
                 metadata.update(failure_kind=exc.kind, failure_detail=exc.detail)
-                if exc.validation_error:
-                    metadata["validation_error"] = exc.validation_error
+                metadata.update(validation_diagnostics(exc))
                 save_diagnostics(metadata)
                 incomplete = exc.detail == "cli_coverage"
                 review_failed = exc.kind == "invalid" and exc.detail in {
