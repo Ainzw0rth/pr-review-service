@@ -96,6 +96,8 @@ Local output limits still apply when provider schemas omit these bounds: at most
 per finding. Every text field is nonempty and at most 12000 characters; finding IDs at most
 64 characters, paths at most 1000 and evidence source IDs at most 128. Keep quotes short and
 verbatim. Group reviewed areas instead of listing every artifact as a separate coverage entry.
+Copy each quote as one contiguous excerpt from its cited artifact. Do not paraphrase,
+reformat, join noncontiguous excerpts, or insert ellipses; use a shorter exact span instead.
 """
 ROLE_POLICIES = {
     "code": """You are Code Reviewer. Own logical correctness, requirements compliance and
@@ -142,6 +144,8 @@ Local output limits still apply when provider schemas omit bounds: at most 100 f
 1000 discussion assessments, 30 related comments and 300 candidate assessments; 1-20 citations
 per candidate assessment. Every summary, reason, reviewer summary, body or quote is at most
 12000 characters. Keep citations short and verbatim; never truncate a citation into a false quote.
+Copy each quote as one contiguous excerpt from its cited artifact. Do not paraphrase,
+reformat, join noncontiguous excerpts, or insert ellipses; use a shorter exact span instead.
 """
 )
 
