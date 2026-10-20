@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from django.core.management.base import BaseCommand, CommandError
 
+from core.capacity import ActiveBudget, CapacityError
 from core.cli import review_cli
 from core.providers import MAX_CLI_CONTEXT_BYTES, ProviderError
 
@@ -53,8 +54,16 @@ class Command(BaseCommand):
                 context,
                 lambda: False,
                 on_response=progress,
+                budget=ActiveBudget(90),
+                on_capacity=lambda waiting: self.stdout.write(
+                    "Waiting for capacity." if waiting else "Capacity available."
+                ),
                 on_activity=activity if options["activity"] else None,
             )
+        except CapacityError:
+            raise CommandError(
+                "Resource cleanup unconfirmed; administrator attention required."
+            ) from None
         except ProviderError as exc:
             raise CommandError(f"{exc.kind}: {exc}") from None
         if options["result"]:

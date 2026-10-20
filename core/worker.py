@@ -7,6 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.activity import Progress
+from core.capacity import CapacityError
 from core.claims import admission, attempt_rows, create_attempt, fenced, job_rows, owned
 from core.models import Job, ModelAttempt, Receipt, ReviewCheckpoint
 from core.publication import (
@@ -99,7 +100,14 @@ def _run_job(job):
         if repo.test_command:
             guard(github, job)
             progress("tests")
-            tests = run_tests(repo, github.archive(job.head_sha), progress.cancelled)
+            tests = run_tests(
+                repo,
+                github.archive(job.head_sha),
+                progress.cancelled,
+                on_capacity=lambda waiting: progress(
+                    "local_tests_waiting" if waiting else "local_tests_resumed"
+                ),
+            )
             progress("tests_passed" if tests["passed"] else "tests_failed")
             checks = {
                 "passed": tests["passed"] and (checks["passed"] if repo.required_checks else True),
@@ -159,21 +167,29 @@ def _run_job(job):
             def team_progress_impl(job, code):
                 progress(code)
                 name, _, event = code.rpartition("_")
-                if (
-                    team
-                    and name in {"intent", "code", "security", "tests", "synthesis"}
-                    and event in {"started", "ready", "incomplete"}
-                ):
+                if name in {
+                    "intent",
+                    "review",
+                    "code",
+                    "security",
+                    "tests",
+                    "synthesis",
+                } and event in {"started", "ready", "incomplete", "waiting", "resumed"}:
                     now = timezone.now().isoformat()
                     row = phase_history.setdefault(name, {"started_at": None, "finished_at": None})
                     row["state"] = (
                         "running"
-                        if event == "started"
+                        if event in {"started", "resumed"}
+                        else "waiting"
+                        if event == "waiting"
                         else "done"
                         if event == "ready"
                         else "incomplete"
                     )
-                    row["started_at" if event == "started" else "finished_at"] = now
+                    if event == "started":
+                        row["started_at"] = now
+                    elif event in {"ready", "incomplete"}:
+                        row["finished_at"] = now
                     data = ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics
                     data["phase_timeline"] = [
                         {"phase": key, **value} for key, value in phase_history.items()
@@ -249,6 +265,9 @@ def _run_job(job):
                         on_response=save_diagnostics,
                         on_activity=save_activity,
                         task="intent",
+                        on_capacity=lambda waiting: team_progress(
+                            "intent_waiting" if waiting else "intent_resumed"
+                        ),
                     )
                     try:
                         validate_intent(intent, context)
@@ -285,6 +304,9 @@ def _run_job(job):
                         progress.cancelled,
                         on_response=save_diagnostics,
                         on_activity=save_activity,
+                        on_capacity=lambda waiting: team_progress(
+                            "review_waiting" if waiting else "review_resumed"
+                        ),
                         **({"task": "review_v2"} if grounded else {}),
                     )
                 try:
@@ -420,6 +442,9 @@ def _run_job(job):
             "superseded",
             "Attempt cancelled, commit or discussion changed; request a new review.",
         )
+    except CapacityError:
+        finish(job, "attention", "Resource cleanup unconfirmed; administrator recovery required.")
+        raise
     except Exception:
         if ReviewCheckpoint.objects.filter(job=job).exists():
             progress("delivery_attention")

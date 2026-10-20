@@ -2,11 +2,11 @@
 
 import queue
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
-from .providers import ProviderError, ReviewCancelled
+from .capacity import ActiveBudget, CapacityError
+from .providers import ProviderError, ReviewCancelled, resolve_capacity_scope
 from .review_team import ROLES, finalize, validate_report
 
 PHASE_TIMEOUT_SECONDS = 1800
@@ -43,27 +43,28 @@ def run_team(
         if progress:
             progress(f"{phase}_{state}")
 
-    def check(deadline=None):
-        if deadline is not None and time.monotonic() >= deadline:
-            raise ProviderError("invalid", detail="review_timeout")
+    def check():
         if cancelled():
             raise ReviewCancelled()
         return False
 
     def serial(phase, evidence):
-        deadline = time.monotonic() + PHASE_TIMEOUT_SECONDS
-        check(deadline)
+        budget = ActiveBudget(PHASE_TIMEOUT_SECONDS)
+        check()
         emit(phase, "started")
         response(phase, {})
         value = call(
             provider,
             deepcopy(evidence),
-            lambda: check(deadline),
+            check,
+            budget=budget,
+            on_capacity=lambda waiting: emit(phase, "waiting" if waiting else "resumed"),
             task=f"review_{phase}",
             on_response=lambda data: response(phase, data),
             on_activity=lambda code, text: activity(phase, code, text),
         )
-        check(deadline)
+        budget.check()
+        check()
         return value
 
     if provider.kind.endswith("_cli"):
@@ -76,7 +77,7 @@ def run_team(
         terminal_errors = []
         latest_reports = {}
         state_lock = threading.Lock()
-        deadline = time.monotonic() + PHASE_TIMEOUT_SECONDS
+        budgets = {phase: ActiveBudget(PHASE_TIMEOUT_SECONDS) for phase in ROLES}
 
         def send(event):
             # Backpressure bounds diagnostic buffering. Cancellation releases producers.
@@ -99,6 +100,8 @@ def run_team(
                     provider,
                     deepcopy(context),
                     stop.is_set,
+                    budget=budgets[phase],
+                    on_capacity=lambda waiting: send(("capacity", phase, waiting)),
                     task=f"review_{phase}",
                     on_response=lambda data: report(phase, data),
                     on_activity=lambda code, text: send(("activity", phase, (code, text))),
@@ -113,16 +116,19 @@ def run_team(
         # Provider.credential is a Django descriptor; lazy access in threads would query DB.
         if getattr(provider, "credential_id", None):
             provider.credential
+            provider._capacity_scope = resolve_capacity_scope(provider)
         try:
             with ThreadPoolExecutor(max_workers=3, thread_name_prefix="pr-review") as pool:
                 try:
                     for phase in ROLES:
-                        check(deadline)
+                        check()
                         emit(phase, "started")
                         response(phase, {})
                         pool.submit(run, phase)
                     while len(reports) < len(ROLES):
-                        check(deadline)
+                        check()
+                        for budget in budgets.values():
+                            budget.check()
                         try:
                             kind, phase, data = events.get(timeout=0.1)
                         except queue.Empty:
@@ -132,6 +138,8 @@ def run_team(
                             raise data
                         if kind == "response":
                             response(phase, data)
+                        elif kind == "capacity":
+                            emit(phase, "waiting" if data else "resumed")
                         elif kind == "activity":
                             activity(phase, *data)
                         elif kind == "result":
@@ -139,7 +147,14 @@ def run_team(
                             emit(phase, "ready" if reports[phase]["complete"] else "incomplete")
                 finally:
                     stop.set()
-        except ProviderError:
+        except Exception as caught:
+            capacity_error = next(
+                (error for _, error in terminal_errors if isinstance(error, CapacityError)), None
+            )
+            if capacity_error:
+                raise capacity_error from None
+            if not isinstance(caught, ProviderError):
+                raise
             # Threads are joined now. Preserve observed account errors even if a peer
             # failed first: API quota must wait, auth must stop, neither may fall forward.
             for name in ROLES:

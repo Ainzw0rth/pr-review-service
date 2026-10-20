@@ -96,6 +96,20 @@ for _phase, _title in {
     )
 
 
+for _phase in (
+    "intent",
+    "review",
+    "code",
+    "security",
+    "tests",
+    "synthesis",
+    "graph",
+    "local_tests",
+):
+    MESSAGES[f"{_phase}_waiting"] = "Waiting for capacity."
+    MESSAGES[f"{_phase}_resumed"] = "Capacity available; execution resumed."
+
+
 def cli_progress(progress, data, state):
     if data.get("transport") not in {"claude_cli", "codex_cli"}:
         return

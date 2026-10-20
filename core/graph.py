@@ -8,7 +8,6 @@ import re
 import subprocess
 import tempfile
 import time
-import uuid
 
 from django.conf import settings
 
@@ -40,8 +39,16 @@ def validate(data, repository, sha):
         raise IntegrationError(FAILURE) from None
 
 
-def execute(request, cancelled=lambda: False):
+def execute(request, cancelled=lambda: False, *, on_capacity=None):
+    from .capacity import Container, limit, permit
     from .runner import _docker
+
+    with permit("graph", limit("GRAPH_CONCURRENCY", 1), cancelled, on_wait=on_capacity) as slot:
+        with Container(slot, _docker) as container:
+            return _execute(request, cancelled, container=container)
+
+
+def _execute(request, cancelled, *, container):
 
     image = settings.GRAPH_RUNNER_IMAGE
     volume = settings.GRAPH_CACHE_VOLUME
@@ -51,12 +58,10 @@ def execute(request, cancelled=lambda: False):
         raise IntegrationError(FAILURE)
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", volume):
         raise IntegrationError(FAILURE)
-    name = "pr-review-graph-" + uuid.uuid4().hex
+    name = container.slot.name
     args = [
-        "docker",
-        "--host=unix:///var/run/docker.sock",
-        "run",
-        "--rm",
+        "create",
+        "--pull=never",
         "-i",
         "--name",
         name,
@@ -87,8 +92,9 @@ def execute(request, cancelled=lambda: False):
         try:
             if cancelled():
                 raise ReviewCancelled()
+            identifier = container.create(args)
             process = subprocess.Popen(
-                args,
+                ["docker", "--host=unix:///var/run/docker.sock", "start", "-ai", identifier],
                 stdin=source,
                 stdout=output,
                 stderr=error,
@@ -111,11 +117,8 @@ def execute(request, cancelled=lambda: False):
             raise IntegrationError(FAILURE) from None
         finally:
             if process and process.poll() is None:
-                try:
-                    _docker(["rm", "-f", name])
-                finally:
-                    process.kill()
-                    process.wait()
+                process.kill()
+                process.wait()
 
 
 def collect(
@@ -146,7 +149,9 @@ def collect(
         }
     )
     result = execute(
-        {"repository": repository, "snapshots": snapshots, "changed": changed}, cancelled
+        {"repository": repository, "snapshots": snapshots, "changed": changed},
+        cancelled,
+        on_capacity=lambda waiting: progress("graph_waiting" if waiting else "graph_resumed"),
     )
     result = validate(result, repository, head_sha)
     for summary in result["snapshots"]:

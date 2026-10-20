@@ -2,8 +2,8 @@
 
 import json
 import math
+import os
 import subprocess
-import uuid
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
@@ -143,6 +143,7 @@ def refresh_due():
     """Worker-only polling: no model calls, no Docker access in the web process."""
     if not settings.CLI_RUNNER_IMAGE:
         return
+    from .capacity import CapacityBusy, CapacityError, Container, cli_scope, permit
     from .cli import container_arguments
     from .runner import _docker
 
@@ -155,33 +156,45 @@ def refresh_due():
         row = SubscriptionQuota.objects.filter(kind=kind).first()
         if row and row.checked_at and now - row.checked_at < timedelta(minutes=5):
             continue
-        name = "pr-review-quota-" + uuid.uuid4().hex
-        volume = (
-            settings.CLI_CLAUDE_AUTH_VOLUME
-            if kind == "claude_cli"
-            else settings.CLI_CODEX_AUTH_VOLUME
-        )
+        volume, scope = cli_scope(kind)
         data = {"error": "unavailable"}
         try:
-            _docker(container_arguments(kind, name, settings.CLI_RUNNER_IMAGE, volume))
-            process = subprocess.run(
-                ["docker", "start", "-a", "-i", name],
-                input=json.dumps({"action": "quota", "kind": kind}),
-                text=True,
-                capture_output=True,
-                timeout=40,
-                check=False,
-            )
-            if process.returncode == 0 and len(process.stdout) <= 8192:
-                parsed = json.loads(process.stdout)
-                if isinstance(parsed, dict):
-                    data = parsed
+            with permit(scope, 1, lambda: False, wait=False) as slot:
+                with Container(slot, _docker, volume=volume) as container:
+                    _docker(["volume", "inspect", volume])
+                    identifier = container.create(
+                        container_arguments(kind, slot.name, settings.CLI_RUNNER_IMAGE, volume)
+                    )
+                    try:
+                        process = subprocess.run(
+                            [
+                                "docker",
+                                "--host=unix:///var/run/docker.sock",
+                                "start",
+                                "-a",
+                                "-i",
+                                identifier,
+                            ],
+                            input=json.dumps({"action": "quota", "kind": kind}),
+                            text=True,
+                            capture_output=True,
+                            timeout=40,
+                            check=False,
+                            env={
+                                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                                "HOME": "/nonexistent",
+                            },
+                        )
+                        if process.returncode == 0 and len(process.stdout) <= 8192:
+                            parsed = json.loads(process.stdout)
+                            if isinstance(parsed, dict):
+                                data = parsed
+                    except (subprocess.SubprocessError, ValueError, OSError):
+                        pass
+        except CapacityBusy:
+            continue  # Do not change checked_at or availability for a busy account.
+        except CapacityError:
+            raise
         except Exception:
-            # Diagnostics are intentionally static: subprocess output can contain secrets.
-            pass
-        finally:
-            try:
-                _docker(["rm", "-f", name], timeout=10)
-            except Exception:
-                pass
+            pass  # Static unavailable snapshot; never persist subprocess output.
         store_snapshot(kind, data)

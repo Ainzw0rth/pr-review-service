@@ -1,0 +1,31 @@
+Creating test database for alias 'default'...
+...................F.F...........Found 43 test(s).
+System check identified no issues (0 silenced).
+..........
+======================================================================
+FAIL: test_incomplete_assessment_publishes_feedback_never_approval_merge_or_resolution (core.tests.test_worker_team.WorkerTeamTests.test_incomplete_assessment_publishes_feedback_never_approval_merge_or_resolution)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/projects/pr-review-service/.worktrees/concurrent-reviews/core/tests/test_worker_team.py", line 162, in test_incomplete_assessment_publishes_feedback_never_approval_merge_or_resolution
+    self.assertEqual(job.status, "completed", job.reason)
+AssertionError: 'attention' != 'completed'
+- attention
++ completed
+ : Saved review retained; delivery could not be confirmed. Retry delivery after checking the connection.
+
+======================================================================
+FAIL: test_one_security_blocker_produces_one_request_changes_review (core.tests.test_worker_team.WorkerTeamTests.test_one_security_blocker_produces_one_request_changes_review)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/root/projects/pr-review-service/.worktrees/concurrent-reviews/core/tests/test_worker_team.py", line 143, in test_one_security_blocker_produces_one_request_changes_review
+    self.assertEqual(job.status, "completed", job.reason)
+AssertionError: 'attention' != 'completed'
+- attention
++ completed
+ : Saved review retained; delivery could not be confirmed. Retry delivery after checking the connection.
+
+----------------------------------------------------------------------
+Ran 43 tests in 36.106s
+
+FAILED (failures=2)
+Destroying test database for alias 'default'...

@@ -358,3 +358,56 @@ class WorkflowV2Tests(TestCase):
                 self.job.workflow_revision = revision
                 self.job.workflow_steps = legacy_steps
                 self.assertEqual(list(self.stages()), legacy_steps)
+
+    def test_capacity_wait_is_per_phase_and_clears_on_resume_or_terminal(self):
+        from core.workflow_schema import REVISION
+
+        self.job.workflow_revision = REVISION
+        self.job.save(update_fields=["workflow_revision"])
+        provider = Provider.objects.create(name="Sol", kind="codex_cli", model="sol")
+        started = timezone.now().isoformat()
+        attempt = ModelAttempt.objects.create(
+            job=self.job,
+            provider=provider,
+            provider_name=provider.name,
+            model=provider.model,
+            diagnostics={
+                "phase": "specialists",
+                "phase_timeline": [
+                    {
+                        "phase": "code",
+                        "state": "waiting",
+                        "started_at": started,
+                        "finished_at": None,
+                    },
+                    {
+                        "phase": "security",
+                        "state": "running",
+                        "started_at": started,
+                        "finished_at": None,
+                    },
+                ],
+            },
+        )
+        # Record valid phase timestamps within the actual attempt.
+        started = attempt.started_at.isoformat()
+        for row in attempt.diagnostics["phase_timeline"]:
+            row["started_at"] = started
+        attempt.save()
+
+        def phases():
+            flow = snapshot(self.job, list(self.job.activity.all()))
+            return {row["phase"]: row for row in flow["models"][0]["attempts"][0]["phases"]}
+
+        self.assertTrue(phases()["code"]["waiting"])
+        self.assertFalse(phases()["security"]["waiting"])
+        self.assertEqual(phases()["code"]["state"], "running")
+        attempt.diagnostics["phase_timeline"][0]["state"] = "running"
+        attempt.save()
+        self.assertFalse(phases()["code"]["waiting"])
+        attempt.diagnostics["phase_timeline"][0]["state"] = "waiting"
+        attempt.status = "cancelled"
+        attempt.finished_at = timezone.now()
+        attempt.save()
+        self.job.status = "cancelled"
+        self.assertFalse(phases()["code"]["waiting"])

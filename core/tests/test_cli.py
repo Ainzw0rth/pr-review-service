@@ -1,11 +1,23 @@
 import json
+import tempfile
+from pathlib import Path
 from unittest import TestCase
 
+from django.test import override_settings
+
 from core.providers import ProviderError
+from core.tests.docker_fake import DockerFake
 from core.tests.test_providers import RESULT
 
 
 class CLIStreamTests(TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        settings = override_settings(DATA_DIR=Path(directory.name))
+        settings.enable()
+        self.addCleanup(settings.disable)
+
     def test_stream_failure_and_exit_metadata_are_retained_without_raw_text(self):
         p = self.parser("codex_cli")
         p.feed(
@@ -261,17 +273,22 @@ class CLIStreamTests(TestCase):
         child = subprocess.Popen(
             [sys.executable, "-c", "import time;time.sleep(60)"], stdout=subprocess.PIPE
         )
-        checks = iter([False, True])
+        spawned = []
+
+        def spawn(*args, **kwargs):
+            spawned.append(True)
+            return child
+
         with (
             override_settings(
                 CLI_RUNNER_IMAGE="sha256:" + "a" * 64, CLI_CODEX_AUTH_VOLUME="private-auth"
             ),
-            patch("core.runner._docker", return_value="[]") as docker,
-            patch("core.cli.subprocess.Popen", return_value=child),
+            patch("core.runner._docker", side_effect=DockerFake()) as docker,
+            patch("core.cli.subprocess.Popen", side_effect=spawn),
             self.assertRaises(ReviewCancelled),
         ):
             review_cli(
-                SimpleNamespace(kind="codex_cli", model="gpt-6.1-sol"), {}, lambda: next(checks)
+                SimpleNamespace(kind="codex_cli", model="gpt-6.1-sol"), {}, lambda: bool(spawned)
             )
         self.assertIsNotNone(child.poll())
         self.assertTrue(any(call.args[0][:2] == ["rm", "-f"] for call in docker.call_args_list))
@@ -300,7 +317,7 @@ class CLIStreamTests(TestCase):
             override_settings(
                 CLI_RUNNER_IMAGE="sha256:" + "a" * 64, CLI_CODEX_AUTH_VOLUME="private-auth"
             ),
-            patch("core.runner._docker", return_value='{"ExitCode":0}'),
+            patch("core.runner._docker", side_effect=DockerFake()),
             patch("core.cli.subprocess.Popen", return_value=child),
             self.assertRaises(ProviderError) as caught,
         ):

@@ -23,7 +23,14 @@ def team_result():
 
 @override_settings(LIVE_WRITES=True)
 class WorkerTeamTests(TestCase):
-    setUp = test_worker_v2.WorkerV2Tests.setUp
+    def setUp(self):
+        test_worker_v2.WorkerV2Tests.setUp(self)
+        from core.secrets import encrypt
+
+        credential = self.first.credential
+        credential.encrypted_value = encrypt("test-api-key")
+        credential.save(update_fields=["encrypted_value"])
+
     snapshot = test_worker_v2.WorkerV2Tests.snapshot
     event = test_worker_v2.WorkerV2Tests.event
     reconcile = test_worker_v2.WorkerV2Tests.reconcile

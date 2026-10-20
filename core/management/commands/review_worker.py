@@ -7,7 +7,16 @@ from django.core.management.base import BaseCommand
 from django.db import close_old_connections, connection, connections, transaction
 from django.utils import timezone
 
-from core.claims import execution_job, pool, register_owner, release, supervisor_owner
+from core.capacity import CapacityError, recover_resources
+from core.claims import (
+    execution_job,
+    pool,
+    recover_dead_owners,
+    recover_owners,
+    register_owner,
+    release,
+    supervisor_owner,
+)
 from core.models import JobClaim, WorkerOwner
 from core.worker import run_job
 from core.workflow import claim, finish
@@ -58,6 +67,13 @@ class Command(BaseCommand):
                     if not connection.in_atomic_block:
                         close_old_connections()
                     WorkerOwner.objects.filter(pk=owner.pk).update(heartbeat_at=timezone.now())
+                    try:
+                        recover_dead_owners(cleanup=recover_resources)
+                        recover_owners(cleanup=recover_resources)
+                    except CapacityError:
+                        self.stderr.write(
+                            "Resource recovery unconfirmed; retained ownership requires attention."
+                        )
                     for future in list(futures):
                         if future.done():
                             futures.remove(future)
@@ -79,6 +95,21 @@ class Command(BaseCommand):
                                 drain_ack=config.drain_generation
                             )
                     if not draining:
+                        # Refresh even under continuous queued load. Busy account permits
+                        # are skipped; running model calls are never globally serialized.
+                        with transaction.atomic():
+                            config = pool()
+                            quota_slot = (
+                                not config.draining
+                                and not WorkerOwner.objects.filter(probe_active=True).exists()
+                            )
+                            if quota_slot:
+                                WorkerOwner.objects.filter(pk=owner.pk).update(probe_active=True)
+                        if quota_slot:
+                            from core.quota import refresh_due
+
+                            refresh_due()  # Failure retains auxiliary ownership for recovery.
+                            WorkerOwner.objects.filter(pk=owner.pk).update(probe_active=False)
                         while len(futures) < 8:
                             job = claim(owner)
                             if job is None:
@@ -108,9 +139,6 @@ class Command(BaseCommand):
                                     )
                             if auxiliary:
                                 try:
-                                    from core.quota import refresh_due
-
-                                    refresh_due()
                                     with transaction.atomic():
                                         config = pool()
                                         probe = None if config.draining else claim_probe()
@@ -119,7 +147,9 @@ class Command(BaseCommand):
                                             probe.save(update_fields=["owner"])
                                     if probe:
                                         run_probe(probe)
-                                finally:
+                                except CapacityError:
+                                    raise  # Retain probe_active until death-proven scoped recovery.
+                                else:
                                     WorkerOwner.objects.filter(pk=owner.pk).update(
                                         probe_active=False
                                     )
@@ -127,7 +157,10 @@ class Command(BaseCommand):
                         break
                     time.sleep(2)
         finally:
-            if not JobClaim.objects.filter(owner=owner).exists():
+            if (
+                not JobClaim.objects.filter(owner=owner).exists()
+                and not WorkerOwner.objects.filter(pk=owner.pk, probe_active=True).exists()
+            ):
                 with transaction.atomic():
                     config = pool()
                     WorkerOwner.objects.filter(pk=owner.pk).update(

@@ -84,3 +84,68 @@ class GraphTests(SimpleTestCase):
         progress.assert_any_call("graph_incremental", count=0)
         progress.assert_any_call("graph_indexed", count=4)
         progress.assert_any_call("graph_impacted", count=1)
+
+    def test_native_graph_uses_slot_labels_and_immutable_id_and_removes(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from core.graph import execute
+        from core.tests.docker_fake import DockerFake
+
+        docker = DockerFake()
+        process = Mock(returncode=0)
+        process.poll.return_value = 0
+
+        def spawn(args, **kwargs):
+            kwargs["stdout"].write(json.dumps({"paths": []}).encode())
+            self.assertRegex(args[-1], "^[a-f0-9]{64}$")
+            return process
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            override_settings(
+                DATA_DIR=Path(directory),
+                GRAPH_RUNNER_IMAGE="sha256:" + "a" * 64,
+                GRAPH_CACHE_VOLUME="test-cache",
+                GRAPH_TIMEOUT_SECONDS=10,
+            ),
+            patch("core.runner._docker", side_effect=docker),
+            patch("core.graph.subprocess.Popen", side_effect=spawn),
+        ):
+            self.assertEqual(execute({}), {"paths": []})
+        self.assertFalse(docker.objects)
+        create = next(command for command in docker.commands if command[0] == "create")
+        for flag in (
+            "--network=none",
+            "--read-only",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--user=10001:10001",
+        ):
+            self.assertIn(flag, create)
+        self.assertTrue(
+            any(flag.startswith("--label=auto-reviewer.generation=") for flag in create)
+        )
+
+    def test_graph_wait_cancellation_starts_no_container(self):
+        import tempfile
+        from pathlib import Path
+
+        from core.capacity import permit
+        from core.graph import execute
+        from core.providers import ReviewCancelled
+
+        cancelled = []
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            override_settings(DATA_DIR=Path(directory)),
+        ):
+            with permit("graph", 1, lambda: False), patch("core.runner._docker") as docker:
+                with self.assertRaises(ReviewCancelled):
+                    execute(
+                        {},
+                        lambda: bool(cancelled),
+                        on_capacity=lambda waiting: cancelled.append(waiting),
+                    )
+                docker.assert_not_called()

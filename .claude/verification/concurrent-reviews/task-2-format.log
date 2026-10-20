@@ -1,0 +1,48 @@
+unformatted: File would be reformatted
+  --> .claude/capacity-audit.md:39:1
+   |
+38 |
+39 +
+40 | def cli_scope(kind):
+41 |     # Return validated actual volume and its opaque scope digest.
+42 |     ...
+43 |
+44 +
+45 | def api_scope(provider):
+   |
+
+unformatted: File would be reformatted
+  --> .claude/concurrent-reviews-plan.md:43:15
+   |
+42 | assert claim() is None
+   - finish(first, 'completed')
+43 + finish(first, "completed")
+44 | assert claim() is None  # cleanup still owns its capacity
+--------------------------------------------------------------------------------
+62 | ```python
+   - with slot('cli-volume:shared', 1, cancelled):
+63 + with slot("cli-volume:shared", 1, cancelled):
+64 |     # Only after entry: start the invocation's 1800s active deadline.
+   |
+
+unformatted: File would be reformatted
+  --> core/management/commands/flush_journal.py:11:27
+   |
+10 |         result = flush()
+   -         self.stdout.write(f"Journal: {result['sent']} accepted; {result['failed']} retained for retry.")
+11 +         self.stdout.write(
+12 +             f"Journal: {result['sent']} accepted; {result['failed']} retained for retry."
+13 +         )
+   |
+
+unformatted: File would be reformatted
+   --> core/transcript.py:110:37
+    |
+109 |             self.emit(
+    -                 "cli_output_status", "CLI response completed; final review withheld from this transcript."
+110 +                 "cli_output_status",
+111 +                 "CLI response completed; final review withheld from this transcript.",
+112 |             )
+    |
+
+4 files would be reformatted, 119 files already formatted

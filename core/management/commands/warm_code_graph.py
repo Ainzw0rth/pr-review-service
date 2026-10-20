@@ -6,6 +6,7 @@ import re
 
 from django.core.management.base import BaseCommand, CommandError
 
+from core.capacity import CapacityError
 from core.github import GitHub, IntegrationError
 from core.graph import execute, validate
 from core.models import Repository
@@ -34,8 +35,15 @@ class Command(BaseCommand):
                         "snapshots": [
                             {"sha": sha, "archive": base64.b64encode(github.archive(sha)).decode()}
                         ],
-                    }
+                    },
+                    on_capacity=lambda waiting: self.stdout.write(
+                        "Waiting for capacity." if waiting else "Capacity available."
+                    ),
                 )
             self.stdout.write(json.dumps(validate(result, repo.full_name, sha)))
+        except CapacityError:
+            raise CommandError(
+                "Resource cleanup unconfirmed; administrator attention required."
+            ) from None
         except IntegrationError as exc:
             raise CommandError(str(exc)) from None

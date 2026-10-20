@@ -1,0 +1,11 @@
+Creating test database for alias 'default'...
+............../root/projects/pr-review-service/.venv/lib/python3.12/site-packages/django/core/handlers/base.py:61: UserWarning: No directory at: /root/projects/pr-review-service/.worktrees/concurrent-reviews/staticfiles/
+  mw_instance = middleware(adapted_handler)
+...............................................................Found 171 test(s).
+System check identified no issues (0 silenced).
+..............................................................................................
+----------------------------------------------------------------------
+Ran 171 tests in 26.905s
+
+OK
+Destroying test database for alias 'default'...

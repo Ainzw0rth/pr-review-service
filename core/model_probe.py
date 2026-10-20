@@ -1,7 +1,5 @@
 """Small, explicit CLI check, executed serially by the trusted worker."""
 
-import time
-
 from django.conf import settings
 from django.utils import timezone
 
@@ -15,13 +13,14 @@ def claim_probe():
 
 
 def run_probe(probe):
+    from .capacity import ActiveBudget, CapacityError
     from .cli import review_cli
     from .providers import ProviderError, ReviewCancelled
 
-    start = time.monotonic()
+    budget = ActiveBudget(90)
 
     def cancelled():
-        return time.monotonic() - start > 90 or (settings.DATA_DIR / "worker.drain").exists()
+        return (settings.DATA_DIR / "worker.drain").exists()
 
     try:
         review_cli(
@@ -30,6 +29,10 @@ def run_probe(probe):
                 "task": "Connectivity probe only. No PR exists. Return complete false, blocking true, and empty findings, replies and related_comments."
             },
             cancelled,
+            budget=budget,
+            on_capacity=lambda waiting: ModelProbe.objects.filter(
+                pk=probe.pk, status="running"
+            ).update(reason="Waiting for capacity." if waiting else "Connection test running."),
         )
         status, reason = (
             "passed",
@@ -45,6 +48,8 @@ def run_probe(probe):
             "failed",
             f"Connection test failed: {exc.kind}. Check login, quota, model ID and installed CLI compatibility.",
         )
+    except CapacityError:
+        raise
     except Exception:
         status, reason = (
             "failed",

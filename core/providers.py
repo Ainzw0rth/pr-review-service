@@ -442,10 +442,7 @@ def review_contract(task="review"):
     return contract(task)
 
 
-def review(provider, context, cancelled, *, on_response=None, on_activity=None, task="review"):
-    if cancelled():
-        raise ReviewCancelled()
-    output_schema, system, validator = review_contract(task)
+def _encode_context(provider, context):
     if (
         provider.kind not in {"openai", "anthropic", "claude_cli", "codex_cli"}
         or not provider.model
@@ -460,6 +457,92 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None, 
             raise ProviderError("invalid", detail="context_limit")
     except (ValueError, TypeError, RecursionError):
         raise ProviderError("invalid") from None
+    return encoded
+
+
+def resolve_capacity_scope(provider):
+    from .capacity import api_scope, digest
+
+    try:
+        credential = decrypt(provider.credential.encrypted_value)
+        if not credential or "\n" in credential or "\r" in credential:
+            raise ValueError()
+        # Always retain the credential gate as well as any explicit account alias:
+        # duplicate keys cannot bypass the cap through inconsistent alias entries.
+        key_scope = "api:" + provider.kind + ":" + digest("key:" + credential)
+        return tuple(dict.fromkeys((key_scope, api_scope(provider, credential))))
+    except (
+        InvalidToken,
+        ValueError,
+        TypeError,
+        AttributeError,
+        RuntimeError,
+        ImproperlyConfigured,
+    ):
+        raise ProviderError("auth") from None
+
+
+def review(
+    provider,
+    context,
+    cancelled,
+    *,
+    on_response=None,
+    on_activity=None,
+    task="review",
+    on_capacity=None,
+    budget=None,
+):
+    from contextlib import ExitStack, nullcontext
+
+    from .capacity import limit, permit
+
+    if cancelled():
+        raise ReviewCancelled()
+    review_contract(task)
+    encoded = _encode_context(provider, context)
+    kwargs = dict(on_response=on_response, on_activity=on_activity, task=task, encoded=encoded)
+    if provider.kind in {"claude_cli", "codex_cli"}:
+        return _review(
+            provider, context, cancelled, on_capacity=on_capacity, budget=budget, **kwargs
+        )
+    if provider.kind not in {"openai", "anthropic"}:
+        raise ProviderError("invalid")
+    scope = getattr(provider, "_capacity_scope", None) or resolve_capacity_scope(provider)
+    scopes = (scope,) if isinstance(scope, str) else scope
+    with ExitStack() as permits:
+        for identity in scopes:
+            permits.enter_context(
+                permit(
+                    identity, limit("API_ACCOUNT_CONCURRENCY", 3), cancelled, on_wait=on_capacity
+                )
+            )
+        with budget.active() if budget else nullcontext():
+
+            def active_cancelled():
+                if budget:
+                    budget.check()
+                return cancelled()
+
+            return _review(provider, context, active_cancelled, **kwargs)
+
+
+def _review(
+    provider,
+    context,
+    cancelled,
+    *,
+    on_response=None,
+    on_activity=None,
+    task="review",
+    on_capacity=None,
+    budget=None,
+    encoded=None,
+):
+    if cancelled():
+        raise ReviewCancelled()
+    output_schema, system, validator = review_contract(task)
+    encoded = encoded if encoded is not None else _encode_context(provider, context)
     if provider.kind in {"claude_cli", "codex_cli"}:
         from .cli import review_cli
 
@@ -469,6 +552,8 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None, 
             cancelled,
             on_response=on_response,
             on_activity=on_activity,
+            on_capacity=on_capacity,
+            budget=budget,
             **({"task": task} if task != "review" else {}),
         )
     try:

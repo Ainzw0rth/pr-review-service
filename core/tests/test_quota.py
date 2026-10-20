@@ -72,3 +72,61 @@ class QuotaTests(TestCase):
         card = next(c for c in quota.cards() if c["kind"] == "codex_cli")
         self.assertEqual(card["windows"][0]["remaining"], 73)
         self.assertEqual(card["state"], "available")
+
+    def test_busy_auth_volume_skips_refresh_without_changing_observation(self):
+        from core.capacity import cli_scope, permit
+        from core.models import SubscriptionQuota
+
+        with (
+            TemporaryDirectory() as directory,
+            self.settings(
+                DATA_DIR=Path(directory),
+                CLI_RUNNER_IMAGE="sha256:" + "a" * 64,
+                CLI_CODEX_AUTH_VOLUME="shared-test-auth",
+            ),
+        ):
+            Provider.objects.create(name="test-cli", kind="codex_cli", model="test")
+            quota.store_snapshot("codex_cli", {"error": "unsupported"})
+            row = SubscriptionQuota.objects.get(kind="codex_cli")
+            row.checked_at = timezone.now() - timedelta(hours=1)
+            row.save()
+            old_time = row.checked_at
+            with (
+                permit(cli_scope("codex_cli")[1], 1, lambda: False),
+                patch("core.runner._docker") as docker,
+            ):
+                quota.refresh_due()
+            row.refresh_from_db()
+            self.assertEqual(row.checked_at, old_time)
+            self.assertEqual(row.error, "unsupported")
+            docker.assert_not_called()
+
+    def test_quota_inspects_auth_volume_and_removes_immutable_container(self):
+        import json
+        from types import SimpleNamespace
+
+        from core.tests.docker_fake import DockerFake
+
+        docker = DockerFake()
+        with (
+            TemporaryDirectory() as directory,
+            self.settings(
+                DATA_DIR=Path(directory),
+                CLI_RUNNER_IMAGE="sha256:" + "a" * 64,
+                CLI_CODEX_AUTH_VOLUME="shared-test-auth",
+            ),
+        ):
+            Provider.objects.create(name="test-cli", kind="codex_cli", model="test")
+            with (
+                patch("core.runner._docker", side_effect=docker),
+                patch(
+                    "core.quota.subprocess.run",
+                    return_value=SimpleNamespace(
+                        returncode=0, stdout=json.dumps({"error": "unsupported"})
+                    ),
+                ) as run,
+            ):
+                quota.refresh_due()
+            self.assertFalse(docker.objects)
+            self.assertIn(["volume", "inspect", "shared-test-auth"], docker.commands)
+            self.assertRegex(run.call_args.args[0][-1], "^[a-f0-9]{64}$")

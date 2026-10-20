@@ -14,7 +14,7 @@ function fixture() {
     status: 'running', status_label: 'Running', provider: 'Test API', heartbeat_at: start,
     reason: '', started_at: start, finished_at: null, next_retry_at: null,
     flow: {
-      legacy: false, model_detail: 'API reviews overlap; subscription CLI sessions run sequentially.',
+      legacy: false, model_detail: 'API reviewers can overlap when account capacity is available; subscription CLI sessions run sequentially.',
       stages: [stage('files', 'Changed files', 'done'), stage('discussion', 'Discussions', 'done'), stage('docs', 'Documentation', 'done'), stage('graph', 'Dependency graph', 'done'), stage('intent', 'Grounded intent', 'done'), stage('checks', 'Required CI', 'done'), stage('tests', 'Isolated tests', 'done'), stage('code_review', 'Code reviewer', 'done'), stage('security_review', 'Security reviewer', 'running'), stage('test_review', 'Test reviewer'), stage('synthesis', 'Review adjudication'), stage('pr_summary', 'PR summary')],
       models: [
         {title: 'Old CLI', model: 'old-model', backend: 'codex_cli', state: 'failed', attempts: [{id: 1, state: 'failed', phase: 'intent', started_at: '2026-10-19T09:00:00Z', finished_at: '2026-10-19T09:00:05Z', failure_reason: 'Old recorded failure', next_action: 'Continued with Test API.'}]},
@@ -76,6 +76,23 @@ test('progress cards retain accessible disclosures, reviewer attribution and his
     assert.match(codeMarker, /✓/); // A running ancestor must not turn completed children into running dots.
     assert.doesNotMatch(await code.innerText(), /Security phase public progress/);
     await code.locator(':scope > summary').focus();
+    // Capacity is per session: waiting does not mark healthy peers skipped or idle.
+    data.flow.stages.find(row => row.id === 'security_review').waiting = true;
+    await page.evaluate(() => window.activityPoll());
+    const security = page.locator('.review-session[data-phase="security"]');
+    assert.equal(await security.locator('.node-state').innerText(), 'Waiting for capacity');
+    assert.equal(await code.locator('.node-state').innerText(), 'Complete');
+    const capacityScreens = join(root, '.claude/verification/concurrent-reviews/task-2-screens');
+    mkdirSync(capacityScreens, {recursive:true});
+    await page.screenshot({path:join(capacityScreens, 'waiting-desktop.png'), fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    await page.emulateMedia({reducedMotion:'reduce'});
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({path:join(capacityScreens, 'waiting-mobile.png'), fullPage:true});
+    await page.setViewportSize({width:1280,height:900});
+    data.flow.stages.find(row => row.id === 'security_review').waiting = false;
+    await page.evaluate(() => window.activityPoll());
+    assert.equal(await security.locator('.node-state').innerText(), 'In progress');
     data.flow.stages.find(row => row.id === 'security_review').state = 'done';
     data.flow.stages.find(row => row.id === 'test_review').state = 'running';
     await page.evaluate(() => window.activityPoll());

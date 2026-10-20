@@ -40,11 +40,11 @@
     const top = element('div', 'node-topline');
     if (!model && data.id) {
       node.dataset.stageId = data.id;
-      node.dataset.state = state;
+      node.dataset.state = data.waiting ? 'waiting' : state;
       const previous = graph.querySelector(`[data-stage-id="${data.id}"]`);
-      if (previous && previous.dataset.state !== state) top.classList.add('motion-enter');
+      if (previous && previous.dataset.state !== node.dataset.state) top.classList.add('motion-enter');
     }
-    top.append(element('span','node-number',String(index + 1).padStart(2,'0')),element('span',`node-state state-${state}`,stateLabel(state,latestAttempt?.phase)));
+    top.append(element('span','node-number',String(index + 1).padStart(2,'0')),element('span',`node-state state-${state}`,data.waiting || latestAttempt?.waiting_phases?.includes(latestAttempt?.phase) ? 'Waiting for capacity' : stateLabel(state,latestAttempt?.phase)));
     node.append(top);
     if (model) {
       node.append(element('h4','model-name',data.title),element('p','model-id',data.model));
@@ -55,10 +55,11 @@
         const row = element('li',`model-try try-${attempt.state}`);
         row.dataset.modelAttempt = String(attempt.id);
         row.dataset.phase = attempt.phase || '';
+        row.dataset.waiting = String(attempt.waiting_phases?.includes(attempt.phase) === true);
         const line = element('div','try-heading');
-        line.append(element('span','try-index',String(number + 1).padStart(2,'0')),element('strong','try-outcome',stateLabel(attempt.state,attempt.phase)),element('span','try-duration',duration(attempt.started_at,attempt.finished_at,attempt.state)));
+        line.append(element('span','try-index',String(number + 1).padStart(2,'0')),element('strong','try-outcome',attempt.waiting_phases?.includes(attempt.phase) ? 'Waiting for capacity' : stateLabel(attempt.state,attempt.phase)),element('span','try-duration',duration(attempt.started_at,attempt.finished_at,attempt.state)));
         const previous = graph.querySelector(`[data-model-attempt="${attempt.id}"]`);
-        if (previous && attempt.phase && previous.dataset.phase !== attempt.phase) {
+        if (previous && (previous.dataset.phase !== row.dataset.phase || previous.dataset.waiting !== row.dataset.waiting)) {
           line.classList.add('motion-enter');
           if (attempt === latestAttempt) top.classList.add('motion-enter');
         }
@@ -177,7 +178,7 @@
     if (Array.isArray(current?.attempt.phases)) {
       stages = stages.map(stage => {
         const recorded = current.attempt.phases.find(item => item.phase === phases[stage.id]);
-        return {...stage,state:recorded?.state || 'pending',started_at:recorded?.started_at || null,finished_at:recorded?.finished_at || null,coverage_complete:recorded?.coverage_complete ?? null};
+        return {...stage,state:recorded?.state || 'pending',started_at:recorded?.started_at || null,finished_at:recorded?.finished_at || null,coverage_complete:recorded?.coverage_complete ?? null,waiting:recorded?.waiting === true};
       });
     }
     const root = element('article',`review-orchestrator node-${state}`);
@@ -196,12 +197,12 @@
       const key = `session-${scope}-${phase}`;
       const {details,summary} = disclosure(key,`review-session node-${state}`,'');
       details.dataset.phase = phase;
-      details.dataset.state = state;
+      details.dataset.state = stage.waiting ? 'waiting' : state;
       details.dataset.stageId = stage.id;
       const title = element('span','session-title',stage.title);
-      const status = element('span','node-state',state === 'skipped' ? 'Skipped' : labels[state] || 'Needs attention');
+      const status = element('span','node-state',stage.waiting ? 'Waiting for capacity' : state === 'skipped' ? 'Skipped' : labels[state] || 'Needs attention');
       const previous = graph.querySelector(`[data-flow-key="${key}"]`);
-      if (previous && previous.dataset.state !== state) status.classList.add('motion-enter');
+      if (previous && previous.dataset.state !== details.dataset.state) status.classList.add('motion-enter');
       const timing = duration(stage.started_at,stage.finished_at || current?.attempt.finished_at,state);
       summary.append(title,status,element('span','session-model',current?.model.model || 'Model not assigned'),element('span','session-elapsed',timing || (state === 'unknown' || stage.started_at ? 'Timing not recorded' : 'Not started')));
       const body = element('div','session-content');
@@ -341,7 +342,7 @@
       } else if (data.next_retry_at && data.status === 'quota') {
         text(heartbeat,`Next availability check ${jakarta(data.next_retry_at)} · not a guaranteed reset`);
       } else {
-        const states = {queued:'Waiting for the serial worker',attention:'Paused · see the model nodes and operational note',failed:'Stopped · see the operational note',completed:'Processing finished · open GitHub for the review',cancelled:'Cancelled · no further review work',superseded:'Superseded by a newer review state'};
+        const states = {queued:'Waiting for an available worker',attention:'Paused · see the model nodes and operational note',failed:'Stopped · see the operational note',completed:'Processing finished · open GitHub for the review',cancelled:'Cancelled · no further review work',superseded:'Superseded by a newer review state'};
         text(heartbeat,states[data.status] || 'Review is not running');
       }
       const retryControl = document.querySelector("[data-job-retry-control]");

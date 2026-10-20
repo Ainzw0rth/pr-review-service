@@ -43,7 +43,7 @@ def attempt_phases(job, attempt, events, next_started=None):
     tracked_history = any(event.code == "intent_started" for event in history) or any(
         isinstance(row, dict)
         and row.get("phase") in ("intent", "code", "security", "tests", "synthesis")
-        and row.get("state") in ("running", "done", "incomplete")
+        and row.get("state") in ("running", "waiting", "done", "incomplete")
         and recorded_time(row.get("started_at"))
         for row in timeline
     )
@@ -71,7 +71,7 @@ def attempt_phases(job, attempt, events, next_started=None):
                 for row in timeline
                 if isinstance(row, dict)
                 and row.get("phase") == phase
-                and row.get("state") in {"running", "done", "incomplete"}
+                and row.get("state") in {"running", "waiting", "done", "incomplete"}
             ),
             {},
         )
@@ -114,6 +114,7 @@ def attempt_phases(job, attempt, events, next_started=None):
                 "started_at": began,
                 "finished_at": ended,
                 "coverage_complete": coverage_complete,
+                "waiting": state == "running" and stored.get("state") == "waiting",
             }
         )
     return phases
@@ -183,8 +184,23 @@ def snapshot(job, events):
         if state == "running" and job.status != "running":
             state = "cancelled" if job.status in ("cancelled", "superseded") else "attention"
         value = count(count_code or key) if unit else None
+        capacity_prefix = "local_tests" if key == "tests" else key
+        capacity_event = next(
+            (
+                event
+                for event in reversed(events)
+                if event.code in {f"{capacity_prefix}_waiting", f"{capacity_prefix}_resumed"}
+            ),
+            None,
+        )
+        waiting = (
+            state == "running"
+            and capacity_event is not None
+            and capacity_event.code.endswith("_waiting")
+        )
         return {
             "id": key,
+            "waiting": waiting,
             "title": title,
             "state": state,
             "count": value,
@@ -476,6 +492,18 @@ def snapshot(job, events):
                 "id": attempt.pk,
                 "state": state,
                 "phase": phase,
+                "waiting_phases": [
+                    row["phase"]
+                    for row in attempt.diagnostics.get("phase_timeline", [])
+                    if isinstance(row, dict)
+                    and row.get("phase")
+                    in {"intent", "review", "code", "security", "tests", "synthesis"}
+                    and row.get("state") == "waiting"
+                ]
+                if state == "running"
+                and job.status == "running"
+                and isinstance(attempt.diagnostics.get("phase_timeline"), list)
+                else [],
                 "phases": attempt_phases(
                     job,
                     attempt,
@@ -529,7 +557,7 @@ def snapshot(job, events):
     model_detail = (
         "Saved analysis reused for delivery; no additional model call."
         if "delivery_resume" in codes
-        else "Grounded intent → independent code, security and test reviews → evidence-backed adjudication. API reviews overlap; subscription CLI sessions run sequentially."
+        else "Grounded intent → independent code, security and test reviews → evidence-backed adjudication. API reviewers can overlap when account capacity is available; subscription CLI sessions run sequentially."
         if includes("synthesis", False)
         else "Each model extracts intent first, then reviews code after the intent summary is validated."
         if includes("intent", False)

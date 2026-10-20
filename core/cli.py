@@ -7,7 +7,6 @@ import selectors
 import subprocess
 import tempfile
 import time
-import uuid
 
 from django.conf import settings
 
@@ -282,7 +281,17 @@ def container_arguments(kind, name, image, volume):
     ]
 
 
-def review_cli(provider, context, cancelled, *, on_response=None, on_activity=None, task="review"):
+def review_cli(
+    provider,
+    context,
+    cancelled,
+    *,
+    on_response=None,
+    on_activity=None,
+    task="review",
+    on_capacity=None,
+    budget=None,
+):
     if task == "intent":
         # Keep citation/tool IDs identical here, in the API envelope and in the later review.
         context = {
@@ -316,6 +325,8 @@ def review_cli(provider, context, cancelled, *, on_response=None, on_activity=No
                 on_response=report,
                 on_activity=on_activity,
                 recovery=recovery,
+                on_capacity=on_capacity,
+                budget=budget,
                 **({"task": task} if task != "review" else {}),
             )
         except ProviderError as exc:
@@ -332,7 +343,37 @@ def review_cli(provider, context, cancelled, *, on_response=None, on_activity=No
                 )
 
 
-def _review_cli_once(
+def _review_cli_once(provider, context, cancelled, *, on_capacity=None, budget=None, **kwargs):
+    from contextlib import nullcontext
+
+    from .capacity import Container, cli_scope, permit
+    from .runner import _docker
+
+    volume, scope = cli_scope(provider.kind)
+    with permit(scope, 1, cancelled, on_wait=on_capacity) as slot:
+        container = Container(slot, _docker, volume=volume)
+        container.cleanup()  # Admission housekeeping is not model active time.
+        with budget.active() if budget else nullcontext():
+
+            def active_cancelled():
+                if budget:
+                    budget.check()
+                return cancelled()
+
+            try:
+                return _review_cli_active(
+                    provider,
+                    context,
+                    active_cancelled,
+                    container=container,
+                    volume=volume,
+                    **kwargs,
+                )
+            finally:
+                container.cleanup()  # Count cleanup; never release before verified absence.
+
+
+def _review_cli_active(
     provider,
     context,
     cancelled,
@@ -341,6 +382,8 @@ def _review_cli_once(
     on_activity=None,
     recovery=None,
     task="review",
+    container,
+    volume,
 ):
     from .providers import _wire_schema
     from .runner import RunnerError, _docker
@@ -348,24 +391,17 @@ def _review_cli_once(
     if cancelled():
         raise ReviewCancelled()
     image = settings.CLI_RUNNER_IMAGE
-    volume = (
-        settings.CLI_CODEX_AUTH_VOLUME
-        if provider.kind == "codex_cli"
-        else settings.CLI_CLAUDE_AUTH_VOLUME
-    )
-    name = "pr-review-cli-" + uuid.uuid4().hex
+    name = container.slot.name
     args = container_arguments(provider.kind, name, image, volume)
     schema, system, _ = review_contract(task)
     parser = CLIStream(provider.kind, context, on_activity, task=task)
     process = None
-    created = False
     try:
         try:
             _docker(["volume", "inspect", volume])
         except RunnerError:
             raise ProviderError("auth", detail="cli_auth") from None
-        _docker(args)
-        created = True
+        name = container.create(args)
         payload = json.dumps(
             {
                 "kind": provider.kind,
@@ -440,11 +476,6 @@ def _review_cli_once(
     except RunnerError:
         raise ProviderError("unavailable", detail="cli_setup") from None
     finally:
-        if created:
-            try:
-                _docker(["rm", "-f", name], timeout=10)
-            except RunnerError:
-                pass
         if process:
             if process.poll() is None:
                 process.kill()
@@ -455,10 +486,7 @@ def _review_cli_once(
 
 
 def cleanup_cli_orphans():
-    from .runner import RunnerError, _docker
+    """Legacy bulk cleanup is unsafe with concurrent workers; drain migration required."""
+    from .capacity import CapacityError
 
-    identifiers = _docker(["ps", "-aq", "--filter=label=auto-reviewer.cli=true"]).split()
-    if any(not re.fullmatch(r"[a-f0-9]{12,64}", value) for value in identifiers):
-        raise RunnerError()
-    if identifiers:
-        _docker(["rm", "-f", *identifiers])
+    raise CapacityError()

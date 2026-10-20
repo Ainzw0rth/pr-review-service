@@ -1,0 +1,20 @@
+E
+======================================================================
+ERROR: test_capacity (unittest.loader._FailedTest.test_capacity)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_capacity
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/root/projects/pr-review-service/.worktrees/concurrent-reviews/core/tests/test_capacity.py", line 9, in <module>
+    from core.capacity import ActiveBudget, CapacityBusy, cli_scope, permit
+ModuleNotFoundError: No module named 'core.capacity'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)
+Found 1 test(s).
+System check identified no issues (0 silenced).

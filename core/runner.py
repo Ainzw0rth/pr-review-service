@@ -9,7 +9,6 @@ import subprocess
 import tarfile
 import tempfile
 import time
-import uuid
 from pathlib import Path, PurePosixPath
 
 from core.providers import ReviewCancelled
@@ -125,9 +124,7 @@ def _docker(args, *, timeout=30):
         raise RunnerError() from None
 
 
-def run_tests(repository, archive, cancelled):
-    if cancelled():
-        raise ReviewCancelled()
+def _validate_tests(repository):
     image, command = repository.test_image, repository.test_command
     if not image and not command:
         return {"passed": True, "summary": "Local tests not configured."}
@@ -141,7 +138,24 @@ def run_tests(repository, archive, cancelled):
         or not command[0]
     ):
         raise RunnerError("Test command must be a nonempty argument array.")
-    name = f"pr-review-{uuid.uuid4().hex}"
+
+
+def run_tests(repository, archive, cancelled, *, on_capacity=None):
+    from .capacity import Container, limit, permit
+
+    if not repository.test_image and not repository.test_command:
+        return {"passed": True, "summary": "Local tests not configured."}
+    _validate_tests(repository)
+    with permit("tests", limit("TEST_CONCURRENCY", 1), cancelled, on_wait=on_capacity) as slot:
+        with Container(slot, _docker) as container:
+            return _run_tests(repository, archive, cancelled, container=container)
+
+
+def _run_tests(repository, archive, cancelled, *, container):
+    if cancelled():
+        raise ReviewCancelled()
+    image, command = repository.test_image, repository.test_command
+    name = container.slot.name
     # stdin transfers through the daemon API: no shared worker/host filesystem paths.
     with tempfile.TemporaryDirectory(prefix="pr-review-") as directory:
         source = Path(directory) / "input"
@@ -163,7 +177,7 @@ def run_tests(repository, archive, cancelled):
                 tar.add(path, arcname=str(path.relative_to(source)), recursive=False)
         process = None
         try:
-            _docker(
+            name = container.create(
                 [
                     "create",
                     "--name",
@@ -238,22 +252,14 @@ def run_tests(repository, archive, cancelled):
         except OSError:
             raise RunnerError() from None
         finally:
-            # Cleanup failure is blocking, never report successful tests with leaked containers.
-            try:
-                _docker(["rm", "-f", "-v", name])
-            finally:
-                if process is not None:
-                    try:
-                        process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=10)
+            if process is not None:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
 
 
 def cleanup_orphans():
-    """Call after acquiring the single-worker lock, before accepting new work."""
-    identifiers = _docker(["ps", "-aq", "--filter=label=auto-reviewer.test=true"]).split()
-    if any(not re.fullmatch(r"[a-f0-9]{12,64}", identifier) for identifier in identifiers):
-        raise RunnerError()
-    if identifiers:
-        _docker(["rm", "-f", "-v", *identifiers])
+    """Concurrent workers must use exact slot cleanup, never global label cleanup."""
+    from .capacity import CapacityError
+
+    raise CapacityError()

@@ -339,11 +339,13 @@ class TeamExecutionTests(TestCase):
 
     def test_phase_deadline_prevents_clearance_and_exposes_only_safe_error(self):
         def call(provider, evidence, cancelled, **kwargs):
-            cancelled()
+            with kwargs["budget"].active():
+                cancelled()
+                kwargs["budget"].check()
             return report()
 
-        # First clock read starts a phase; second exceeds its deadline.
-        with patch("core.review_orchestration.time.monotonic", side_effect=[0, 10000]):
+        # First clock read starts a phase; second exceeds its active budget.
+        with patch("core.capacity.time.monotonic", side_effect=[0, 10000, 10000]):
             with self.assertRaises(ProviderError) as caught:
                 self.run_team(call)
         self.assertEqual(caught.exception.detail, "review_timeout")
@@ -355,11 +357,12 @@ class TeamExecutionTests(TestCase):
         def call(provider, evidence, cancelled, **kwargs):
             nonlocal elapsed
             tasks.append(kwargs["task"])
-            elapsed += 20 * 60
-            cancelled()
+            with kwargs["budget"].active():
+                elapsed += 20 * 60
+                cancelled()
             return synthesis() if kwargs["task"] == "review_synthesis" else report()
 
-        with patch("core.review_orchestration.time.monotonic", side_effect=lambda: elapsed):
+        with patch("core.capacity.time.monotonic", side_effect=lambda: elapsed):
             final, _ = self.run_team(call)
         self.assertTrue(final["complete"])
         self.assertEqual(
@@ -380,7 +383,7 @@ class TeamExecutionTests(TestCase):
             elapsed = 20 * 60
             return report()
 
-        with patch("core.review_orchestration.time.monotonic", side_effect=lambda: elapsed):
+        with patch("core.capacity.time.monotonic", side_effect=lambda: elapsed):
             final, _ = self.run_team(call, kind="openai")
         self.assertTrue(final["complete"])
 
@@ -391,11 +394,12 @@ class TeamExecutionTests(TestCase):
         def call(provider, evidence, cancelled, **kwargs):
             nonlocal elapsed
             tasks.append(kwargs["task"])
-            elapsed = 30 * 60
-            cancelled()
+            with kwargs["budget"].active():
+                elapsed = 30 * 60
+                cancelled()
             return report()
 
-        with patch("core.review_orchestration.time.monotonic", side_effect=lambda: elapsed):
+        with patch("core.capacity.time.monotonic", side_effect=lambda: elapsed):
             with self.assertRaises(ProviderError) as caught:
                 self.run_team(call)
         self.assertEqual(caught.exception.detail, "review_timeout")
