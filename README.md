@@ -487,11 +487,17 @@ docker compose exec web python manage.py backup
 docker compose exec web python manage.py cleanup
 ```
 
-Backups use SQLite's consistent backup API under `/app/var/backups/`. Securely copy them off-VPS,
-with a **separate encrypted backup of `.env`/CREDENTIAL_KEY**. Losing the encryption key makes stored
-credentials unreadable. To restore, stop worker/events/web/maintenance, preserve the current volume,
-replace only its database with the selected backup, restore matching keys and restart/migrate. Never
-copy a live SQLite file without its transaction state; use the backup command.
+Backups under `/app/var/backups/` match the selected backend: SQLite uses its consistent backup API
+and `.sqlite3` files; PostgreSQL uses custom-format `pg_dump` archives (`.pgdump`). Securely copy them
+off-VPS, with a **separate encrypted backup of `.env`, CREDENTIAL_KEY and DJANGO_SECRET_KEY**. Losing
+the encryption key makes stored credentials unreadable.
+
+For **SQLite only**, restoration replaces the database file with the selected `.sqlite3` backup
+after stopping worker/events/web/maintenance and all other writers, preserving the current volume,
+and checking matching keys and image/schema compatibility. Never copy a live SQLite file without
+its transaction state; use the backup command. PostgreSQL archives require `pg_restore`, not file
+replacement. Follow the [backup and rollback safeguards](docs/postgres-cutover.md#backups-and-rollback)
+for restoration and reconcile post-backup writes/external publication before any database rollback.
 
 Hourly maintenance removes terminal jobs/receipts after 90 days and expired operational records.
 Active/quota/attention jobs are not silently expired. Worker restarts mark interrupted jobs Needs
