@@ -10,3 +10,4 @@ staticfiles/
 .ruff_cache/
 .claude/verification/
 compose.override.yaml
+.worktrees/
