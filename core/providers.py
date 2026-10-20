@@ -516,7 +516,7 @@ def review(provider, context, cancelled, *, on_response=None, on_activity=None, 
     try:
         with (
             httpx.Client(
-                timeout=httpx.Timeout(180, connect=10, write=30, pool=10),
+                timeout=httpx.Timeout(360, connect=10, write=30, pool=10),
                 follow_redirects=False,
                 trust_env=False,
             ) as client,

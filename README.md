@@ -271,8 +271,11 @@ stored as activity. Only explicitly public CLI progress excerpts use the filtere
 a response have no response metadata. Historical attempts cannot be backfilled from discarded
 responses; any separately recorded diagnostic replay must be identified as such.
 
-There is no configured monthly spend cap or whole-review timeout. API calls have finite
-network timeouts; CLI reviews have no service-imposed wall-clock timeout. Failure traversal is bounded. Interrupting a job cannot undo provider charges
+There is no configured monthly spend cap or whole-review timeout. Specialist and
+adjudication phases each have a 30-minute analysis budget. API calls also have a
+6-minute network read timeout; connect, write and pool timeouts remain unchanged.
+Legacy CLI reviews and intent extraction have no service-imposed wall-clock timeout.
+Failure traversal is bounded. Interrupting a job cannot undo provider charges
 already incurred. API cancellation may wait for a network timeout; CLI cancellation removes its runner container.
 
 ### Required checks and isolated tests
@@ -827,7 +830,7 @@ The final summary includes concise Code, Security and Test perspectives. Existin
 thread assessments, optional action plans, required CI and publication guards remain.
 The Test Reviewer does not replace actual CI or isolated test execution.
 
-New specialist and adjudication phases each have a 15-minute work budget, with
+New specialist and adjudication phases each have a 30-minute work budget, with
 existing transport cleanup timeouts still applying. Existing context/response size
 limits and API output-token caps remain enforced. CLI evidence recovery is still
 limited to one fresh pass per phase. This means five model phases per successful

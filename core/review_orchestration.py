@@ -9,7 +9,7 @@ from copy import deepcopy
 from .providers import ProviderError, ReviewCancelled
 from .review_team import ROLES, finalize, validate_report
 
-PHASE_TIMEOUT_SECONDS = 900
+PHASE_TIMEOUT_SECONDS = 1800
 
 
 def run_team(

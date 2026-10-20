@@ -348,6 +348,59 @@ class TeamExecutionTests(TestCase):
                 self.run_team(call)
         self.assertEqual(caught.exception.detail, "review_timeout")
 
+    def test_cli_each_phase_can_analyze_for_twenty_minutes(self):
+        elapsed = 0
+        tasks = []
+
+        def call(provider, evidence, cancelled, **kwargs):
+            nonlocal elapsed
+            tasks.append(kwargs["task"])
+            elapsed += 20 * 60
+            cancelled()
+            return synthesis() if kwargs["task"] == "review_synthesis" else report()
+
+        with patch("core.review_orchestration.time.monotonic", side_effect=lambda: elapsed):
+            final, _ = self.run_team(call)
+        self.assertTrue(final["complete"])
+        self.assertEqual(
+            tasks, ["review_code", "review_security", "review_tests", "review_synthesis"]
+        )
+
+    def test_api_specialists_and_adjudication_can_each_analyze_for_twenty_minutes(self):
+        elapsed = 0
+        barrier = threading.Barrier(3)
+
+        def call(provider, evidence, cancelled, **kwargs):
+            nonlocal elapsed
+            if kwargs["task"] == "review_synthesis":
+                elapsed += 20 * 60
+                cancelled()
+                return synthesis()
+            barrier.wait(timeout=3)
+            elapsed = 20 * 60
+            return report()
+
+        with patch("core.review_orchestration.time.monotonic", side_effect=lambda: elapsed):
+            final, _ = self.run_team(call, kind="openai")
+        self.assertTrue(final["complete"])
+
+    def test_cli_phase_cannot_exceed_thirty_minutes(self):
+        elapsed = 0
+        tasks = []
+
+        def call(provider, evidence, cancelled, **kwargs):
+            nonlocal elapsed
+            tasks.append(kwargs["task"])
+            elapsed = 30 * 60
+            cancelled()
+            return report()
+
+        with patch("core.review_orchestration.time.monotonic", side_effect=lambda: elapsed):
+            with self.assertRaises(ProviderError) as caught:
+                self.run_team(call)
+        self.assertEqual(caught.exception.detail, "review_timeout")
+        self.assertEqual(tasks, ["review_code"])
+
     def test_failed_api_reviewer_cancels_and_joins_remaining_reviewers(self):
         barrier = threading.Barrier(3)
         exited = set()
