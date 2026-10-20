@@ -14,10 +14,10 @@ test at core/tests/activity_ui.test.cjs:32:1
 ✖ progress cards retain accessible disclosures, reviewer attribution and history across polling (2237.280494ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'In progress'
   - 'Running'
-  
+
       at TestContext.<anonymous> (/root/projects/pr-review-service/.worktrees/concurrent-reviews/core/tests/activity_ui.test.cjs:95:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {

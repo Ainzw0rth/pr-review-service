@@ -143,6 +143,8 @@ def _validate_tests(repository):
 def run_tests(repository, archive, cancelled, *, on_capacity=None):
     from .capacity import Container, limit, permit
 
+    if cancelled():
+        raise ReviewCancelled()
     if not repository.test_image and not repository.test_command:
         return {"passed": True, "summary": "Local tests not configured."}
     _validate_tests(repository)

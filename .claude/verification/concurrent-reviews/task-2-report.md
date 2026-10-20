@@ -4,7 +4,7 @@
 
 Implemented shared same-host permits, active-time budgets, scoped native cleanup/recovery, periodic nonblocking quota refresh, and phase-specific waiting projection. No real model, auth-volume, GitHub, production, push, or deployment operations performed.
 
-Implementation commit: recorded in the final task handoff (this report is included in that commit).
+Implementation commit: `e6a9824` (follow-up evidence/cancellation preservation commit recorded in final handoff).
 
 ## Decisions / interfaces
 
@@ -62,7 +62,7 @@ Browser capacity test initially expected “Running”; existing product label i
 
    Log: `task-2-browser-capacity.log`. Exercises keyboard disclosure/focus retention, polling, correct waiting/resume label, unaffected completed peer, history/coverage semantics, 1280×900 and 390×844 layouts, reduced motion, and mobile overflow. Screenshots manually inspected: `task-2-screens/waiting-desktop.png`, `task-2-screens/waiting-mobile.png`; no overflow or competing styles. Screenshot heartbeat warning is fixture age, not a production finding.
 
-6. `$VENV/bin/ruff check .` — passed (`task-2-ruff.log`). Changed Python files: `$VENV/bin/ruff format --check` with the 23 changed Python files — passed (`task-2-format-changed.log`). `node --check static/core/activity.js` and `git diff --check` — passed.
+6. `$VENV/bin/ruff check .` — passed (`task-2-ruff.log`). Changed Python files: `$VENV/bin/ruff format --check` with the 23 changed Python files — passed (`task-2-format-changed.log`). `node --check static/core/activity.js` and source `git diff --check` — passed. Captured browser-red output contained two whitespace-only lines; trimmed in the evidence follow-up so the committed diff also passes.
 
 7. `DATA_DIR=.claude/verification/concurrent-reviews/test-data DJANGO_SECRET_KEY=verification-only $PY manage.py check` — passed (`task-2-check.log`).
 
