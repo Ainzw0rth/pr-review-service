@@ -2,6 +2,28 @@
 
 ## Current production — 2026-10-20
 
+Deployed source `8c717f7`: owner **Settings → Parallel CLI sessions per account** is now
+**6** (range 1–32), independently of **Concurrent PR reviews = 2**.
+Saved CLI limits refresh in the supervisor without restart; environment remains bootstrap-only.
+Same-host CLI admission prioritizes ready adjudication/synthesis, then ordinary review work,
+then quota probes, FIFO within each priority. Running sessions are never preempted; shrinking
+counts all occupied slots before admitting more. Dead waiter tickets are reaped.
+
+Both prior production reviews finished before the old worker was stopped. PostgreSQL backup
+validated, migration 0021 applied, new supervisor acknowledged idle before activation. Live owner
+browser saved CLI cap6 while drained, verified unchanged repository policies/PR cap2, desktop/mobile
+layouts, keyboard focus and no JavaScript errors. Temporary verification session removed.
+Public health HTTP200; anonymous Settings HTTP302. All four app services share the new image,
+zero restarts; queued reviews resumed. Final SQLite suite: 709 tests, OK (6 skips); full PostgreSQL
+suite before final edge-case fixes: 706 tests, OK (2 skips); post-fix PostgreSQL focused suite:
+65 tests, OK. Ruff, migration drift, deployment checks and independent rereview passed.
+Queue ordering/resizing/cancellation verified with real process tests; production timing gains not
+measured. No artificial production model call or GitHub publication initiated for verification.
+
+Private rollout receipt/screenshots: `.claude/verification/cli-priority-rollout/`.
+
+### Previous PostgreSQL/parallel-specialist rollout
+
 Deployed source `2b7741b` with PostgreSQL 17 and coordinated parallel CLI specialists.
 Owner Settings now exposes **Concurrent PR reviews**, currently **2** (range 1–8).
 `CLI_ACCOUNT_CONCURRENCY=3` bounds model sessions per shared auth volume across PRs/models/quota probes.
