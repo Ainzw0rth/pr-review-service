@@ -48,9 +48,9 @@ assert claim() is not None
 
 ### Task 2: Account/resource capacity and active-time budgets
 
-**Files:** `core/capacity.py` (new), `core/cli.py`, `core/providers.py` if necessary, `core/review_orchestration.py`, `core/quota.py`, `core/model_probe.py`, `core/runner.py`, `core/graph.py`, direct probe/warm commands, focused capacity/team tests. Worker call-site integration coordinated with Task1 owner; do not overwrite unrelated ownership changes.
+**Files:** `core/capacity.py` (new), `core/cli.py`, `core/providers.py` if necessary, `core/review_orchestration.py`, `core/quota.py`, `core/model_probe.py`, `core/runner.py`, `core/graph.py`, direct probe/warm commands, `core/flow.py`, `static/core/activity.js` and focused capacity/team/progress tests. Task2 integrates optional adapter callbacks at worker call sites after Task1 commit. Worker call-site integration coordinated with Task1 owner; do not overwrite unrelated ownership changes.
 
-**Interfaces:** Produce reusable cancellable slot context manager and model invocation gate. Shared CLI-volume identity, API account/credential fingerprint identity, bounded graph/tests. Task3 adds env bounds if needed. `Progress` receives allowlisted waiting/ready events; provider thread callbacks stay queued to controller.
+**Interfaces:** Produce `permit(scope, limit, cancelled, *, on_wait=None, wait=True)` and `ActiveBudget(seconds)`; adapters gain optional `on_capacity`/`budget` keywords. Resolve shared identity before API threads; native gate covers each CLI session and retains one active budget across recovery. Shared CLI-volume identity, API account/credential fingerprint identity, bounded graph/tests. Task3 adds env bounds if needed. `Progress` receives allowlisted waiting/ready events; provider thread callbacks stay queued to controller.
 
 - [ ] Write failing tests using independent threads/processes and actual flock files: shared CLI volume/model rows serialize; separate accounts proceed; cap cannot exceed configured count; cancellation releases wait without acquiring/calling provider; probes/quota use same lock; healthy containers never globally cleaned.
 - [ ] Acquire actual slot before starting phase deadline; API phases get active-time clocks per started invocation, synthesis still waits for all reports. Keep timeout/auth/quota precedence, bounded callback queues and controller-thread state writes. Waiting produces no fallback or skipped attempt.
@@ -67,7 +67,7 @@ with slot('cli-volume:shared', 1, cancelled):
 
 ### Task 3: PostgreSQL, transfer and deploy safety
 
-**Files:** `reviewdesk/settings.py`, `requirements.txt`, `compose.yaml`, `.env.example`, `core/management/commands/backup.py`, new transfer command, `scripts/deploy.py`, new cutover helper if necessary, `README.md`, database/deployment tests.
+**Files:** `reviewdesk/settings.py`, `requirements.txt`, `requirements.lock`, `Dockerfile`, `compose.yaml`, `.env.example`, `core/management/commands/backup.py`, new transfer command, `scripts/deploy.py`, new cutover helper if necessary, `README.md`, database/deployment tests.
 
 **Interfaces:** PostgreSQL selected by explicit environment configuration; SQLite fallback for local development. Backups support selected backend. Transfer from offline SQLite source to fresh migrated PostgreSQL target preserves every table/PK/ciphertext, validates counts/content/FKs, resets sequences and refuses a populated target. Normal deploy accepts reviewed schema migrations only while all writers stopped/drained.
 
