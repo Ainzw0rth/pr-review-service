@@ -10,7 +10,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.delivery import checkpoint_state, safe_error, update_cursor
-from core.github import IntegrationError
+from core.github import GitHubRateLimited, IntegrationError
 from core.models import Job, Receipt
 from core.workflow import canonical_cycle, current
 from core.workflow_schema import GROUNDED_REVISIONS
@@ -378,6 +378,8 @@ def publish_threads(github, job, replies):
                 resolved = (data.get("resolveReviewThread") or {}).get("thread") or {}
                 if resolved.get("id") != thread["id"] or resolved.get("isResolved") is not True:
                     raise IntegrationError("GitHub did not confirm discussion resolution.")
+            except GitHubRateLimited:
+                raise
             except IntegrationError:
                 from .context import review_thread
 
@@ -628,6 +630,8 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
         return terminal_transition(
             github, job, blocked=blocked, baseline_timeline=baseline_timeline
         )
+    except GitHubRateLimited:
+        raise
     except StaleReview:
         if event == "APPROVE":
             withdraw(github, job)

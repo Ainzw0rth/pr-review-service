@@ -62,7 +62,9 @@ def claim(owner=None):
                 return None
             candidates = (
                 Job.objects.filter(
-                    Q(status="queued") | Q(status="quota", next_retry_at__lte=timezone.now())
+                    Q(status="queued")
+                    & (Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=timezone.now()))
+                    | Q(status="quota", next_retry_at__lte=timezone.now())
                 )
                 .exclude(pr_id__in=JobClaim.objects.values("pr_id"))
                 .order_by("created_at")

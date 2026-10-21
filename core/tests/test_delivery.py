@@ -11,6 +11,54 @@ from core.tests.test_publication import PublicationTests
 
 @override_settings(CREDENTIAL_KEY=Fernet.generate_key().decode())
 class DeliveryTests(PublicationTests):
+    def test_typed_rate_limit_keeps_saved_analysis_for_automatic_retry(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from core.delivery import deliver, save_review
+        from core.github import GitHubRateLimited
+        from core.models import ReviewCheckpoint
+
+        job, gh = self.prepare()
+        save_review(job, self.result(), {}, {"passed": True, "summary": "Pass"})
+        before = ReviewCheckpoint.objects.get(job=job).encrypted_payload
+        error = GitHubRateLimited(timezone.now() + timedelta(minutes=5))
+        with patch("core.delivery.time.sleep") as sleep:
+            with self.assertRaises(GitHubRateLimited) as raised:
+                deliver(gh, job, lambda *args: (_ for _ in ()).throw(error), lambda *a: None)
+            sleep.assert_not_called()
+        self.assertIs(raised.exception, error)
+        checkpoint = ReviewCheckpoint.objects.get(job=job)
+        self.assertEqual(checkpoint.stage, "ready")
+        self.assertEqual(checkpoint.encrypted_payload, before)
+        self.assertEqual(checkpoint.delivery_attempts, 1)
+
+    def test_rate_limit_after_review_keeps_receipt_and_resumes_labels(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from core.delivery import deliver, save_review
+        from core.github import GitHubRateLimited
+        from core.models import ReviewCheckpoint
+
+        job, gh = self.prepare()
+        save_review(
+            job, {**self.result(), "blocking": True}, {}, {"passed": True, "summary": "Pass"}
+        )
+        original = gh.delete
+        error = GitHubRateLimited(timezone.now() + timedelta(minutes=5))
+        with patch.object(gh, "delete", side_effect=error):
+            with self.assertRaises(GitHubRateLimited):
+                deliver(gh, job, publish, lambda *a, **kw: None)
+        self.assertEqual(ReviewCheckpoint.objects.get(job=job).stage, "labels")
+        self.assertTrue(Receipt.objects.filter(job=job, key="review").exists())
+        gh.delete = original
+        self.assertEqual(deliver(gh, job, publish, lambda *a, **kw: None), "feedback")
+        self.assertEqual(len(gh.reviews), 1)
+        self.assertEqual(len(gh.comments), 1)
+
     def test_saved_review_retries_label_cleanup_without_duplicate_review(self):
         from core.delivery import deliver, save_review
         from core.models import ReviewCheckpoint

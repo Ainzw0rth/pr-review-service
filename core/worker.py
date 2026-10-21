@@ -39,8 +39,8 @@ def run_job(job):
 
 def _run_job(job):
     from core.context import build_context, failure_reason
-    from core.delivery import DeliveryPaused, load_review, save_review
-    from core.github import GitHub, IntegrationError, ci_snapshot
+    from core.delivery import DeliveryPaused, load_review, safe_error, save_review
+    from core.github import GitHub, GitHubRateLimited, IntegrationError, ci_snapshot
     from core.providers import (
         ProviderError,
         ReviewCancelled,
@@ -56,9 +56,25 @@ def _run_job(job):
     result = None
     outcome = None
     diagnostic = "Review incomplete. Check connections and required checks; request a new review."
+    default_diagnostic = diagnostic
     progress = Progress(job)
     grounded = job.workflow_revision in GROUNDED_REVISIONS
     team = job.workflow_revision in TEAM_REVISIONS
+
+    def defer_github(exc):
+        progress("github_waiting")
+        if model_attempt is not None:
+            attempt_rows(job, pk=model_attempt.pk, status="running").update(
+                status="attention",
+                finished_at=timezone.now(),
+                diagnostics={
+                    **ModelAttempt.objects.get(pk=model_attempt.pk).diagnostics,
+                    "failure_kind": "unavailable",
+                    "failure_detail": "github_rate_limit",
+                },
+            )
+        finish(job, "queued", str(exc), retry_at=exc.retry_at)
+
     progress.start()
     try:
         progress("starting")
@@ -418,6 +434,10 @@ def _run_job(job):
             }
         save_review(job, result, context, checks)
         outcome = _deliver_and_finish(github, job, progress)
+    except GitHubRateLimited as exc:
+        if result is not None and not ReviewCheckpoint.objects.filter(job=job).exists():
+            save_review(job, result, context, checks)
+        defer_github(exc)
     except DeliveryPaused as exc:
         progress("delivery_attention")
         delivered = Receipt.objects.filter(job=job, key="review").exists()
@@ -446,7 +466,9 @@ def _run_job(job):
     except CapacityError:
         finish(job, "attention", "Resource cleanup unconfirmed; administrator recovery required.")
         raise
-    except Exception:
+    except Exception as exc:
+        if isinstance(exc, IntegrationError) and diagnostic == default_diagnostic:
+            diagnostic = safe_error(exc)
         if ReviewCheckpoint.objects.filter(job=job).exists():
             progress("delivery_attention")
             finish(
@@ -467,6 +489,9 @@ def _run_job(job):
                 f"/issues/{job.pr.number}/comments",
             )
             fail_to_feedback(github, job)
+        except GitHubRateLimited as exc:
+            defer_github(exc)
+            return
         except Exception:
             pass
         finish(

@@ -133,6 +133,10 @@ skipped in favor of the next available account; if none remains, the worker is r
 the next availability check. API-key quota retains its same-provider wait. CI status is refreshed
 before publication but never delays code review or blocks approval.
 Fresh eligibility checks remain mandatory before clearance.
+GitHub primary and secondary rate limits defer affected reviews until the reset or retry time,
+releasing worker capacity. A durable cooldown is shared by connections using the same token.
+Saved analysis and publication receipts survive the wait; delivery resumes without another model
+call or duplicate review. Ordinary HTTP 403 permission errors remain failures, not quota waits.
 New commits or loss of eligibility invalidate active attempts; pushes and discussion replies alone
 do not start another review. GitHub read/write operations are revalidated, but are not one atomic
 transaction across GitHub and the local database.

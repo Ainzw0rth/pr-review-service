@@ -1,10 +1,10 @@
 import base64
 import gzip
 from types import SimpleNamespace
-from unittest import TestCase
 from unittest.mock import Mock, patch
 
 import httpx
+from django.test import TestCase
 
 from core.context import build_context
 from core.github import GitHub, IntegrationError, check_required
@@ -13,7 +13,7 @@ from core.github import GitHub, IntegrationError, check_required
 class GitHubTests(TestCase):
     def test_compressed_response_decoded_once_and_pagination_header_preserved(self):
         link = '<https://api.github.com/repos/acme/app/issues?page=2>; rel="next"'
-        client = self.client(
+        client = self.github_client(
             lambda req: httpx.Response(
                 200,
                 headers={"Content-Encoding": "gzip", "Link": link},
@@ -25,7 +25,7 @@ class GitHubTests(TestCase):
         self.assertEqual(response.headers["link"], link)
         self.assertNotIn("content-encoding", response.headers)
 
-    def client(self, handler):
+    def github_client(self, handler):
         repo = SimpleNamespace(
             full_name="acme/app",
             github_credential=SimpleNamespace(encrypted_value="encrypted"),
@@ -38,7 +38,7 @@ class GitHubTests(TestCase):
         return client
 
     def test_rejects_untrusted_destinations_and_cross_repo_paths(self):
-        client = self.client(lambda req: self.fail("must not send"))
+        client = self.github_client(lambda req: self.fail("must not send"))
         for path in [
             "https://evil.example/x",
             "//evil.example/x",
@@ -62,8 +62,10 @@ class GitHubTests(TestCase):
                 },
             )
 
-        self.assertEqual(self.client(handler).pages("/issues"), [{"id": 1}, {"id": 2}])
-        client = self.client(lambda req: httpx.Response(401, json={"message": "private-token"}))
+        self.assertEqual(self.github_client(handler).pages("/issues"), [{"id": 1}, {"id": 2}])
+        client = self.github_client(
+            lambda req: httpx.Response(401, json={"message": "private-token"})
+        )
         with self.assertRaises(IntegrationError) as error:
             client.get("/issues")
         self.assertNotIn("private-token", str(error.exception))
@@ -82,7 +84,7 @@ class GitHubTests(TestCase):
             )
 
         self.assertEqual(
-            self.client(handler).pages("/issues/157/timeline"), [{"id": 100}, {"id": 101}]
+            self.github_client(handler).pages("/issues/157/timeline"), [{"id": 100}, {"id": 101}]
         )
 
     def test_pagination_rejects_changed_resource_or_host(self):
@@ -101,11 +103,11 @@ class GitHubTests(TestCase):
                     )
 
                 with self.assertRaises(IntegrationError):
-                    self.client(handler).pages("/issues/157/timeline")
+                    self.github_client(handler).pages("/issues/157/timeline")
                 self.assertEqual(len(requests), 1)
 
     def test_pagination_loop_fails_closed(self):
-        client = self.client(
+        client = self.github_client(
             lambda req: httpx.Response(
                 200,
                 json=[],
@@ -129,7 +131,7 @@ class GitHubTests(TestCase):
             self.assertNotIn("authorization", req.headers)
             return httpx.Response(200, content=b"archive")
 
-        self.assertEqual(self.client(handler).archive("a" * 40), b"archive")
+        self.assertEqual(self.github_client(handler).archive("a" * 40), b"archive")
 
     def test_required_checks_latest_status_and_missing_check(self):
         github = Mock()

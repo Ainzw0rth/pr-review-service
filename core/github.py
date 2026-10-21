@@ -2,11 +2,13 @@
 
 import json
 import re
+from datetime import timezone
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 import httpx
 from cryptography.fernet import InvalidToken
 
+from . import github_limits
 from .secrets import decrypt
 
 API = "https://api.github.com"
@@ -20,6 +22,16 @@ class IntegrationError(Exception):
     """Only static, credential-free operational descriptions belong here."""
 
 
+class GitHubRateLimited(IntegrationError):
+    """Safe, retryable GitHub backoff; never contains upstream response content."""
+
+    def __init__(self, retry_at, kind="primary"):
+        self.retry_at = retry_at.astimezone(timezone.utc)
+        self.kind = kind if kind in {"primary", "secondary"} else "secondary"
+        reset = self.retry_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        super().__init__(f"GitHub {self.kind} rate limit. Retry after {reset}.")
+
+
 class GitHub:
     def __init__(self, repository):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository.full_name):
@@ -30,6 +42,7 @@ class GitHub:
             token = decrypt(repository.github_credential.encrypted_value)
         except (InvalidToken, ValueError, TypeError, RuntimeError, AttributeError):
             raise IntegrationError("GitHub credential unavailable; reconnect account.") from None
+        self.rate_scope = github_limits.scope(token)
         self.headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -67,22 +80,46 @@ class GitHub:
             path = self.prefix + path
         return API + path
 
+    def _check_cooldown(self):
+        row = github_limits.active(self.rate_scope)
+        if row:
+            raise GitHubRateLimited(row.retry_at, row.kind)
+
+    def _rate_response(self, response):
+        if response.status_code not in (403, 429):
+            return
+        classification = github_limits.classify(
+            response.status_code, response.headers, github_limits.bounded_error(response)
+        )
+        if classification:
+            retry_at, kind = classification
+            row = github_limits.remember(self.rate_scope, retry_at, kind)
+            raise GitHubRateLimited(row.retry_at, row.kind)
+
     def _request(self, method, path, data=None):
+        destination = self._url(path)
+        self._check_cooldown()
         try:
             with self.client.stream(
                 method,
-                self._url(path),
+                destination,
                 headers=self.headers,
                 json=data,
                 timeout=TIMEOUT,
             ) as response:
                 if not 200 <= response.status_code < 300:
+                    self._rate_response(response)
                     raise IntegrationError(f"GitHub request failed (HTTP {response.status_code}).")
                 raw = bytearray()
                 for chunk in response.iter_bytes():
                     raw.extend(chunk)
                     if len(raw) > MAX_RESPONSE_BYTES:
                         raise IntegrationError("GitHub response exceeds safe context limit.")
+                if response.headers.get("x-ratelimit-remaining") == "0":
+                    classification = github_limits.classify(403, response.headers)
+                    if classification:
+                        retry_at, kind = classification
+                        github_limits.remember(self.rate_scope, retry_at, kind)
                 # Streaming responses are reconstructed after the bounded read.
                 # iter_bytes() already decoded compression; do not decode it twice.
                 headers = dict(response.headers)
@@ -181,6 +218,22 @@ class GitHub:
     def graphql(self, query, variables):
         result = self.post("/graphql", {"query": query, "variables": variables})
         if (
+            isinstance(result, dict)
+            and isinstance(result.get("errors"), list)
+            and any(
+                isinstance(error, dict) and error.get("type") == "RATE_LIMITED"
+                for error in result["errors"]
+            )
+        ):
+            from datetime import timedelta
+
+            from django.utils import timezone as django_timezone
+
+            row = github_limits.remember(
+                self.rate_scope, django_timezone.now() + timedelta(seconds=60), "primary"
+            )
+            raise GitHubRateLimited(row.retry_at, row.kind)
+        if (
             not isinstance(result, dict)
             or result.get("errors")
             or not isinstance(result.get("data"), dict)
@@ -192,6 +245,7 @@ class GitHub:
         if not re.fullmatch(r"[a-fA-F0-9]{40,64}", sha):
             raise IntegrationError("Invalid source commit.")
         url = self._url("/tarball/" + sha)
+        self._check_cooldown()
         headers = self.headers
         try:
             # Auth goes only to api.github.com. GitHub supplies a signed codeload URL.
@@ -210,6 +264,8 @@ class GitHub:
                         headers = {"Accept": "application/octet-stream"}
                         continue
                     if response.status_code != 200:
+                        if step == 0:
+                            self._rate_response(response)
                         raise IntegrationError("Source archive unavailable.")
                     archive = bytearray()
                     for chunk in response.iter_bytes():
@@ -276,5 +332,7 @@ def ci_snapshot(github, repository, sha):
     """Best-effort CI evidence for review; merging still uses check_required directly."""
     try:
         return check_required(github, repository, sha)
+    except GitHubRateLimited:
+        raise
     except IntegrationError:
         return {"passed": False, "summary": "CI status unavailable; verify checks on GitHub."}

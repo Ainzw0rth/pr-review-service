@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from core.events import process_event
+from core.github import GitHubRateLimited
 from core.models import Webhook
 
 
@@ -25,6 +26,9 @@ class Command(BaseCommand):
                 ):
                     try:
                         process_event(event)
+                    except GitHubRateLimited as exc:
+                        Webhook.objects.filter(pk=event.pk).update(error=str(exc)[:200])
+                        continue
                     except Exception:
                         Webhook.objects.filter(pk=event.pk).update(
                             error="Connection unavailable; event processing will retry."

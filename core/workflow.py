@@ -220,7 +220,7 @@ def finish(job, status, reason="", retry_at=None):
                 status=status,
                 reason=reason[:250],
                 next_retry_at=retry_at,
-                finished_at=None if status == "quota" else timezone.now(),
+                finished_at=None if status in {"queued", "quota"} else timezone.now(),
             )
     except StaleReview:
         return 0

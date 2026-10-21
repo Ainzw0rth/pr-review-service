@@ -447,3 +447,11 @@ class JobClaim(models.Model):
     token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     heartbeat_at = models.DateTimeField(default=timezone.now)
     expires_at = models.DateTimeField()
+
+
+class GitHubCooldown(models.Model):
+    """Token-hash-scoped GitHub backoff shared by every repository and process."""
+
+    scope = models.CharField(max_length=64, primary_key=True)
+    retry_at = models.DateTimeField()
+    kind = models.CharField(max_length=16)
