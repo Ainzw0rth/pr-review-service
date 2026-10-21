@@ -219,3 +219,22 @@ class GitHubLimitsTests(TestCase):
         with self.assertRaises(IntegrationError):
             github.get("/issues")
         self.assertFalse(GitHubCooldown.objects.exists())
+
+    def test_decisive_rate_headers_survive_broken_response_body(self):
+        from core.github import GitHubRateLimited
+
+        class BrokenStream(httpx.SyncByteStream):
+            def __iter__(self):
+                raise httpx.ReadError("private-token response interrupted")
+
+        for status, headers in [
+            (429, {"Retry-After": "120"}),
+            (403, {"x-ratelimit-remaining": "0"}),
+        ]:
+            with self.subTest(status=status):
+                github = self.github_client(
+                    lambda req: httpx.Response(status, headers=headers, stream=BrokenStream()),
+                    token=f"token-{status}",
+                )
+                with self.assertRaises(GitHubRateLimited):
+                    github.get("/issues")

@@ -88,9 +88,11 @@ class GitHub:
     def _rate_response(self, response):
         if response.status_code not in (403, 429):
             return
-        classification = github_limits.classify(
-            response.status_code, response.headers, github_limits.bounded_error(response)
-        )
+        classification = github_limits.classify(response.status_code, response.headers)
+        if classification is None:
+            classification = github_limits.classify(
+                response.status_code, response.headers, github_limits.bounded_error(response)
+            )
         if classification:
             retry_at, kind = classification
             row = github_limits.remember(self.rate_scope, retry_at, kind)
