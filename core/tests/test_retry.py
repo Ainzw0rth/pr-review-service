@@ -135,3 +135,47 @@ class RetryTests(TestCase):
         self.visible.refresh_from_db()
         self.assertEqual(self.visible.status, "queued")
         self.assertEqual(Job.objects.filter(pr=self.visible.pr).count(), 1)
+
+    def test_bulk_retry_is_scoped_and_duplicate_safe(self):
+        self.client.force_login(self.user)
+        self.hidden.status = "failed"
+        self.hidden.save()
+        with (
+            patch("core.github.GitHub") as cls,
+            patch("core.workflow.canonical_cycle", return_value={"key": "10", "eligible": True}),
+        ):
+            cls.return_value.pull.return_value = self.snapshot
+            for _ in range(2):
+                response = self.client.post("/jobs/retry-failed/")
+                self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertEqual(Job.objects.filter(retry_of=self.visible).count(), 1)
+        self.assertFalse(Job.objects.filter(retry_of=self.hidden).exists())
+
+    def test_bulk_retry_requires_post_csrf_and_login(self):
+        url = "/jobs/retry-failed/"
+        self.assertEqual(self.client.post(url).status_code, 302)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        self.assertEqual(client.post(url).status_code, 403)
+
+    def test_bulk_retry_reports_rejections_without_stopping_other_jobs(self):
+        from core.github import IntegrationError
+
+        self.client.force_login(self.user)
+        with patch("core.retries.retry_job", side_effect=IntegrationError("secret")):
+            response = self.client.post("/jobs/retry-failed/", follow=True)
+        self.assertContains(response, "0 reviews queued; 1 skipped")
+        self.assertNotContains(response, "secret")
+        self.assertContains(response, "Retry all failed")
+
+    def test_bulk_retry_leaves_running_jobs_untouched(self):
+        self.client.force_login(self.user)
+        self.visible.status = "running"
+        self.visible.save()
+        with patch("core.github.GitHub") as github:
+            self.client.post("/jobs/retry-failed/")
+            github.assert_not_called()
+        self.visible.refresh_from_db()
+        self.assertEqual(self.visible.status, "running")

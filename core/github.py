@@ -231,7 +231,7 @@ def check_required(github, repository, sha):
     if not required:
         return {
             "passed": False,
-            "summary": "No required GitHub checks configured; required test evidence is missing.",
+            "summary": "No GitHub CI checks configured; verify CI on GitHub before merging.",
         }
     if not re.fullmatch(r"[a-fA-F0-9]{40,64}", sha):
         raise IntegrationError("Invalid check commit.")
@@ -270,3 +270,11 @@ def check_required(github, repository, sha):
         if not missing
         else "Required checks missing, pending or failed: " + ", ".join(missing),
     }
+
+
+def ci_snapshot(github, repository, sha):
+    """Best-effort CI evidence for review; merging still uses check_required directly."""
+    try:
+        return check_required(github, repository, sha)
+    except IntegrationError:
+        return {"passed": False, "summary": "CI status unavailable; verify checks on GitHub."}

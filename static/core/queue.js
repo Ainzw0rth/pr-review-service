@@ -1,4 +1,18 @@
 (() => {
+  document.querySelector('[data-bulk-retry]')?.addEventListener('submit', event => {
+    const button = event.currentTarget.querySelector('button');
+    button.disabled = true;
+    button.textContent = 'Queuing retries…';
+    event.currentTarget.setAttribute('aria-busy', 'true');
+  });
+  window.addEventListener('pageshow', () => {
+    const button = document.querySelector('[data-bulk-retry] button');
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Retry all failed ↻';
+      button.form.removeAttribute('aria-busy');
+    }
+  });
   const form = document.querySelector('[data-queue-filters]');
   if (!form) return;
   const results = document.querySelector('[data-queue-results]');

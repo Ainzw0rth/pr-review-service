@@ -329,6 +329,11 @@
       set('[data-job-status]',`${data.status_label}.`);
       document.querySelectorAll('[data-job-badge]').forEach(badge => { text(badge,data.status_label); badge.className = `status status-${data.status}`; });
       set('[data-job-provider]',data.provider || 'Not assigned');
+      document.querySelectorAll('[data-review-duration]').forEach(timer => {
+        timer.dataset.start = data.started_at || '';
+        timer.dataset.finish = data.finished_at || '';
+        timer.dataset.status = data.status;
+      });
       set('[data-job-started]',jakarta(data.started_at) || 'Not started');
       set('[data-job-finished]',jakarta(data.finished_at) || 'Not finished');
       set('[data-job-retry]',jakarta(data.next_retry_at) || 'Not scheduled');

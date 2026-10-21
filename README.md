@@ -91,7 +91,7 @@ flowchart TB
     ignore["No new review job"]
     queue["Persist review attempt<br/>Pin commit SHA and human review cycle"]
     context["Worker collects changed code, docs,<br/>open threads, linked issues and related PRs"]
-    ci["Read current-commit CI<br/>Wait while checks run; run optional local tests"]
+    ci["Read current-commit CI<br/>Advisory only, never wait; run optional local tests"]
     intent["Configured model: synthesize grounded intent<br/>Validate evidence citations"]
     code["Code reviewer<br/>Correctness, requirements and integration"]
     security["Security reviewer<br/>Authorization, vulnerabilities and trust boundaries"]
@@ -100,7 +100,7 @@ flowchart TB
     guard{"Same commit, eligible cycle<br/>and unchanged discussion?"}
     stale["Stop stale attempt<br/>Human requests a fresh review"]
     publish["Publish concise findings and replies on GitHub<br/>Resolve verified fixes; keep remaining gaps open"]
-    outcome{"Complete review, no blocking findings<br/>and required test evidence passed?"}
+    outcome{"Complete review, no blocking findings<br/>and configured local tests passed?"}
     feedback["feedback label<br/>Request changes when blocked"]
     ready["approved label<br/>AI clearance only"]
     fix["Developer pushes fixes<br/>Re-request reviewer if needed and retoggle"]
@@ -130,8 +130,9 @@ routes and authentication errors need attention. Protocol failures, malformed/in
 output, oversized responses, runner memory exhaustion, model-specific context limits and
 unavailable model IDs also try the next configured model. Exhausted subscription accounts are
 skipped in favor of the next available account; if none remains, the worker is released until
-the next availability check. API-key quota retains its same-provider wait. Fresh CI and eligibility
-checks remain mandatory before clearance.
+the next availability check. API-key quota retains its same-provider wait. CI status is refreshed
+before publication but never delays code review or blocks approval.
+Fresh eligibility checks remain mandatory before clearance.
 New commits or loss of eligibility invalidate active attempts; pushes and discussion replies alone
 do not start another review. GitHub read/write operations are revalidated, but are not one atomic
 transaction across GitHub and the local database.
@@ -280,10 +281,11 @@ already incurred. API cancellation may wait for a network timeout; CLI cancellat
 
 ### Required checks and isolated tests
 
-`required_checks` is a JSON list of exact GitHub check/status names. Every required check must
-succeed on the reviewed SHA; pending/missing checks block clearance. Same-SHA CI evidence is
-rechecked before clearance. An empty list without configured local tests does not provide enough
-test evidence to approve automatically.
+`required_checks` is a JSON list of exact GitHub check/status names. CI is advisory for code
+review: queued, running, missing, failed or unavailable checks never delay model calls or block
+code approval. Same-SHA CI status is refreshed before publication and included in the summary,
+with a reminder to ensure all checks pass before merging. Auto-merge still requires passing
+configured CI and GitHub branch rules. Configured local test failures still block clearance.
 
 Optional local tests use `test_image` (digest-pinned) and `test_command` (argument array), e.g.:
 
@@ -541,6 +543,13 @@ by default. Historical jobs show only recorded evidence; deployment does not res
 
 Set `DASHBOARD_RETRY_USER_ID` to the existing owner's Django user ID (default `0` disables).
 The account must also be active and a superuser. Other admins and members cannot use this action.
+The dashboard **Retry all failed** button retries all visible failed/attention attempts across
+filters, using the same commit, cycle, organization and duplicate guards as individual retries.
+Ineligible attempts are skipped and counted; saved delivery retries reuse their analysis.
+Review time appears in the queue and PR detail, ticks live while running and freezes on finish.
+It measures wall time from the worker's first start, excluding initial queue wait (including any
+subsequent quota or delivery pauses). Historical attempts without timestamps show unavailable.
+
 On an eligible job detail page, **Retry review** creates a fresh attempt from the first model.
 The server rechecks the current GitHub commit, reviewer, label and canonical human review cycle.
 Stale, running, completed or already-published attempts cannot be retried this way. No label is
@@ -952,7 +961,8 @@ It is **off by default**, separate from the Workflow model-order editor.
 
 - Off: passing reviews retain the existing approved-label workflow; no formal approval.
 - On: new jobs capture permission to submit a commit-pinned `APPROVE` review only when
-  the analysis is complete, no blocking findings remain, and required checks pass.
+  the analysis is complete, no blocking findings remain, and configured local tests pass.
+  CI status is advisory and reported separately; approval does not mean CI passed.
   Approvals are submitted even when there are no inline comments. Feedback still uses
   `REQUEST_CHANGES`.
 - Turning it on does not upgrade existing queued jobs or retroactively approve PRs.
@@ -988,7 +998,7 @@ all repositories. It requires automatic approval to also be enabled. Choose squa
 - New jobs snapshot both toggles and the method. Enabling is not retroactive.
 - Only a completed, passing service review with its formal approval still valid can
   merge. Human approval or the `approved` label alone does not trigger this feature.
-- After publishing, the worker rechecks the PR head, workflow labels, required CI,
+- After publishing, auto-merge rechecks the PR head, workflow labels, required CI,
   recorded approval, and GitHub's `APPROVED` review decision and `CLEAN`/`MERGEABLE`
   merge state. Missing/unknown state, conflicts and unmet requirements fail closed.
 - The merge API request includes the reviewed SHA, so a racing new commit cannot be

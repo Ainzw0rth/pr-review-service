@@ -60,7 +60,8 @@ class CIRefreshTests(TestCase):
         self.assertEqual(ci["state"], "done")
         events.append(SimpleNamespace(code="checks_blocked", count=None, created_at=None))
         ci = next(n for n in snapshot(job, events)["stages"] if n["id"] == "checks")
-        self.assertEqual(ci["state"], "blocked")
+        self.assertEqual(ci["state"], "done")
+        self.assertIn("Advisory", ci["detail"])
 
     def run_review(self, results, *, local_tests=None):
         from core.models import Credential, Provider
@@ -88,6 +89,8 @@ class CIRefreshTests(TestCase):
         def check(*args):
             nonlocal last
             last = next(results, last)
+            if isinstance(last, Exception):
+                raise last
             return last
 
         with (
@@ -106,13 +109,14 @@ class CIRefreshTests(TestCase):
             ) as review,
             patch("core.runner.run_tests", return_value=local_tests),
             patch("core.sheets.sync_status"),
-            patch("core.worker.time.sleep"),
+            patch("time.sleep") as sleep,
         ):
             run_job(job)
+        sleep.assert_not_called()
         job.refresh_from_db()
         return job, gh, review
 
-    def test_pending_ci_finishes_before_model_sees_evidence(self):
+    def test_pending_ci_does_not_delay_model_and_latest_status_is_published(self):
         job, gh, review = self.run_review(
             [
                 {"passed": False, "pending": True, "summary": "CI running"},
@@ -124,9 +128,9 @@ class CIRefreshTests(TestCase):
         self.assertEqual(tasks[0], "intent")
         self.assertCountEqual(tasks[1:4], ["review_code", "review_security", "review_tests"])
         self.assertEqual(tasks[4], "review_synthesis")
-        self.assertTrue(review.call_args.args[1]["checks"]["passed"])
+        self.assertFalse(review.call_args.args[1]["checks"]["passed"])
         self.assertIn({"name": "approved"}, gh.snapshot["labels"])
-        self.assertIn("checks_waiting", list(job.activity.values_list("code", flat=True)))
+        self.assertNotIn("checks_waiting", list(job.activity.values_list("code", flat=True)))
 
     def test_latest_success_not_combined_with_old_ci_failure(self):
         job, gh, _ = self.run_review(
@@ -149,3 +153,20 @@ class CIRefreshTests(TestCase):
         self.assertIn({"name": "feedback"}, gh.snapshot["labels"])
         summary = next(data["body"] for path, data in gh.writes if path.endswith("/comments"))
         self.assertIn("Local tests failed", summary)
+
+    def test_persistently_pending_ci_is_advisory(self):
+        job, gh, _ = self.run_review([{"passed": False, "pending": True, "summary": "CI running"}])
+        self.assertEqual(job.status, "completed")
+        self.assertIn({"name": "approved"}, gh.snapshot["labels"])
+        summary = next(data["body"] for path, data in gh.writes if path.endswith("/comments"))
+        self.assertIn("CI running", summary)
+        self.assertIn("ensure all CI checks pass before merging", summary)
+
+    def test_unavailable_ci_is_advisory(self):
+        from core.github import IntegrationError
+
+        job, gh, _ = self.run_review([IntegrationError("Unavailable")])
+        self.assertEqual(job.status, "completed")
+        self.assertIn({"name": "approved"}, gh.snapshot["labels"])
+        summary = next(data["body"] for path, data in gh.writes if path.endswith("/comments"))
+        self.assertIn("CI status unavailable", summary)

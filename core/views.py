@@ -315,6 +315,30 @@ def job_retry(request, job_id):
     return redirect("job_detail", job_id=job.pk)
 
 
+@login_required
+@never_cache
+@require_POST
+def jobs_retry_failed(request):
+    from .github import IntegrationError
+    from .retries import RetryRejected, retry_job
+
+    # Snapshot candidates so retries created during this request are never retried again.
+    jobs = list(visible_jobs(request.user).filter(status__in=["failed", "attention"]))
+    queued = skipped = 0
+    for job in jobs:
+        try:
+            retry_job(job, request.user.username)
+        except (RetryRejected, IntegrationError, KeyError, TypeError, ValueError):
+            skipped += 1
+        else:
+            queued += 1
+    messages.info(
+        request,
+        f"{queued} reviews queued; {skipped} skipped (ineligible, already retried, or GitHub unavailable).",
+    )
+    return redirect("dashboard")
+
+
 def admin_login(request, extra_context=None):
     if request.user.is_authenticated:
         return HttpResponseForbidden("Platform administrator access required.")

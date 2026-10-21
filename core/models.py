@@ -222,6 +222,23 @@ class Job(models.Model):
     heartbeat_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
 
+    @property
+    def duration_display(self):
+        """Wall time since the worker first started; excludes initial queue wait."""
+        if not self.started_at:
+            return "Not started"
+        end = self.finished_at
+        if end is None:
+            if self.status != self.Status.RUNNING:
+                return "Unavailable"
+            end = timezone.now()
+        seconds = max(0, int((end - self.started_at).total_seconds()))
+        hours, seconds = divmod(seconds, 3600)
+        minutes, seconds = divmod(seconds, 60)
+        if hours:
+            return f"{hours}h {minutes}m {seconds}s"
+        return f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
+
     def save(self, *args, **kwargs):
         if self._state.adding:
             from .workflow_schema import snapshot as workflow_snapshot

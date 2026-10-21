@@ -387,7 +387,7 @@ class DashboardTests(TestCase):
         response = self.client.get(f"/jobs/{self.visible.id}/activity/")
         data = response.json()
         self.assertEqual(len(data["events"]), 100)
-        self.assertIn("Checking required CI", data["events"][-1]["message"])
+        self.assertIn("Reading advisory CI status", data["events"][-1]["message"])
         self.assertNotIn("secret-token", response.content.decode())
         self.assertNotIn("private-source", response.content.decode())
         self.visible.delete()
@@ -648,3 +648,29 @@ class DashboardTests(TestCase):
         )
         event.refresh_from_db()
         self.assertEqual(event.error, "Reconciliation unavailable.")
+
+    def test_review_duration_excludes_queue_and_is_shown_on_both_pages(self):
+        job = self.visible
+        job.started_at = timezone.now() - timedelta(minutes=8)
+        job.finished_at = job.started_at + timedelta(minutes=5, seconds=12)
+        job.status = "completed"
+        job.save()
+        self.client.force_login(self.user)
+        for url in ["/", f"/jobs/{job.pk}/"]:
+            self.assertContains(self.client.get(url), "5m 12s")
+        self.assertEqual(job.duration_display, "5m 12s")
+
+    def test_review_duration_handles_running_and_unstarted_attempts(self):
+        job = self.visible
+        self.assertEqual(job.duration_display, "Not started")
+        now = timezone.now()
+        job.started_at = now - timedelta(hours=1, seconds=9)
+        job.status = "running"
+        from unittest.mock import patch
+
+        with patch("core.models.timezone.now", return_value=now):
+            self.assertEqual(job.duration_display, "1h 0m 9s")
+        job.status = "cancelled"
+        self.assertEqual(job.duration_display, "Unavailable")
+        job.finished_at = job.started_at - timedelta(seconds=1)
+        self.assertEqual(job.duration_display, "0s")

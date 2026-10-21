@@ -53,6 +53,12 @@ class WorkerTests(WorkflowTests):
         job.refresh_from_db()
         return job, gh, reviewer
 
+    def test_failed_review_records_finish_time_for_duration(self):
+        job, _, _ = self.run_case([ProviderError("auth")])
+        self.assertEqual(job.status, "attention")
+        self.assertIsNotNone(job.finished_at)
+        self.assertNotEqual(job.duration_display, "Unavailable")
+
     def test_workflow_edit_after_claim_cannot_change_model(self):
         from core.tests.test_providers import RESULT
 

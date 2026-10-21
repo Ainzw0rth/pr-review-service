@@ -394,8 +394,8 @@ developers to retoggle feedback/on review and re-request the reviewer when neces
 Set complete false if necessary context is absent or truncated. Set blocking true for any
 blocking finding or unresolved blocking uncertainty. Nonblocking suggestions may remain.
 Do not claim tests ran unless supplied test evidence proves it. Never claim formal approval.
-The service independently enforces required CI at publication and rechecks it for this commit.
-Missing/pending/failed required CI is an operational gate, not by itself a code finding or a reason
+The service reports advisory CI status at publication and rechecks it for this commit.
+Missing/pending/failed CI does not block code approval and is not by itself a code finding or a reason
 to set blocking true. Report actual defects or missing SPECIFIC acceptance-test evidence separately.
 Do not demand proof of general CI success from the developer; the service checks GitHub directly.
 Write for a busy human reviewer. Each finding covers one actionable issue, usually 35-80 words:

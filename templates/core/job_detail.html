@@ -3,7 +3,7 @@
 {% block content %}
 <a class="back-link" href="{% url 'dashboard' %}">← Review queue</a>
 <section class="page-heading job-heading">
-  <div><h1>PR #{{ job.pr.number }} <span data-job-badge class="status status-{{ job.status }}">{{ job.get_status_display }}</span></h1><p class="lede">{{ job.pr.repository.full_name }} · Attempt {{ job.generation }} <span class="commit-chip">{{ job.head_sha|slice:':8' }}</span></p></div>
+  <div><h1>PR #{{ job.pr.number }} <span data-job-badge class="status status-{{ job.status }}">{{ job.get_status_display }}</span></h1><p class="lede">{{ job.pr.repository.full_name }} · Attempt {{ job.generation }} <span class="commit-chip">{{ job.head_sha|slice:':8' }}</span></p><p class="note">Review time · {% include 'core/review_duration.html' %} · excludes initial queue wait</p></div>
   <a class="button" href="{{ job.pr.url }}" rel="noreferrer">Open pull request ↗</a>
 </section>
 <section class="retry-controls" data-job-retry-control {% if not retry_available %}hidden{% endif %}><form method="post" action="{% url 'job_retry' job.id %}">{% csrf_token %}<button type="submit" data-retry-label>{% if delivery_retry %}Retry delivery ↻{% else %}Retry review ↻{% endif %}</button></form><p data-retry-explanation>{% if delivery_retry %}Deliver the saved review without another model call. Existing receipts and current GitHub state are rechecked.{% else %}Starts a fresh attempt from the first model. The current commit, reviewer and on review label must still match.{% endif %}</p></section>

@@ -265,10 +265,10 @@ def snapshot(job, events):
         ),
         node(
             "checks",
-            "Required CI",
+            "CI status",
             {"checks"},
             {"checks_passed", "checks_blocked"},
-            detail="Evidence for this commit",
+            detail="Advisory evidence for this commit",
         ),
     ]
     if includes("graph", "graph_started" in codes):
@@ -326,10 +326,10 @@ def snapshot(job, events):
             latest_ci.created_at if latest_ci.code != "checks_waiting" else None
         )
     if latest_ci and latest_ci.code == "checks_blocked":
-        stages[-1]["state"] = "blocked"
-        stages[-1]["detail"] = "Missing, pending or unsuccessful"
+        stages[-1]["state"] = "done"
+        stages[-1]["detail"] = "Advisory: missing, pending, unsuccessful or unavailable"
     elif latest_ci and latest_ci.code == "checks_waiting":
-        stages[-1]["detail"] = "Waiting for CI before AI review"
+        stages[-1]["detail"] = "CI still running; review does not wait"
     if includes("tests", bool(codes & {"tests", "tests_passed", "tests_failed"})):
         tests = node(
             "tests",

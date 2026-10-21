@@ -109,7 +109,13 @@ class AutomaticApprovalTests(PublicationTests):
         self.repo.save()
         job, gh = self.prepare()
         gh.snapshot["user"] = {"login": "developer"}
-        outcome = publish(gh, job, self.result(), {}, {"passed": False, "summary": "CI failed"})
+        outcome = publish(
+            gh,
+            job,
+            {**self.result(), "blocking": True},
+            {},
+            {"passed": False, "summary": "CI failed"},
+        )
         self.assertEqual(outcome, "feedback")
         self.assertTrue(any(data.get("event") == "REQUEST_CHANGES" for _, data in gh.writes))
         self.assertFalse(any(data.get("event") == "APPROVE" for _, data in gh.writes))
@@ -188,22 +194,17 @@ class AutomaticApprovalTests(PublicationTests):
         self.assertIsNotNone(row.dismissed_at)
         self.assertEqual([label["name"] for label in gh.snapshot["labels"]], ["feedback"])
 
-    def test_ci_regression_after_approval_withdraws_it(self):
-        from core.models import ApprovalRecord
-        from core.publication import LabelCleanupError, publish
+    def test_failed_ci_does_not_prevent_formal_code_approval(self):
+        from core.publication import publish
 
         self.repo.auto_approve = True
         self.repo.required_checks = ["ci"]
         self.repo.save()
         job, gh = self.prepare()
         gh.snapshot["user"] = {"login": "developer"}
-        with (
-            patch("core.github.check_required", side_effect=[{"passed": True}, {"passed": False}]),
-            patch.object(gh, "put", create=True, return_value={"state": "DISMISSED"}),
-        ):
-            with self.assertRaises(LabelCleanupError):
-                publish(gh, job, self.result(), {}, {"passed": True, "summary": "Pass"})
-        record = ApprovalRecord.objects.get(job=job)
-        self.assertTrue(record.revoke_requested)
-        self.assertIsNotNone(record.dismissed_at)
-        self.assertNotIn("approved", [label["name"] for label in gh.snapshot["labels"]])
+        outcome = publish(gh, job, self.result(), {}, {"passed": False, "summary": "CI failed"})
+        self.assertEqual(outcome, "ready")
+        reviews = [data for path, data in gh.writes if path.endswith("/reviews")]
+        self.assertEqual(reviews[0]["event"], "APPROVE")
+        self.assertIn("ensure all CI checks pass before merging", reviews[0]["body"])
+        self.assertIn({"name": "approved"}, gh.snapshot["labels"])

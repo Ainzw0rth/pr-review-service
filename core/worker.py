@@ -1,6 +1,5 @@
 """Single reviewer; event reconciler runs separately so cancellation stays responsive."""
 
-import time
 from datetime import timedelta
 
 from django.conf import settings
@@ -41,7 +40,7 @@ def run_job(job):
 def _run_job(job):
     from core.context import build_context, failure_reason
     from core.delivery import DeliveryPaused, load_review, save_review
-    from core.github import GitHub, IntegrationError, check_required
+    from core.github import GitHub, IntegrationError, ci_snapshot
     from core.providers import (
         ProviderError,
         ReviewCancelled,
@@ -89,17 +88,7 @@ def _run_job(job):
             raise IntegrationError("Context collection incomplete")
         progress("context_ready")
         progress("checks")
-        checks = check_required(github, job.pr.repository, job.head_sha)
-        if checks.get("pending"):
-            progress("checks_waiting")
-        while checks.get("pending"):
-            # No whole-review timeout; keep admin/commit cancellation responsive.
-            for _ in range(15):
-                if progress.cancelled():
-                    raise ReviewCancelled()
-                time.sleep(1)
-            guard(github, job)
-            checks = check_required(github, job.pr.repository, job.head_sha)
+        checks = ci_snapshot(github, job.pr.repository, job.head_sha)
         progress("checks_passed" if checks["passed"] else "checks_blocked")
         repo = job.pr.repository
         tests = None
@@ -116,7 +105,8 @@ def _run_job(job):
             )
             progress("tests_passed" if tests["passed"] else "tests_failed")
             checks = {
-                "passed": tests["passed"] and (checks["passed"] if repo.required_checks else True),
+                "passed": checks["passed"],
+                "local_passed": tests["passed"],
                 "summary": checks["summary"] + " " + tests["summary"],
             }
         context["checks"] = checks
@@ -419,10 +409,11 @@ def _run_job(job):
             return
         if repo.required_checks:
             progress("recheck")
-            latest = check_required(github, repo, job.head_sha)
+            latest = ci_snapshot(github, repo, job.head_sha)
             progress("checks_passed" if latest["passed"] else "checks_blocked")
             checks = {
-                "passed": latest["passed"] and (tests is None or tests["passed"]),
+                "passed": latest["passed"],
+                "local_passed": tests is None or tests["passed"],
                 "summary": latest["summary"] + (" " + tests["summary"] if tests else ""),
             }
         save_review(job, result, context, checks)

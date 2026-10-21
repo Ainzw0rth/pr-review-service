@@ -468,7 +468,9 @@ def publish(github, job, result, context, checks):
     blocked = (
         result["blocking"]
         or not result["complete"]
-        or not checks["passed"]
+        or not checks.get(
+            "local_passed", checks["passed"] if job.pr.repository.test_command else True
+        )
         or any(f["severity"] == "blocking" for f in result["findings"])
         or any(reply.get("blocking", False) for _, reply in replies)
     )
@@ -478,6 +480,8 @@ def publish(github, job, result, context, checks):
         if blocked
         else "No blocking findings. Formal GitHub approval follows the repository auto-approve setting. Merging follows the separate opt-in auto-merge setting; repository merge rules still apply."
     )
+    if not checks["passed"]:
+        body += "\n\nCI is advisory for this code review; ensure all CI checks pass before merging."
     # Use issue summary first: preserves reviewer request while thread replies publish.
     _progress(job, "summary", "started")
     once(github, job, "summary", body, f"/issues/{number}/comments", f"/issues/{number}/comments")
@@ -547,7 +551,7 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
     number = job.pr.number
     tag = marker(job, "review")
     from core.approvals import dismiss_stale, enabled_for, remember, withdraw
-    from core.github import IntegrationError, check_required
+    from core.github import IntegrationError
 
     event = review_event(job, blocked)
     existing = find_review(github, job, blocked)
@@ -579,11 +583,6 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
                 raise IntegrationError(
                     "Connected GitHub account cannot approve its own PR; another reviewer is required."
                 )
-            if (
-                job.pr.repository.required_checks
-                and not check_required(github, job.pr.repository, job.head_sha)["passed"]
-            ):
-                raise IntegrationError("Required checks changed during review")
             remember(github, job, tag)
             guard(github, job)
         with admission(job):
@@ -602,7 +601,7 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
                 {
                     "commit_id": job.head_sha,
                     "event": event,
-                    "body": f"Automated review. See summary above.\n\n{tag}",
+                    "body": f"Automated review. See summary above. CI is advisory; ensure all CI checks pass before merging.\n\n{tag}",
                     "comments": inline,
                 },
             )
@@ -634,8 +633,6 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
             withdraw(github, job)
         raise
     except Exception as exc:
-        if event == "APPROVE" and str(exc) == "Required checks changed during review":
-            withdraw(github, job)
         raise LabelCleanupError(safe_error(exc)) from None
 
 
@@ -741,11 +738,6 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
         update_cursor(job, "labels", label_transitions=own_transitions)
 
     terminal_guard()
-    if not blocked and job.pr.repository.required_checks:
-        from core.github import check_required
-
-        if not check_required(github, job.pr.repository, job.head_sha)["passed"]:
-            raise ValueError("Required checks changed during review")
     _progress(job, "labels", "started")
     transition(
         github,
