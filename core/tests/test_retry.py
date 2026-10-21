@@ -166,7 +166,7 @@ class RetryTests(TestCase):
         self.client.force_login(self.user)
         with patch("core.retries.retry_job", side_effect=IntegrationError("secret")):
             response = self.client.post("/jobs/retry-failed/", follow=True)
-        self.assertContains(response, "0 reviews queued; 1 skipped")
+        self.assertContains(response, "0 reviews queued. 1 skipped.")
         self.assertNotContains(response, "secret")
         self.assertContains(response, "Retry all failed")
 
@@ -179,3 +179,32 @@ class RetryTests(TestCase):
             github.assert_not_called()
         self.visible.refresh_from_db()
         self.assertEqual(self.visible.status, "running")
+
+    def test_retry_results_use_popup_notifications_not_page_banners(self):
+        self.retry(user=self.user)
+        fresh = Job.objects.get(retry_of=self.visible)
+        response = self.client.get(reverse("job_detail", args=[fresh.pk]))
+        self.assertContains(response, 'data-toast data-level="success"')
+        self.assertContains(response, 'aria-label="Dismiss notification"')
+        self.assertNotContains(response, '<div class="notice" role="status">')
+
+    def test_bulk_retry_result_is_a_concise_popup(self):
+        self.client.force_login(self.user)
+        with patch("core.retries.retry_job"):
+            response = self.client.post("/jobs/retry-failed/", follow=True)
+        self.assertContains(response, 'data-toast data-level="info"')
+        self.assertContains(response, "1 review queued.")
+        self.assertNotContains(response, "ineligible, already retried, or GitHub unavailable")
+        self.assertNotContains(response, '<div class="notice" role="status">')
+
+    def test_bulk_retry_is_a_compact_queue_action_without_helper_copy(self):
+        self.client.force_login(self.user)
+        response = self.client.get("/")
+        html = response.content.decode()
+        heading = html.split('<section class="page-heading">', 1)[1].split("</section>", 1)[0]
+        summary = html.split('aria-label="Review statistics"', 1)[1].split("</section>", 1)[0]
+        self.assertNotIn("data-bulk-retry", heading)
+        self.assertIn('class="text-button"', summary)
+        self.assertIn("data-bulk-retry", summary)
+        self.assertNotContains(response, "All failed / attention reviews in your workspace")
+        self.assertNotContains(response, "Current commit and eligibility must still match.")

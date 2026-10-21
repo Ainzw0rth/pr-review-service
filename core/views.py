@@ -301,15 +301,16 @@ def job_retry(request, job_id):
     try:
         fresh = retry_job(job, request.user.username)
     except RetryRejected as exc:
-        messages.error(request, str(exc))
+        messages.error(request, str(exc), extra_tags="toast")
     except (IntegrationError, KeyError, TypeError, ValueError):
-        messages.error(request, "Could not verify the current PR with GitHub. No retry queued.")
+        messages.error(
+            request, "Could not verify the PR with GitHub. No retry queued.", extra_tags="toast"
+        )
     else:
         messages.success(
             request,
-            "Saved review queued for delivery without a model call; eligibility will be rechecked."
-            if fresh.pk == job.pk
-            else "Fresh review queued from the first configured model. PR eligibility will be checked again by the worker.",
+            "Review delivery queued." if fresh.pk == job.pk else "Review retry queued.",
+            extra_tags="toast",
         )
         return redirect("job_detail", job_id=fresh.pk)
     return redirect("job_detail", job_id=job.pk)
@@ -332,10 +333,10 @@ def jobs_retry_failed(request):
             skipped += 1
         else:
             queued += 1
-    messages.info(
-        request,
-        f"{queued} reviews queued; {skipped} skipped (ineligible, already retried, or GitHub unavailable).",
-    )
+    result = f"{queued} review{'s' if queued != 1 else ''} queued."
+    if skipped:
+        result += f" {skipped} skipped."
+    messages.info(request, result, extra_tags="toast")
     return redirect("dashboard")
 
 

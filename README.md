@@ -543,8 +543,9 @@ by default. Historical jobs show only recorded evidence; deployment does not res
 
 Set `DASHBOARD_RETRY_USER_ID` to the existing owner's Django user ID (default `0` disables).
 The account must also be active and a superuser. Other admins and members cannot use this action.
-The dashboard **Retry all failed** button retries all visible failed/attention attempts across
+The compact **Retry all failed** action beside the queue statistics retries all visible failed/attention attempts across
 filters, using the same commit, cycle, organization and duplicate guards as individual retries.
+Retry outcomes appear as dismissible popup notifications, not inline page banners.
 Ineligible attempts are skipped and counted; saved delivery retries reuse their analysis.
 Review time appears in the queue and PR detail, ticks live while running and freezes on finish.
 It measures wall time from the worker's first start, excluding initial queue wait (including any

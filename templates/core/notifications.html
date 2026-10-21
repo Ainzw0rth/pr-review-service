@@ -1,0 +1,3 @@
+<div class="toast-stack" aria-label="Notifications">{% for message in messages %}{% if 'toast' in message.tags %}
+  <div class="toast" data-toast data-level="{{ message.level_tag }}" role="{% if message.level_tag == 'error' %}alert{% else %}status{% endif %}" aria-atomic="true"><p>{{ message }}</p><button type="button" class="text-button" data-toast-dismiss aria-label="Dismiss notification">×</button></div>
+{% endif %}{% endfor %}</div>
