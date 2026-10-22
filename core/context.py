@@ -8,7 +8,7 @@ import re
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
-from .github import MAX_PAGES, GitHubRateLimited, IntegrationError
+from .github import MAX_PAGES, GitHubRateLimited, GitHubUnavailable, IntegrationError
 
 MAX_CONTEXT_BYTES = 32 * 1024 * 1024  # Memory safeguard, not a file/document count cap.
 SAFE_FAILURES = frozenset(
@@ -509,7 +509,7 @@ def build_context(github, job, progress=None, cancelled=lambda: False):
             raise IntegrationError("The pull request changed while gathering evidence.")
         bound()
         result["complete"] = True
-    except GitHubRateLimited:
+    except (GitHubRateLimited, GitHubUnavailable):
         raise
     except IntegrationError as error:
         result["reason"] = str(error)

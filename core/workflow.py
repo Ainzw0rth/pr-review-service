@@ -18,6 +18,10 @@ def eligible(repo, snapshot):
     )
 
 
+class TimelineMismatch(ValueError):
+    pass
+
+
 def canonical_cycle(repo, timeline, snapshot):
     """Replay trusted GitHub issue events; delivery order is never event order."""
     workflow_labels = {repo.review_label, repo.feedback_label, repo.approved_label}
@@ -89,7 +93,9 @@ def canonical_cycle(repo, timeline, snapshot):
         or (fresh_requested and not requested)
         or opened != (snapshot["state"] == "open")
     ):
-        raise ValueError("GitHub timeline and current PR state disagree; retry reconciliation")
+        raise TimelineMismatch(
+            "GitHub timeline and current PR state disagree; retry reconciliation"
+        )
     return {
         "key": key,
         "actor": actor,
@@ -98,6 +104,18 @@ def canonical_cycle(repo, timeline, snapshot):
         and eligible(repo, snapshot)
         and max(labels, key=labels.get, default=None) == repo.review_label,
     }
+
+
+def read_cycle(github, repo, number):
+    """Use one complete, consistent GitHub history; never synthesize event IDs."""
+    timeline = github.pages(f"/issues/{number}/timeline")
+    snapshot = github.pull(number)
+    try:
+        cycle = canonical_cycle(repo, timeline, snapshot)
+    except TimelineMismatch:
+        timeline = github.pages(f"/issues/{number}/events")
+        cycle = canonical_cycle(repo, timeline, snapshot)
+    return snapshot, timeline, cycle
 
 
 @transaction.atomic

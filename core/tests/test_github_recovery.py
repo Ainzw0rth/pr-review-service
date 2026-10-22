@@ -201,3 +201,29 @@ class GitHubRecoveryTests(TestCase):
         ):
             run_job(resumed)
         repeated_model.assert_not_called()
+
+    def test_server_error_defers_then_stops_after_three_job_retries(self):
+        from core.github import GitHubUnavailable
+
+        job = self.job()
+        for attempt in range(4):
+            with (
+                patch("core.github.GitHub", return_value=FakeGitHub(self.snapshot())),
+                patch(
+                    "core.context.build_context",
+                    side_effect=GitHubUnavailable(503, "/issues/1", "ABC"),
+                ),
+                patch("core.worker.once") as feedback,
+            ):
+                run_job(job)
+            job.refresh_from_db()
+            feedback.assert_not_called()
+            if attempt < 3:
+                self.assertEqual(job.status, "queued")
+                with patch(
+                    "core.claims.timezone.now",
+                    return_value=job.next_retry_at + timedelta(seconds=1),
+                ):
+                    job = workflow.claim()
+            else:
+                self.assertEqual(job.status, "attention")

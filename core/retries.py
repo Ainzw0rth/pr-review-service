@@ -37,7 +37,7 @@ def retry_job(job, actor):
     if delivery_available(job):
         return queue_retry(job)
     from .github import GitHub
-    from .workflow import canonical_cycle, eligible
+    from .workflow import eligible, read_cycle
 
     existing = Job.objects.filter(retry_of=job).first()
     if existing:
@@ -46,9 +46,7 @@ def retry_job(job, actor):
         raise RetryRejected("This attempt cannot be retried. Use the latest unpublished attempt.")
     github = GitHub(job.pr.repository)
     try:
-        timeline = github.pages(f"/issues/{job.pr.number}/timeline")
-        snapshot = github.pull(job.pr.number)
-        cycle = canonical_cycle(job.pr.repository, timeline, snapshot)
+        snapshot, _, cycle = read_cycle(github, job.pr.repository, job.pr.number)
     finally:
         github.close()
     with transaction.atomic():

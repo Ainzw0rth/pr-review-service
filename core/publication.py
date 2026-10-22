@@ -10,9 +10,9 @@ from django.conf import settings
 from django.utils import timezone
 
 from core.delivery import checkpoint_state, safe_error, update_cursor
-from core.github import GitHubRateLimited, IntegrationError
+from core.github import GitHubRateLimited, GitHubUnavailable, IntegrationError
 from core.models import Job, Receipt
-from core.workflow import canonical_cycle, current
+from core.workflow import canonical_cycle, current, read_cycle
 from core.workflow_schema import GROUNDED_REVISIONS
 
 from .claims import admission, expect_label, mutation, owned
@@ -69,15 +69,12 @@ class StaleReview(Exception):
 def _guard_state(github, job):
     if not current(job):
         raise StaleReview("Attempt no longer active")
-    timeline = github.pages(f"/issues/{job.pr.number}/timeline")
-    pr = github.pull(job.pr.number)
-    # A cancellation may arrive while either network read is in flight.
-    if not current(job):
-        raise StaleReview("Attempt cancelled during eligibility check")
     try:
-        cycle = canonical_cycle(job.pr.repository, timeline, pr)
+        pr, timeline, cycle = read_cycle(github, job.pr.repository, job.pr.number)
     except (ValueError, TypeError, KeyError):
         raise StaleReview("Cannot establish current review cycle") from None
+    if not current(job):
+        raise StaleReview("Attempt cancelled during eligibility check")
     row = Job.objects.select_related("pr").get(pk=job.pk)
     if (
         pr["head"]["sha"] != job.head_sha
@@ -378,7 +375,7 @@ def publish_threads(github, job, replies):
                 resolved = (data.get("resolveReviewThread") or {}).get("thread") or {}
                 if resolved.get("id") != thread["id"] or resolved.get("isResolved") is not True:
                     raise IntegrationError("GitHub did not confirm discussion resolution.")
-            except GitHubRateLimited:
+            except (GitHubRateLimited, GitHubUnavailable):
                 raise
             except IntegrationError:
                 from .context import review_thread
@@ -630,7 +627,7 @@ def _publish_review(github, job, inline, blocked, baseline_timeline):
         return terminal_transition(
             github, job, blocked=blocked, baseline_timeline=baseline_timeline
         )
-    except GitHubRateLimited:
+    except (GitHubRateLimited, GitHubUnavailable):
         raise
     except StaleReview:
         if event == "APPROVE":
@@ -667,8 +664,11 @@ def terminal_transition(github, job, *, blocked, baseline_timeline):
     def terminal_guard():
         if not owned(job):
             raise StaleReview("Execution ownership lost")
-        timeline = github.pages(f"/issues/{number}/timeline")
-        fresh = copy.deepcopy(github.pull(number))
+        try:
+            snapshot, timeline, _ = read_cycle(github, job.pr.repository, number)
+        except (ValueError, TypeError, KeyError):
+            raise StaleReview("Cannot establish terminal review cycle") from None
+        fresh = copy.deepcopy(snapshot)
         row = Job.objects.select_related("pr__repository").get(pk=job.pk)
         if (
             row.status != "running"

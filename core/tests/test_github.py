@@ -563,3 +563,34 @@ class ContextTests(TestCase):
             else []
         )
         self.assertFalse(build_context(github, job)["complete"])
+
+
+class TransientReadTests(TestCase):
+    github_client = GitHubTests.github_client
+
+    def test_safe_read_recovers_but_write_is_not_replayed(self):
+        responses = iter([503, 502, 200])
+        client = self.github_client(lambda req: httpx.Response(next(responses), json={"ok": True}))
+        with patch("core.github.time.sleep"):
+            self.assertEqual(client.get("/issues/1"), {"ok": True})
+        calls = []
+        client = self.github_client(lambda req: calls.append(req.method) or httpx.Response(503))
+        with self.assertRaises(IntegrationError):
+            client._request("POST", "/issues/1/comments", {"body": "test"})
+        self.assertEqual(calls, ["POST"])
+
+    def test_exhausted_read_has_bounded_safe_diagnostics(self):
+        from core.github import GitHubUnavailable
+
+        calls = []
+        client = self.github_client(
+            lambda req: (
+                calls.append(req.url)
+                or httpx.Response(503, headers={"x-github-request-id": "AB12:CD34"}, text="SECRET")
+            )
+        )
+        with patch("core.github.time.sleep"), self.assertRaises(GitHubUnavailable) as caught:
+            client.get("/issues/1?secret=SECRET")
+        self.assertEqual(len(calls), 3)
+        self.assertNotIn("SECRET", str(caught.exception))
+        self.assertIn("AB12:CD34", str(caught.exception))

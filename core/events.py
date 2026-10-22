@@ -3,7 +3,7 @@ from django.utils import timezone
 
 from core.models import ExpectedLabel, Job, Webhook
 from core.publication import StaleReview, transition
-from core.workflow import canonical_cycle, reconcile
+from core.workflow import read_cycle, reconcile
 
 
 def process_event(event):
@@ -18,7 +18,7 @@ def process_event(event):
         github.close()
 
 
-def _process_event(event, github):
+def _process_event(event, github, state=None):
     from core.sheets import sync_status
 
     repo = event.repository
@@ -29,9 +29,7 @@ def _process_event(event, github):
         event.payload = {}
         event.save()
         return
-    timeline = github.pages(f"/issues/{number}/timeline")
-    snapshot = github.pull(number)
-    canonical = canonical_cycle(repo, timeline, snapshot)
+    snapshot, canonical = state or _read_state(github, repo, number)
     action = payload.get("action")
     reconcile(event, snapshot, canonical=canonical)
     try:
@@ -85,13 +83,8 @@ def _process_event(event, github):
             if job:
 
                 def still_requested():
-                    latest = github.pull(number)
-                    if (
-                        latest["head"]["sha"] != job.head_sha
-                        or not canonical_cycle(
-                            repo, github.pages(f"/issues/{number}/timeline"), latest
-                        )["eligible"]
-                    ):
+                    latest, _, cycle = read_cycle(github, repo, number)
+                    if latest["head"]["sha"] != job.head_sha or not cycle["eligible"]:
                         raise StaleReview("Task review status is stale")
 
                 sync_status(github, repo, number, "review", before_write=still_requested)
@@ -113,3 +106,61 @@ def _process_event(event, github):
         )
         raise
     ExpectedLabel.objects.filter(expires_at__lt=timezone.now()).delete()
+
+
+def _read_state(github, repo, number):
+    snapshot, _, canonical = read_cycle(github, repo, number)
+    return snapshot, canonical
+
+
+def process_pending():
+    """Bounded sweep; retain every event and share only expensive state reads."""
+    from collections import defaultdict
+    from datetime import timedelta
+
+    from django.db.models import Exists, OuterRef, Q
+
+    from core.github import GitHub, GitHubRateLimited, GitHubUnavailable
+    from core.workflow import TimelineMismatch
+
+    groups = defaultdict(list)
+    blocked_pr = Webhook.objects.filter(
+        repository_id=OuterRef("repository_id"),
+        payload__number=OuterRef("payload__number"),
+        processed_at__isnull=True,
+        retry_at__gt=timezone.now(),
+    )
+    pending = list(
+        Webhook.objects.filter(processed_at__isnull=True)
+        .filter(~Exists(blocked_pr))
+        .filter(Q(retry_at__isnull=True) | Q(retry_at__lte=timezone.now()))
+        .select_related("repository")
+        .order_by("created_at", "pk")[:100]
+    )
+    for event in pending:
+        groups[(event.repository_id, event.payload.get("number"))].append(event)
+    for (_, number), events in groups.items():
+        github = None
+        try:
+            github = GitHub(events[0].repository)
+            state = _read_state(github, events[0].repository, number) if number else None
+            for event in events:
+                _process_event(event, github, state=state)
+        except Exception as exc:
+            remaining = Webhook.objects.filter(
+                pk__in=[event.pk for event in events], processed_at__isnull=True
+            )
+            count = max(event.retry_count for event in events) + 1
+            retry_at = timezone.now() + timedelta(seconds=min(30 * 2 ** min(count - 1, 6), 1800))
+            if isinstance(exc, GitHubRateLimited):
+                reason, retry_at = str(exc), max(retry_at, exc.retry_at)
+            elif isinstance(exc, GitHubUnavailable):
+                reason = str(exc)
+            elif isinstance(exc, TimelineMismatch):
+                reason = "GitHub history disagrees with current PR state; reconciliation paused, retry scheduled."
+            else:
+                reason = "Event reconciliation unavailable; retry scheduled."
+            remaining.update(error=reason[:200], retry_at=retry_at, retry_count=count)
+        finally:
+            if github is not None:
+                github.close()

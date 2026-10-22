@@ -11,7 +11,7 @@ from .models import Job, JobActivity
 from .workflow import current
 
 MESSAGES = {
-    "github_waiting": "GitHub API rate-limited; review queued until reset.",
+    "github_waiting": "GitHub temporarily unavailable or rate-limited; review queued for retry.",
     "starting": "Worker started; verifying reviewer, labels and commit.",
     "context": "Fetching PR changes and review context from GitHub.",
     "files": "Changed-file context loaded",

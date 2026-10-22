@@ -40,7 +40,13 @@ def run_job(job):
 def _run_job(job):
     from core.context import build_context, failure_reason
     from core.delivery import DeliveryPaused, load_review, safe_error, save_review
-    from core.github import GitHub, GitHubRateLimited, IntegrationError, ci_snapshot
+    from core.github import (
+        GitHub,
+        GitHubRateLimited,
+        GitHubUnavailable,
+        IntegrationError,
+        ci_snapshot,
+    )
     from core.providers import (
         ProviderError,
         ReviewCancelled,
@@ -446,6 +452,21 @@ def _run_job(job):
             }
         save_review(job, result, context, checks)
         outcome = _deliver_and_finish(github, job, progress)
+    except GitHubUnavailable as exc:
+        if result is not None and not ReviewCheckpoint.objects.filter(job=job).exists():
+            save_review(job, result, context, checks)
+        if job.github_retry_count >= 3:
+            finish(job, "attention", "GitHub read retries exhausted. " + str(exc))
+        else:
+            job.github_retry_count += 1
+            job_rows(job).update(github_retry_count=job.github_retry_count)
+            progress("github_waiting")
+            finish(
+                job,
+                "queued",
+                str(exc),
+                retry_at=timezone.now() + timedelta(seconds=60 * 2 ** (job.github_retry_count - 1)),
+            )
     except GitHubRateLimited as exc:
         if result is not None and not ReviewCheckpoint.objects.filter(job=job).exists():
             save_review(job, result, context, checks)

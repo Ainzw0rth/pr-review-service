@@ -178,3 +178,56 @@ class DeliveryTests(PublicationTests):
                     deliver(gh, job, publisher, lambda *a: None)
                 self.assertEqual(publisher.call_count, 1)
             sleep.assert_not_called()
+
+    def test_transient_read_after_review_resumes_without_duplicate_publication(self):
+        from core.delivery import deliver, save_review
+        from core.github import GitHubUnavailable
+        from core.models import ReviewCheckpoint
+
+        job, gh = self.prepare()
+        save_review(
+            job, {**self.result(), "blocking": True}, {}, {"passed": True, "summary": "Pass"}
+        )
+        original = gh.pull
+        failed = False
+
+        def pull(number):
+            nonlocal failed
+            if gh.reviews and not failed:
+                failed = True
+                raise GitHubUnavailable(503, "/pulls/1", "ABC")
+            return original(number)
+
+        with patch.object(gh, "pull", side_effect=pull):
+            with self.assertRaises(GitHubUnavailable):
+                deliver(gh, job, publish, lambda *a, **kw: None)
+        self.assertTrue(Receipt.objects.filter(job=job, key="review").exists())
+        self.assertNotEqual(ReviewCheckpoint.objects.get(job=job).stage, "done")
+        self.assertEqual(deliver(gh, job, publish, lambda *a, **kw: None), "feedback")
+        self.assertEqual(len(gh.reviews), 1)
+        self.assertEqual(len(gh.comments), 1)
+
+    def test_publication_survives_history_feed_recovery(self):
+        from core.delivery import deliver, save_review
+
+        job, gh = self.prepare()
+        save_review(
+            job, {**self.result(), "blocking": True}, {}, {"passed": True, "summary": "Pass"}
+        )
+        original = gh.pages
+        used_fallback = False
+
+        def pages(path):
+            nonlocal used_fallback
+            if path.endswith("/events"):
+                used_fallback = True
+                return list(gh.timeline)
+            if path.endswith("/timeline") and not used_fallback:
+                return []
+            return original(path)
+
+        with patch.object(gh, "pages", side_effect=pages):
+            self.assertEqual(deliver(gh, job, publish, lambda *a, **kw: None), "feedback")
+        self.assertTrue(used_fallback)
+        self.assertEqual(len(gh.reviews), 1)
+        self.assertEqual({item["name"] for item in gh.snapshot["labels"]}, {"feedback"})

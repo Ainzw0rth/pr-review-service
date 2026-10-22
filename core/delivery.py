@@ -79,7 +79,7 @@ def load_review(job):
 
 
 def deliver(github, job, publisher, progress):
-    from .github import GitHubRateLimited, IntegrationError
+    from .github import GitHubRateLimited, GitHubUnavailable, IntegrationError
     from .publication import LabelCleanupError, find_review
 
     checkpoint, data = load_review(job)
@@ -114,7 +114,7 @@ def deliver(github, job, publisher, progress):
             with mutation(job):
                 checkpoint.save(update_fields=["encrypted_payload", "stage"])
             return outcome
-        except GitHubRateLimited:
+        except (GitHubRateLimited, GitHubUnavailable):
             raise
         except (IntegrationError, LabelCleanupError) as exc:
             reason = safe_error(exc)

@@ -1,7 +1,9 @@
 """GitHub transport: fixed hosts, finite calls, complete-or-fail pagination."""
 
 import json
+import random
 import re
+import time
 from datetime import timezone
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
@@ -20,6 +22,18 @@ MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
 
 class IntegrationError(Exception):
     """Only static, credential-free operational descriptions belong here."""
+
+
+class GitHubUnavailable(IntegrationError):
+    """Exhausted safe-read retries; safe operational metadata only."""
+
+    def __init__(self, status, endpoint, request_id=""):
+        self.status = status
+        self.request_id = request_id if re.fullmatch(r"[A-Za-z0-9:-]{1,100}", request_id) else ""
+        super().__init__(
+            f"GitHub temporarily unavailable (HTTP {status}); {endpoint[:100]}"
+            + (f"; request {self.request_id}" if self.request_id else "")
+        )
 
 
 class GitHubRateLimited(IntegrationError):
@@ -99,6 +113,16 @@ class GitHub:
             raise GitHubRateLimited(row.retry_at, row.kind)
 
     def _request(self, method, path, data=None):
+        # Writes retain existing receipt/guard semantics.
+        for attempt in range(3):
+            try:
+                return self._request_once(method, path, data)
+            except GitHubUnavailable:
+                if attempt == 2:
+                    raise
+                time.sleep(2**attempt + random.uniform(0, 0.5))
+
+    def _request_once(self, method, path, data=None):
         destination = self._url(path)
         self._check_cooldown()
         try:
@@ -111,6 +135,12 @@ class GitHub:
             ) as response:
                 if not 200 <= response.status_code < 300:
                     self._rate_response(response)
+                    if method == "GET" and response.status_code in (500, 502, 503, 504):
+                        raise GitHubUnavailable(
+                            response.status_code,
+                            urlsplit(destination).path,
+                            response.headers.get("x-github-request-id", ""),
+                        )
                     raise IntegrationError(f"GitHub request failed (HTTP {response.status_code}).")
                 raw = bytearray()
                 for chunk in response.iter_bytes():

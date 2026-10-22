@@ -45,3 +45,98 @@ class EventTests(WorkflowTests):
             review_worker.Command().handle(once=True, allow_sqlite=True)
         cleanup.assert_not_called()
         cli_cleanup.assert_not_called()
+
+    def test_batch_shares_reads_and_defers_inconsistent_history(self):
+        from core.events import process_pending
+
+        first = self.event("labeled")
+        second = self.event("review_requested")
+        with patch("core.github.GitHub") as client:
+            client.return_value.pages.return_value = [
+                self.timeline(1, "labeled"),
+                self.timeline(2, "review_requested"),
+            ]
+            client.return_value.pull.return_value = self.snapshot()
+            process_pending()
+            self.assertEqual(client.return_value.pull.call_count, 1)
+            self.assertEqual(client.return_value.pages.call_count, 1)
+        self.assertEqual(Job.objects.count(), 1)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertIsNotNone(first.processed_at)
+        self.assertIsNotNone(second.processed_at)
+        pending = self.event("labeled")
+        with patch("core.github.GitHub") as client:
+            client.return_value.pages.return_value = []
+            client.return_value.pull.return_value = self.snapshot()
+            process_pending()
+            process_pending()
+            self.assertEqual(client.return_value.pull.call_count, 1)
+        pending.refresh_from_db()
+        self.assertIsNone(pending.processed_at)
+        self.assertIn("history", pending.error)
+        self.assertIsNotNone(pending.retry_at)
+
+    def test_event_arriving_during_batch_stays_pending(self):
+        from core.events import process_pending
+
+        self.event("labeled")
+        arrivals = []
+
+        def snapshot(number):
+            arrivals.append(self.event("review_requested"))
+            return self.snapshot()
+
+        with patch("core.github.GitHub") as client:
+            client.return_value.pages.return_value = [
+                self.timeline(1, "review_requested"),
+                self.timeline(2, "labeled"),
+            ]
+            client.return_value.pull.side_effect = snapshot
+            process_pending()
+        arrivals[0].refresh_from_db()
+        self.assertIsNone(arrivals[0].processed_at)
+
+    def test_new_webhook_does_not_bypass_pr_backoff(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from core.events import process_pending
+
+        old = self.event("labeled")
+        old.retry_at = timezone.now() + timedelta(minutes=5)
+        old.save()
+        self.event("review_requested")
+        with patch("core.github.GitHub") as client:
+            process_pending()
+            client.assert_not_called()
+
+    def test_alternate_history_retains_canonical_identity(self):
+        from core.events import process_pending
+
+        self.event("labeled")
+        with patch("core.github.GitHub") as client:
+            client.return_value.pages.side_effect = [
+                [],
+                [self.timeline(1, "review_requested"), self.timeline(2, "labeled")],
+            ]
+            client.return_value.pull.return_value = self.snapshot()
+            process_pending()
+        self.assertEqual(Job.objects.get().pr.canonical_trigger, "2")
+
+    def test_fallback_created_job_passes_publication_guard(self):
+        from core.events import process_pending
+        from core.publication import guard
+        from core.workflow import claim
+
+        self.event("labeled")
+        history = [self.timeline(1, "review_requested"), self.timeline(2, "labeled")]
+        with patch("core.github.GitHub") as client:
+            client.return_value.pages.side_effect = lambda path: (
+                history if path.endswith("/events") else []
+            )
+            client.return_value.pull.return_value = self.snapshot()
+            process_pending()
+            job = claim()
+            guard(client.return_value, job)

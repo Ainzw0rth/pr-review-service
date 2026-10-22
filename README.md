@@ -137,6 +137,22 @@ GitHub primary and secondary rate limits defer affected reviews until the reset 
 releasing worker capacity. A durable cooldown is shared by connections using the same token.
 Saved analysis and publication receipts survive the wait; delivery resumes without another model
 call or duplicate review. Ordinary HTTP 403 permission errors remain failures, not quota waits.
+
+Transient REST GET failures (HTTP 500/502/503/504) get at most three request attempts with
+short exponential backoff and jitter. Exhausted reads release the worker and schedule up to
+three delayed job retries (1, 2, then 4 minutes), then stop with Needs attention. Writes are
+not replayed by this transport policy. Existing saved-analysis and publication-receipt guards
+remain in force. Safe diagnostics include the endpoint without query parameters and a
+validated GitHub request ID; response bodies and credentials are not retained.
+
+The event queue shares timeline/current-state reads across pending deliveries for each PR
+in a bounded sweep. It retains individual event processing and leaves new arrivals for the
+next sweep. Failures back off from 30 seconds to 30 minutes, persist across restarts, and
+new deliveries cannot bypass an existing same-PR cooldown. A timeline/current-state mismatch
+is checked against GitHub's alternate issue-events feed using the same canonical event IDs.
+Reconciliation, publication, and explicit retries use this shared check. If neither feed
+matches current state, processing remains safely paused with a specific diagnostic; webhook
+arrival order is never substituted for missing GitHub history.
 New commits or loss of eligibility invalidate active attempts; pushes and discussion replies alone
 do not start another review. GitHub read/write operations are revalidated, but are not one atomic
 transaction across GitHub and the local database.

@@ -217,6 +217,7 @@ class Job(models.Model):
     )
     provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True, blank=True)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    github_retry_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     heartbeat_at = models.DateTimeField(null=True, blank=True)
@@ -288,6 +289,8 @@ class JobActivity(models.Model):
 
 
 class Webhook(models.Model):
+    retry_at = models.DateTimeField(null=True, blank=True)
+    retry_count = models.PositiveIntegerField(default=0)
     delivery = models.CharField(max_length=100, unique=True)
     repository = models.ForeignKey(Repository, on_delete=models.CASCADE)
     event = models.CharField(max_length=60)
