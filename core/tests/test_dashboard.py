@@ -586,11 +586,11 @@ class DashboardTests(TestCase):
 
         out = StringIO()
         call_command("bootstrap_admin", setup_link=True, stdout=out)
-        admin = get_user_model().objects.get(username="louis")
+        admin = get_user_model().objects.get(username="admin")
         self.assertTrue(admin.is_superuser)
         self.assertTrue(admin.is_staff)
         self.assertFalse(admin.has_usable_password())
-        self.assertEqual(admin.email, "louiscaesapdf@gmail.com")
+        self.assertEqual(admin.email, "")
         response = self.client.post(
             out.getvalue().strip(),
             {

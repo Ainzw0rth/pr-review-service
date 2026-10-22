@@ -8,4 +8,6 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         result = flush()
-        self.stdout.write(f"Journal: {result['sent']} accepted; {result['failed']} retained for retry.")
+        self.stdout.write(
+            f"Journal: {result['sent']} accepted; {result['failed']} retained for retry."
+        )

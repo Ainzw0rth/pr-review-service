@@ -10,3 +10,5 @@ Before continuing the WIP, integrate current main carefully. Its earlier phase-c
 For future changes: branch from main, verify and review, merge into main, then deploy main. Retire completed branches after confirming unique work is preserved.
 
 All seven retired branch tips were ancestors of production release `384200f`. Six retired worktrees were clean; their complete files (including ignored local files) were archived and compared before removal. Private local recovery archives and manifest: `var/branch-cleanup-20261022/`. Production data volumes and running containers were not changed.
+
+Settings/repository management and generic public setup were subsequently integrated separately into main. The WIP branch remains a historical snapshot for unfinished Workflow/custom-specialist changes; do not merge it wholesale or reintroduce its old Settings/checkpoint implementation.

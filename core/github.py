@@ -76,6 +76,8 @@ class GitHub:
     def _url(self, path):
         if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
             raise IntegrationError("GitHub destination rejected.")
+        if path == "/":
+            return API + self.prefix
         parsed = urlsplit(path)
         decoded = unquote(parsed.path)
         if (

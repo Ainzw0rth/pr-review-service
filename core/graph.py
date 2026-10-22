@@ -121,6 +121,16 @@ def _execute(request, cancelled, *, container):
                 process.wait()
 
 
+def enabled(repository):
+    """Explicit per-repository override; legacy name-only callers keep env behavior."""
+    if not isinstance(repository, str):
+        override = getattr(repository, "graph_enabled", None)
+        if type(override) is bool:
+            return override
+        repository = repository.full_name
+    return repository in settings.GRAPH_REPOSITORIES
+
+
 def collect(
     github,
     repository,
@@ -130,7 +140,9 @@ def collect(
     cancelled=lambda: False,
     progress=lambda *a, **k: None,
 ):
-    if repository not in settings.GRAPH_REPOSITORIES:
+    configured = getattr(github, "repository", None)
+    target = configured if getattr(configured, "full_name", None) == repository else repository
+    if not enabled(target):
         return None
     progress("graph_started")
     snapshots = []

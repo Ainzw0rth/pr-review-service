@@ -114,6 +114,8 @@ class Repository(models.Model):
         help_text="Maximum related issues and PRs per review; blank means no item limit.",
     )
     enabled = models.BooleanField(default=True)
+    graph_enabled = models.BooleanField(null=True, blank=True, default=None)
+    webhook_id = models.CharField(max_length=32, blank=True)
     github_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
     webhook_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
     review_label = models.CharField(max_length=60, default="on review")

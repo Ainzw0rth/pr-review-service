@@ -1,6 +1,7 @@
 import json as _json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEBUG = os.environ.get("DEBUG", "0") == "1"
@@ -87,7 +88,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "Asia/Jakarta"
+TIME_ZONE = os.environ.get("TIME_ZONE", "Asia/Jakarta")
 USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -96,13 +97,37 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/login/"
+# Explicit loopback opt-in; existing deployments retain HTTPS defaults.
+LOCAL_HTTP = os.environ.get("LOCAL_HTTP", "0") == "1"
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://127.0.0.1:8040").rstrip("/")
+WEBHOOK_PUBLIC_URL = os.environ.get("WEBHOOK_PUBLIC_URL", "").rstrip("/")
+if LOCAL_HTTP:
+    _local_url = urlsplit(PUBLIC_URL)
+    if (
+        _local_url.scheme != "http"
+        or _local_url.hostname not in {"localhost", "127.0.0.1", "::1"}
+        or _local_url.username
+        or _local_url.password
+        or _local_url.path
+        or _local_url.query
+        or _local_url.fragment
+        or not ALLOWED_HOSTS
+        or any(host not in {"localhost", "127.0.0.1", "[::1]"} for host in ALLOWED_HOSTS)
+        or os.environ.get("TRUST_PROXY", "0") == "1"
+    ):
+        raise RuntimeError(
+            "LOCAL_HTTP requires a loopback HTTP PUBLIC_URL, loopback ALLOWED_HOSTS and TRUST_PROXY=0"
+        )
+    # HTTP is intentional only after the loopback constraints above pass.
+    SILENCED_SYSTEM_CHECKS = ["security.W004", "security.W008", "security.W012", "security.W016"]
+
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
-SESSION_COOKIE_SECURE = not DEBUG
-CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SECURE = not (DEBUG or LOCAL_HTTP)
+CSRF_COOKIE_SECURE = not (DEBUG or LOCAL_HTTP)
 CSRF_TRUSTED_ORIGINS = [x for x in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if x]
-SECURE_SSL_REDIRECT = not DEBUG
-SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
+SECURE_SSL_REDIRECT = not (DEBUG or LOCAL_HTTP)
+SECURE_HSTS_SECONDS = 31536000 if not (DEBUG or LOCAL_HTTP) else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -111,7 +136,6 @@ SECURE_REFERRER_POLICY = "same-origin"
 if os.environ.get("TRUST_PROXY", "0") == "1":
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://127.0.0.1:8040").rstrip("/")
 CREDENTIAL_KEY = os.environ.get("CREDENTIAL_KEY", "")
 LIVE_WRITES = os.environ.get("LIVE_WRITES", "0") == "1"
 

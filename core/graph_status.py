@@ -9,7 +9,7 @@ from pathlib import Path
 
 from django.conf import settings
 
-from .graph import VERSION
+from .graph import VERSION, enabled
 
 LABELS = {
     "disabled": "Not enabled",
@@ -22,10 +22,14 @@ LABELS = {
 
 
 def status(repository):
+    graph_enabled = enabled(repository)
+    if not isinstance(repository, str):
+        repository = repository.full_name
+
     def result(state, **extra):
         return {"repository": repository, "state": state, "label": LABELS[state], **extra}
 
-    if repository not in settings.GRAPH_REPOSITORIES:
+    if not graph_enabled:
         return result("disabled")
     root = settings.GRAPH_STATUS_DIR
     if not root or not Path(root).is_dir():
@@ -82,6 +86,4 @@ def cards(user):
     repos = Repository.objects.filter(enabled=True)
     if not user.is_superuser:
         repos = repos.filter(organization__membership__user=user)
-    return [
-        status(name) for name in repos.order_by("full_name").values_list("full_name", flat=True)
-    ]
+    return [status(repo) for repo in repos.order_by("full_name")]

@@ -107,7 +107,8 @@ class Transcript:
             self.emit("cli_output_status", "CLI session started.")
         elif kind == "turn.completed" or kind == "result" and event.get("subtype") == "success":
             self.emit(
-                "cli_output_status", "CLI response completed; final review withheld from this transcript."
+                "cli_output_status",
+                "CLI response completed; final review withheld from this transcript.",
             )
         elif kind in {"turn.failed", "runner_error"} or kind == "result" and event.get("is_error"):
             self.emit(

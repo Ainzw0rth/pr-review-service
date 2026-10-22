@@ -1,6 +1,6 @@
 """Per-attempt workflow identity and planned dashboard stages, not an execution engine."""
 
-from django.conf import settings
+from .graph import enabled as graph_enabled
 
 # Bump for review-step or behavior changes. Keep old stage IDs/renderers available.
 REVISION = "v3"
@@ -13,7 +13,7 @@ LEGACY_STEPS = ("files", "discussion", "docs", "graph", "checks", "tests", "publ
 
 def snapshot(repository):
     steps = ["files", "discussion", "docs"]
-    if repository.full_name in settings.GRAPH_REPOSITORIES:
+    if graph_enabled(repository):
         steps.append("graph")
     steps.extend(["intent", "checks"])
     if repository.test_command:
