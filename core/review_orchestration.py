@@ -22,12 +22,14 @@ def run_team(
     on_response=None,
     on_activity=None,
     progress=None,
+    checkpoints=None,
 ):
     """Return a publishable v2-shaped result and a private adjudication audit.
 
     Fan out at most three ways when account concurrency permits it. CLI accounts
     default to serial execution. All stateful callbacks run on this thread.
     """
+    phases = list(ROLES)
     reports = {}
     diagnostics = {}
 
@@ -49,6 +51,25 @@ def run_team(
             raise ReviewCancelled()
         return False
 
+    def accept(phase, value):
+        reports[phase] = validate_report(value, context)
+        if checkpoints is not None:
+            check()
+            checkpoints.save(phase, reports[phase], provider, context["intent"])
+        emit(phase, "ready" if reports[phase]["complete"] else "incomplete")
+
+    if checkpoints is not None:
+        for phase in phases:
+            check()
+            saved = checkpoints.load(phase, context["intent"])
+            if saved is not None:
+                reports[phase] = saved
+                emit(phase, "started")
+                if progress:
+                    progress("phase_reused")
+                emit(phase, "ready")
+    pending = [phase for phase in phases if phase not in reports]
+
     def serial(phase, evidence):
         budget = ActiveBudget(PHASE_TIMEOUT_SECONDS)
         check()
@@ -69,16 +90,16 @@ def run_team(
         return value
 
     if provider.kind.endswith("_cli") and cli_limit() == 1:
-        for phase in ROLES:
-            reports[phase] = validate_report(serial(phase, context), context)
-            emit(phase, "ready" if reports[phase]["complete"] else "incomplete")
-    else:
+        for phase in pending:
+            accept(phase, serial(phase, context))
+    elif pending:
         stop = threading.Event()
         events = queue.Queue(maxsize=100)
         terminal_errors = []
         latest_reports = {}
+        completed_results = {}
         state_lock = threading.Lock()
-        budgets = {phase: ActiveBudget(PHASE_TIMEOUT_SECONDS) for phase in ROLES}
+        budgets = {phase: ActiveBudget(PHASE_TIMEOUT_SECONDS) for phase in pending}
 
         def send(event):
             # Backpressure bounds diagnostic buffering. Cancellation releases producers.
@@ -96,6 +117,8 @@ def run_team(
             send(("response", phase, snapshot))
 
         def run(phase):
+            if stop.is_set():
+                return
             try:
                 value = call(
                     provider,
@@ -107,6 +130,8 @@ def run_team(
                     on_response=lambda data: report(phase, data),
                     on_activity=lambda code, text: send(("activity", phase, (code, text))),
                 )
+                with state_lock:
+                    completed_results[phase] = value
                 send(("result", phase, value))
             except Exception as exc:
                 with state_lock:
@@ -121,21 +146,30 @@ def run_team(
         try:
             with ThreadPoolExecutor(max_workers=3, thread_name_prefix="pr-review") as pool:
                 try:
-                    for phase in ROLES:
+                    for phase in pending:
                         check()
                         emit(phase, "started")
                         response(phase, {})
                         pool.submit(copy_context().run, run, phase)
-                    while len(reports) < len(ROLES):
+                    failed = set()
+                    while len(reports) + len(failed) < len(phases):
                         check()
-                        for budget in budgets.values():
-                            budget.check()
+                        for name, budget in budgets.items():
+                            if name not in reports and name not in failed:
+                                budget.check()
                         try:
                             kind, phase, data = events.get(timeout=0.1)
                         except queue.Empty:
                             continue
                         if kind == "error":
                             response(phase, diagnostics.get(phase, {}))
+                            if (
+                                checkpoints is not None
+                                and isinstance(data, ProviderError)
+                                and data.kind not in {"auth", "quota"}
+                            ):
+                                failed.add(phase)
+                                continue
                             raise data
                         if kind == "response":
                             response(phase, data)
@@ -144,8 +178,17 @@ def run_team(
                         elif kind == "activity":
                             activity(phase, *data)
                         elif kind == "result":
-                            reports[phase] = validate_report(data, context)
-                            emit(phase, "ready" if reports[phase]["complete"] else "incomplete")
+                            try:
+                                accept(phase, data)
+                            except ProviderError as exc:
+                                if checkpoints is None:
+                                    raise
+                                reports.pop(phase, None)
+                                terminal_errors.append((phase, exc))
+                                failed.add(phase)
+                    if terminal_errors:
+                        phase, error = terminal_errors[0]
+                        raise error
                 finally:
                     stop.set()
         except Exception as caught:
@@ -156,9 +199,18 @@ def run_team(
                 raise capacity_error from None
             if not isinstance(caught, ProviderError):
                 raise
+            # Joined peers may have completed just before cancellation. Persist only
+            # fully validated results, on the controller, under execution fencing.
+            if checkpoints is not None:
+                for name, value in completed_results.items():
+                    if name not in reports:
+                        try:
+                            accept(name, value)
+                        except ProviderError:
+                            pass
             # Threads are joined now. Preserve observed account errors even if a peer
             # failed first. The worker applies each transport's quota/fallback policy.
-            for name in ROLES:
+            for name in phases:
                 if name in latest_reports:
                     response(name, latest_reports[name])
             for fatal_kind in ("auth", "quota"):
@@ -177,9 +229,12 @@ def run_team(
             response(phase, latest_reports.get(phase, diagnostics.get(phase, {})))
             raise
     # Stable report order makes synthesis input, audits and provider fallbacks reproducible.
-    reports = {phase: reports[phase] for phase in ROLES}
+    reports = {phase: reports[phase] for phase in phases}
     evidence = {**context, "reviewer_reports": reports}
     value = serial("synthesis", evidence)
     result = finalize(value, reports, context)
     emit("synthesis", "ready" if result["complete"] else "incomplete")
-    return result, {"reports": reports, "assessments": value["assessments"]}
+    audit = {"reports": reports, "assessments": value["assessments"]}
+    if checkpoints is not None:
+        audit["phase_sources"] = dict(checkpoints.sources)
+    return result, audit

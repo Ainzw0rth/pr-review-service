@@ -336,6 +336,21 @@ class JournalEntry(models.Model):
     last_error = models.CharField(max_length=180, blank=True)
 
 
+class PhaseCheckpoint(models.Model):
+    """Private validated analysis, independent of publication receipts."""
+
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="phase_checkpoints")
+    phase = models.CharField(max_length=32)
+    fingerprint = models.CharField(max_length=64)
+    encrypted_payload = models.TextField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["job", "phase"], name="unique_phase_checkpoint")
+        ]
+
+
 class ReviewCheckpoint(models.Model):
     """Private review artifact and delivery cursor; never returned by dashboard endpoints."""
 

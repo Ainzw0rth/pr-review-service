@@ -41,6 +41,7 @@ MESSAGES = {
     "cli_reconnecting": "CLI connection interrupted; native client reconnecting.",
     "cli_completed": "CLI finished its response; validating review output.",
     "intent_started": "Synthesizing grounded intent from collected evidence.",
+    "phase_reused": "Reusing a validated analysis phase with matching evidence and configuration.",
     "intent_ready": "Structured intent validated; evidence remains private.",
     "model": "Calling the selected model; awaiting provider response.",
     "unavailable": "Provider unavailable; checking the next configured connection.",

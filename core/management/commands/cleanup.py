@@ -11,6 +11,7 @@ from core.models import (
     JournalEntry,
     LoginAttempt,
     ModelProbe,
+    PhaseCheckpoint,
     ReviewCheckpoint,
     Webhook,
 )
@@ -30,6 +31,9 @@ class Command(BaseCommand):
             .delete()
         )
         ModelProbe.objects.filter(created_at__lt=cutoff).delete()
+        PhaseCheckpoint.objects.filter(
+            created_at__lt=cutoff, job__execution_claim__isnull=True
+        ).delete()
         ReviewCheckpoint.objects.filter(
             created_at__lt=cutoff, job__execution_claim__isnull=True
         ).delete()
