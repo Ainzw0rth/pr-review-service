@@ -3,6 +3,24 @@
 Self-hosted, human-triggered GitHub PR reviews. An organization-scoped dashboard shows
 queue progress, model activity and operational status; findings stay on GitHub.
 
+## See it in action
+
+[![Auto Reviewer: real specialist-review dashboard with fictional demo data](docs/media/review-progress.png)](docs/media/demo.mp4)
+
+**[Watch the 44-second walkthrough →](docs/media/demo.mp4)** · [Screenshots & local demo](docs/demo.md)
+
+Queue → specialist progress → repository settings. Real UI, fictional data; no customer
+information or real review results. Silent video with on-screen captions.
+
+<details>
+<summary>Play a short animated preview</summary>
+
+![Animated tour of the queue, review progress and Settings using fictional data](docs/media/demo-preview.gif)
+
+</details>
+
+## What it does
+
 - **Explicit review requests:** request the configured reviewer and apply `on review`.
   Pushes and discussion replies alone do not start reviews.
 - **Grounded review:** commit-pinned changes, linked issues, documentation and optional
