@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from .claims import fenced, heartbeat
 from .models import Job, JobActivity
+from .review_agents import job_roles
 from .workflow import current
 
 MESSAGES = {
@@ -41,6 +42,7 @@ MESSAGES = {
     "cli_completed": "CLI finished its response; validating review output.",
     "intent_started": "Synthesizing grounded intent from collected evidence.",
     "intent_ready": "Structured intent validated; evidence remains private.",
+    "phase_reused": "Reusing a validated analysis phase with matching evidence and configuration.",
     "model": "Calling the selected model; awaiting provider response.",
     "unavailable": "Provider unavailable; checking the next configured connection.",
     "quota": "Provider quota exhausted; waiting for the next availability check.",
@@ -135,7 +137,11 @@ def message(event):
 
     if event.code in CODES and event.detail:
         return event.detail
-    text = MESSAGES.get(event.code, "Operational event.")
+    text = MESSAGES.get(event.code)
+    if text is None:
+        phase, _, state = event.code.rpartition("_")
+        title = job_roles(event.job).get(phase)
+        text = f"{title} reviewer: {state}." if title else "Operational event."
     return text if event.count is None else f"{text}: {event.count}."
 
 
@@ -151,8 +157,17 @@ def record(job, code, *, count=None, detail="", source=""):
         or len(source) > 100
     ):
         raise ValueError("Invalid public CLI event.")
+    phase, _, state = code.rpartition("_")
+    custom_event = phase in job_roles(job) and state in {
+        "started",
+        "ready",
+        "incomplete",
+        "waiting",
+        "resumed",
+    }
     if (
         code not in MESSAGES
+        and not custom_event
         and code not in CODES
         or (count is not None and (type(count) is not int or not 0 <= count <= 1_000_000))
     ):

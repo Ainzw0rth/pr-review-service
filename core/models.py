@@ -2,8 +2,10 @@ import uuid
 
 from django.conf import settings
 from django.core.validators import MinValueValidator, RegexValidator
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
+
+from .review_agents import defaults as review_agent_defaults
 
 
 class Organization(models.Model):
@@ -114,6 +116,8 @@ class Repository(models.Model):
         help_text="Maximum related issues and PRs per review; blank means no item limit.",
     )
     enabled = models.BooleanField(default=True)
+    graph_enabled = models.BooleanField(null=True, blank=True, default=None)
+    webhook_id = models.CharField(max_length=32, blank=True)
     github_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
     webhook_credential = models.ForeignKey(Credential, on_delete=models.PROTECT, related_name="+")
     review_label = models.CharField(max_length=60, default="on review")
@@ -202,6 +206,7 @@ class Job(models.Model):
     reason = models.CharField(max_length=250, blank=True)
     provider_diagnostics = models.JSONField(default=dict, blank=True)
     provider_plan = models.JSONField(default=list, blank=True)
+    review_agents = models.JSONField(default=review_agent_defaults, editable=False)
     auto_approve = models.BooleanField(default=False)
     auto_merge = models.BooleanField(default=False)
     merge_method = models.CharField(
@@ -239,19 +244,25 @@ class Job(models.Model):
             return f"{hours}h {minutes}m {seconds}s"
         return f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
         if self._state.adding:
+            from .review_config import capture
             from .workflow_schema import snapshot as workflow_snapshot
 
-            self.workflow_revision, self.workflow_steps = workflow_snapshot(self.pr.repository)
+            revision, plan, self.review_agents = capture()
+            self.workflow_revision, self.workflow_steps = workflow_snapshot(
+                self.pr.repository, self.review_agents
+            )
             self.auto_approve, self.auto_merge, self.merge_method = Repository.objects.values_list(
                 "auto_approve", "auto_merge", "merge_method"
             ).get(pk=self.pr.repository_id)
         if self._state.adding and not self.workflow_version:
-            from .review_config import snapshot, version
+            from .review_config import version
 
-            revision, plan = snapshot()
-            self.workflow_version = version(self.provider_plan) if self.provider_plan else revision
+            self.workflow_version = (
+                version(self.provider_plan, self.review_agents) if self.provider_plan else revision
+            )
             if not self.provider_plan:
                 self.provider_plan = plan
         super().save(*args, **kwargs)
@@ -336,6 +347,21 @@ class JournalEntry(models.Model):
     last_error = models.CharField(max_length=180, blank=True)
 
 
+class PhaseCheckpoint(models.Model):
+    """Private validated analysis, independent of publication receipts."""
+
+    job = models.ForeignKey(Job, on_delete=models.CASCADE, related_name="phase_checkpoints")
+    phase = models.CharField(max_length=32)
+    fingerprint = models.CharField(max_length=64)
+    encrypted_payload = models.TextField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["job", "phase"], name="unique_phase_checkpoint")
+        ]
+
+
 class ReviewCheckpoint(models.Model):
     """Private review artifact and delivery cursor; never returned by dashboard endpoints."""
 
@@ -391,6 +417,7 @@ class ServiceSettings(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     concurrent_pr_reviews = models.PositiveSmallIntegerField(default=2)
     cli_account_concurrency = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    review_agents = models.JSONField(default=review_agent_defaults)
     draining = models.BooleanField(default=False)
     drain_generation = models.PositiveIntegerField(default=0)
 
@@ -406,6 +433,12 @@ class ServiceSettings(models.Model):
             raise ValidationError(
                 {"cli_account_concurrency": "Choose a whole number from 1 to 32."}
             )
+        from .review_agents import validate_agents
+
+        try:
+            self.review_agents = validate_agents(self.review_agents)
+        except ValueError as exc:
+            raise ValidationError({"review_agents": str(exc)}) from exc
         if self.pk != 1:
             raise ValidationError("Service settings is a singleton.")
 

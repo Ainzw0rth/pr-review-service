@@ -6,7 +6,8 @@ import re
 
 from django.db import transaction
 
-from .models import Provider
+from .models import Provider, ServiceSettings
+from .review_agents import configured, validate_agents
 
 FIELDS = ("id", "name", "kind", "model", "enabled", "effort", "credential_id")
 
@@ -15,13 +16,23 @@ def library():
     return list(Provider.objects.values(*FIELDS))
 
 
-def version(rows):
-    return hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()[:16]
+def version(rows, agents=None):
+    payload = {"models": rows, "agents": configured() if agents is None else agents}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+
+@transaction.atomic
+def capture():
+    ServiceSettings.objects.get_or_create(pk=1)
+    configuration = ServiceSettings.objects.select_for_update().get(pk=1)
+    rows = library()
+    agents = configuration.review_agents
+    return version(rows, agents), [row for row in rows if row["enabled"]], agents
 
 
 def snapshot():
-    rows = library()
-    return version(rows), [row for row in rows if row["enabled"]]
+    revision, rows, _ = capture()
+    return revision, rows
 
 
 def providers_for_job(job):
@@ -48,10 +59,13 @@ class Conflict(ValueError):
 
 @transaction.atomic
 def save_library(data):
+    configuration, _ = ServiceSettings.objects.get_or_create(pk=1)
+    configuration = ServiceSettings.objects.select_for_update().get(pk=1)
     rows = list(Provider.objects.select_for_update())
     current = library()
     if data.get("version") != version(current):
         raise Conflict("Workflow changed in another tab. Reload before saving.")
+    agents = validate_agents(data.get("agents", configuration.review_agents))
     incoming = data.get("models")
     if not isinstance(incoming, list) or not 1 <= len(incoming) <= 100:
         raise ValueError("Provide 1–100 model configurations.")
@@ -103,3 +117,6 @@ def save_library(data):
         raise ValueError("The workflow needs at least one enabled model.")
     for row in validated:
         row.save()
+
+    configuration.review_agents = agents
+    configuration.save(update_fields=["review_agents"])

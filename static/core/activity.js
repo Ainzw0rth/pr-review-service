@@ -144,7 +144,7 @@
     const content = element('div','session-activity');
     content.append(element('h5','try-label','Public phase activity'));
     const events = terminalEvents.filter(event => {
-      const sourceMatches = model && event.source === `${model.title.slice(0,80)} / ${phase}`;
+      const sourceMatches = model && event.source === `${model.title.slice(0,Math.min(80,97 - phase.length))} / ${phase}`;
       const exactAttempt = event.model_attempt_id !== undefined && String(event.model_attempt_id) === String(attempt?.id);
       if (event.model_attempt_id !== undefined && !exactAttempt) return false;
       if (!(sourceMatches || exactAttempt && event.phase === phase)) return false;
@@ -174,7 +174,8 @@
     const tree = element('section','review-tree');
     tree.setAttribute('aria-label','Service-managed reviewer sessions');
     const state = current?.attempt.state || 'pending';
-    const phases = {code_review:'code',security_review:'security',test_review:'tests',synthesis:'synthesis'};
+    const phases = Object.fromEntries(stages.map(stage => [stage.id, {code_review:'code',security_review:'security',test_review:'tests',synthesis:'synthesis'}[stage.id] || stage.id.replace(/_review$/, '')]));
+    stages.forEach(stage => { phaseNames[phases[stage.id]] = stage.title; phaseLabels[phases[stage.id]] = stage.title; });
     if (Array.isArray(current?.attempt.phases)) {
       stages = stages.map(stage => {
         const recorded = current.attempt.phases.find(item => item.phase === phases[stage.id]);
@@ -231,7 +232,7 @@
     const focused = graph.contains(document.activeElement) ? document.activeElement.dataset.flowFocus : null;
     const focusedGroup = focused ? document.activeElement.closest('[data-flow-key]')?.dataset.flowKey : null;
     const scrollPositions = new Map([...graph.querySelectorAll('[data-flow-scroll]')].map(node => [node.dataset.flowScroll,node.scrollTop]));
-    const specialists = flow.stages.filter(n => ['code_review','security_review','test_review','synthesis'].includes(n.id));
+    const specialists = flow.stages.filter(n => ['code_review','security_review','test_review','synthesis'].includes(n.id) || /^agent_[0-9a-f]{12}_review$/.test(n.id));
     const sessions = flow.models.flatMap(model => model.attempts.map(attempt => ({model,attempt})));
     const current = sessions.reduce((latest,row) => !latest || row.attempt.id > latest.attempt.id ? row : latest,null);
     function overall(nodes) {
@@ -245,7 +246,7 @@
       if (nodes.some(n => ['done','success','not_needed'].includes(n.state))) return panel.dataset.jobState === 'running' ? 'running' : 'attention';
       return 'pending';
     }
-    const reviewNodes = current?.attempt.phases?.length ? current.attempt.phases.filter(phase => ['code','security','tests','synthesis'].includes(phase.phase)) : specialists;
+    const reviewNodes = current?.attempt.phases?.length ? current.attempt.phases.filter(phase => ['code','security','tests','synthesis'].includes(phase.phase) || /^agent_[0-9a-f]{12}$/.test(phase.phase)) : specialists;
     const overview = element('ol','review-progress');
     const groups = [
       ['evidence','Evidence','Source, conversations and project agreements.',flow.stages.filter(n => ['files','discussion','docs','graph','intent'].includes(n.id))],

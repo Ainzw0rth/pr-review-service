@@ -1,0 +1,25 @@
+{% extends 'core/base.html' %}{% load static %}
+{% block title %}{% if repository %}{{ repository.full_name }}{% else %}Add repository{% endif %}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/settings.css' %}"><script src="{% static 'core/settings.js' %}" defer></script>{% endblock %}
+{% block content %}
+<div class="settings-page repository-editor">
+<a href="{% url 'service_settings' %}" class="back-link">← Settings</a>
+<section class="page-heading"><div><h1>{% if repository %}Repository.{% else %}Add repository.{% endif %}</h1><p class="lede">{% if repository %}{{ repository.full_name }}{% else %}Connect GitHub. Keep the same review workflow.{% endif %}</p></div>{% if repository %}<span class="status">{% if repository.webhook_id %}Connected{% else %}Not verified{% endif %}</span>{% endif %}</section>
+{% if error %}<p class="notice" role="alert">{{ error }}</p>{% endif %}
+<form method="post" class="repository-form" data-settings-save>{% csrf_token %}<input type="hidden" name="version" value="{{ version }}">
+{% if form.non_field_errors %}<div class="notice" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+<section class="settings-section"><h2>Repository</h2><div class="settings-field-grid">
+<div><label for="{{ form.full_name.id_for_label }}">Repository</label>{{ form.full_name }}{{ form.full_name.errors }}<p class="helptext">owner/repository</p></div>
+<div><label for="{{ form.organization.id_for_label }}">Workspace</label>{{ form.organization }}{{ form.organization.errors }}</div>
+<div><label for="{{ form.reviewer.id_for_label }}">GitHub reviewer</label>{{ form.reviewer }}{{ form.reviewer.errors }}<p class="helptext">Review requests for this account enter the queue.</p></div>
+</div></section>
+<section class="settings-section"><h2>GitHub connection</h2><div class="settings-field-grid"><div><label for="{{ form.github_credential.id_for_label }}">Saved connection</label>{{ form.github_credential }}{{ form.github_credential.errors }}</div><div><label for="{{ form.github_token.id_for_label }}">{% if repository %}Replace token{% else %}Or use a new token{% endif %}</label>{{ form.github_token }}{{ form.github_token.errors }}<p class="helptext">Stored encrypted. Never shown again.</p></div></div><p class="note">GitHub access must include this repository. Webhook setup needs repository administration permission.</p></section>
+<section class="settings-section"><h2>Monitoring</h2><div class="settings-switch-row"><div><label for="{{ form.enabled.id_for_label }}">Watch review requests</label><p>Use the existing reviewer and label trigger.</p></div><label class="setting-switch">{{ form.enabled }}<span aria-hidden="true"></span><span class="sr-only">Watch review requests</span></label>{{ form.enabled.errors }}</div><div class="settings-switch-row"><div><label for="{{ form.graph_enabled.id_for_label }}">Code graph</label><p>Include related source beyond the changed lines.</p></div><label class="setting-switch">{{ form.graph_enabled }}<span aria-hidden="true"></span><span class="sr-only">Include code graph evidence</span></label>{{ form.graph_enabled.errors }}</div></section>
+<details class="disclosure repository-advanced" {% if form.review_label.errors or form.feedback_label.errors or form.approved_label.errors or form.required_checks.errors or form.instructions.errors %}open{% endif %}><summary>Advanced <span class="disclosure-hint">Labels, CI &amp; instructions</span></summary><div class="settings-field-grid">
+<div><label for="{{ form.review_label.id_for_label }}">Review label</label>{{ form.review_label }}{{ form.review_label.errors }}</div><div><label for="{{ form.feedback_label.id_for_label }}">Feedback label</label>{{ form.feedback_label }}{{ form.feedback_label.errors }}</div><div><label for="{{ form.approved_label.id_for_label }}">Approved label</label>{{ form.approved_label }}{{ form.approved_label.errors }}</div>
+</div><div class="settings-field"><label for="{{ form.required_checks.id_for_label }}">CI check names</label>{{ form.required_checks }}{{ form.required_checks.errors }}<p class="helptext">One per line. Advisory for reviews; required for auto-merge.</p></div><div class="settings-field"><label for="{{ form.instructions.id_for_label }}">Repository instructions</label>{{ form.instructions }}{{ form.instructions.errors }}</div></details>
+<div class="settings-save"><a href="{% url 'service_settings' %}" class="text-button">Cancel</a><button type="submit">{% if repository %}Save repository{% else %}Add repository{% endif %}</button></div>
+</form>
+{% if repository %}<section class="settings-section repository-connection"><div><h2>Webhook</h2><p class="note">{% if repository.webhook_id %}GitHub sends review requests to this service.{% else %}Verify GitHub access and webhook delivery for this repository.{% endif %}</p></div><form method="post" action="{% url 'repository_connect' repository.pk %}" data-settings-action>{% csrf_token %}<button type="submit" class="text-button">{% if repository.webhook_id %}Check connection{% else %}Verify connection{% endif %}</button></form></section>{% endif %}
+</div>
+{% endblock %}

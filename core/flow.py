@@ -4,6 +4,7 @@ from django.utils.dateparse import parse_datetime
 
 from .models import Provider
 from .providers import REFUSAL_CATEGORIES, failure_description
+from .review_agents import job_roles
 from .usage import public_usage
 from .workflow_schema import LEGACY_STEPS, TEAM_REVISIONS
 
@@ -21,7 +22,8 @@ def attempt_phases(job, attempt, events, next_started=None):
     ]
     phases = []
     timeline = attempt.diagnostics.get("phase_timeline", [])
-    timeline = timeline[:5] if isinstance(timeline, list) else []
+    timeline = timeline[:10] if isinstance(timeline, list) else []
+    phase_names = ("intent", *job_roles(job), "synthesis")
     usage = public_usage(attempt.diagnostics)
     used = {row.get("phase") for row in usage["passes"]}
 
@@ -42,12 +44,12 @@ def attempt_phases(job, attempt, events, next_started=None):
 
     tracked_history = any(event.code == "intent_started" for event in history) or any(
         isinstance(row, dict)
-        and row.get("phase") in ("intent", "code", "security", "tests", "synthesis")
+        and row.get("phase") in phase_names
         and row.get("state") in ("running", "waiting", "done", "incomplete")
         and recorded_time(row.get("started_at"))
         for row in timeline
     )
-    for phase in ("intent", "code", "security", "tests", "synthesis"):
+    for phase in phase_names:
         entered = next((e for e in history if e.code == f"{phase}_started"), None)
         finished = next(
             (e for e in reversed(history) if e.code in {f"{phase}_ready", f"{phase}_incomplete"}),
@@ -109,6 +111,7 @@ def attempt_phases(job, attempt, events, next_started=None):
                 state = "skipped" if tracked_history else "unknown"
         phases.append(
             {
+                "title": job_roles(job).get(phase, phase.title()),
                 "phase": phase,
                 "state": state,
                 "started_at": began,
@@ -369,9 +372,22 @@ def snapshot(job, events):
             "synthesis",
             "Verify evidence, reconcile findings & retain attribution",
         ),
+    ) + tuple(
+        (
+            key + "_review",
+            name + " reviewer",
+            key,
+            "Owner-configured specialist; fixed evidence and safety policy applies",
+        )
+        for key, name in job_roles(job).items()
+        if key.startswith("agent_")
     ):
         if includes(key, False):
             stages.append(phase_node(key, title, phase, detail, events[latest_intent:]))
+    synthesis_stage = next((stage for stage in stages if stage["id"] == "synthesis"), None)
+    if synthesis_stage:
+        stages.remove(synthesis_stage)
+        stages.append(synthesis_stage)
     stages.append(
         node(
             "publication",
@@ -485,7 +501,7 @@ def snapshot(job, events):
             "tests",
             "specialists",
             "synthesis",
-        }:
+        } | set(job_roles(job)):
             phase = None
         group["attempts"].append(
             {
@@ -496,8 +512,7 @@ def snapshot(job, events):
                     row["phase"]
                     for row in attempt.diagnostics.get("phase_timeline", [])
                     if isinstance(row, dict)
-                    and row.get("phase")
-                    in {"intent", "review", "code", "security", "tests", "synthesis"}
+                    and row.get("phase") in {"intent", "review", "synthesis"} | set(job_roles(job))
                     and row.get("state") == "waiting"
                 ]
                 if state == "running"
@@ -557,7 +572,7 @@ def snapshot(job, events):
     model_detail = (
         "Saved analysis reused for delivery; no additional model call."
         if "delivery_resume" in codes
-        else "Grounded intent → independent code, security and test reviews → evidence-backed adjudication. API reviewers can overlap when account capacity is available; subscription CLI sessions run sequentially."
+        else "Grounded intent → selected independent specialist reviews → evidence-backed adjudication. API reviewers can overlap when account capacity is available; subscription CLI sessions run sequentially."
         if includes("synthesis", False)
         else "Each model extracts intent first, then reviews code after the intent summary is validated."
         if includes("intent", False)

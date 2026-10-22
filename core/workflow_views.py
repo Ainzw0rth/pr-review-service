@@ -10,7 +10,7 @@ from django.shortcuts import render
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_http_methods
 
-from .models import ModelProbe, Provider
+from .models import ModelProbe, Provider, ServiceSettings
 from .retries import is_retry_owner
 from .review_config import Conflict, library, save_library, version
 
@@ -19,8 +19,12 @@ def owner_context(request):
     return {"workflow_owner": is_retry_owner(request.user)}
 
 
+@transaction.atomic
 def state():
+    ServiceSettings.objects.get_or_create(pk=1)
+    configuration = ServiceSettings.objects.select_for_update().get(pk=1)
     rows = library()
+    agents = configuration.review_agents
     probes = []
     for probe in ModelProbe.objects.order_by("-id")[:20]:
         probes.append(
@@ -32,7 +36,8 @@ def state():
             }
         )
     return {
-        "version": version(rows),
+        "version": version(rows, agents),
+        "agents": agents,
         "models": [{k: v for k, v in row.items() if k != "credential_id"} for row in rows],
         "probes": probes,
     }
@@ -57,7 +62,7 @@ def workflow_state(request):
         return HttpResponseForbidden("Only the configured owner can configure workflows.")
     if request.method == "POST":
         try:
-            if len(request.body) > 100_000:
+            if len(request.body) > 250_000:
                 raise ValueError("Workflow payload too large.")
             data = json.loads(request.body)
             if not isinstance(data, dict):

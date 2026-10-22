@@ -206,6 +206,38 @@ Treat setup/reset/invite URLs as secrets. Do not paste them into public tickets 
 6. Optionally configure Google Sheets using the confirmed mapping below.
 7. Generate invitations from the Organization admin action. Members receive no platform-admin rights.
 
+### Configure repositories and reviewers in the UI
+
+The configured owner now has **Settings** in the main navigation. **Add repository**
+accepts `owner/repository`, workspace, requested reviewer and a saved GitHub connection or
+new write-only token. Saving checks repository access, creates missing workflow labels,
+and creates or updates this service's pull-request webhook. The token must have the target
+repository and webhook-administration permissions; failed setup retains the local repository
+and offers **Verify connection**. Stored tokens and webhook secrets are never rendered.
+See GitHub's [repository webhook API](https://docs.github.com/en/rest/repos/webhooks).
+
+Repository rows support Edit and Pause/Resume without deleting history. Review policy stays
+collapsed until opened; automatic approval and merge remain separate opt-ins and both default
+off for new repositories. CI is advisory for review approval and mandatory for auto-merge.
+Capacity and per-repository graph collection can be edited here without changing code or the
+repository environment allowlist. Existing graph configuration is inherited until explicitly
+changed. Existing webhooks with no saved setup receipt show **Not verified**, not disconnected.
+
+**Workflow** places the library beside the complete review pipeline: evidence → model/fallback
+order → grounded intent → enabled specialists → adjudication → GitHub. Models can be dragged
+between the library and sequence, or reordered using keyboard-accessible buttons.
+The **Reviewers** tab enables/disables Code, Security and Tests, and adds custom specialists
+with a name and review instructions. Keep at least one enabled reviewer; up to eight run per
+review, with at most twelve in the library. Built-in policies remain fixed. Specialist execution
+still fans out at most three ways, subject to existing account-capacity limits.
+
+Model configuration, specialist instructions and enabled reviewers are captured together for
+new jobs. Queued/running reviews retain their original snapshot; legacy jobs retain all three
+built-ins. Custom reviewers use the same citation, evidence, blocking-finding and adjudication
+validation as built-ins. Their progress and provider-reported usage appear in the job detail.
+Stale settings/workflow saves are rejected without silently applying another tab's changes.
+All interactive motion respects reduced-motion preferences.
+
 ### GitHub account
 
 Use an authorized token for Louis's account, restricted to the target repository where possible.
@@ -875,15 +907,37 @@ New specialist and adjudication phases each have a 30-minute work budget, with
 existing transport cleanup timeouts still applying. Existing context/response size
 limits and API output-token caps remain enforced. CLI evidence recovery is still
 limited to one fresh pass per phase. This means five model phases per successful
-provider attempt (intent, three specialists, synthesis), plus bounded CLI recovery;
-fallback providers rerun the whole sequence. Failed calls, malformed output, invalid
-citations and unread evidence still stop that team attempt. A valid specialist
+initial review (intent, three specialists, synthesis), plus bounded CLI recovery.
+Validated intent and complete specialist reports are saved as encrypted analysis
+checkpoints. Fallback providers reuse those phases and run only missing phases and
+adjudication. Failed calls, malformed output, invalid citations and unread evidence
+cannot be checkpointed. On an ordinary specialist failure, other active specialists
+can finish and save their work; authentication/quota errors and cancellation retain
+the existing stop policy. A valid specialist
 assessment with limited coverage instead continues through the remaining reviewers
 and adjudication. The host forces the result to incomplete, blocking feedback, with
 limitations retained; it cannot approve, merge or resolve threads. Completeness
 describes review coverage, not defect-free code or passing CI. Existing quota and
 authentication handling is unchanged; deadlines and unread-evidence failures try
 the next configured provider.
+
+Analysis checkpoints also survive worker restarts and explicit dashboard retries,
+but do not automatically requeue interrupted jobs. Reuse requires an exact fingerprint
+of the commit, collected evidence (including CI), intent dependency, workflow/model
+configuration, enabled specialists, and current prompt/schema contracts. Only the
+same job or its explicit same-PR retry ancestors are eligible; a new human review
+cycle does not inherit old analysis. Changed inputs cause a fresh review. Cached
+results are revalidated before use, incomplete/corrupt/expired results are ignored,
+and stale workers cannot save. Checkpoints expire after 90 days and are removed by
+normal cleanup. The encrypted final audit records each saved phase's originating
+job/provider/model. Reused phases emit a progress event without adding model usage.
+
+These checkpoints are separate from publication checkpoints: synthesis, current
+eligibility checks, and existing receipt-aware delivery still govern GitHub writes.
+They do not resume an interrupted CLI session or change its fresh-pass evidence
+recovery policy. Migration `0023_phase_checkpoints` requires the normal drained,
+backed-up application deployment; no CLI image rebuild is needed for this change.
+Historical attempts without phase checkpoints cannot recover previously lost work.
 
 Specialist reports and adjudication decisions stay in the encrypted delivery
 checkpoint and its final compact audit. Delivery-only retries reuse saved analysis
@@ -1090,8 +1144,9 @@ docker image inspect --format '{{.Id}}' auto-reviewer-graph:2.3.9
 ```
 
 Set `GRAPH_RUNNER_IMAGE` to that immutable image ID and `GRAPH_CACHE_VOLUME` to the
-volume name. Enable chosen repositories with a comma-separated `GRAPH_REPOSITORIES`,
-e.g. `MarkAny-GaneshaIT/AnyOne-2.0`. Keep it empty to disable this integration. Apply
+volume name. Enable graph collection per repository in **Settings**. Existing deployments
+inherit the comma-separated `GRAPH_REPOSITORIES` allowlist until a repository override is saved.
+An empty legacy allowlist disables graphs only for repositories without an explicit override. Apply
 configuration with the usual drained deployment; never restart an active review.
 Prewarm an explicit commit using the newly deployed management command:
 

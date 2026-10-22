@@ -1,31 +1,47 @@
 {% extends 'core/base.html' %}{% load static %}
 {% block title %}Workflow{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'core/workflow.css' %}">{% endblock %}
 {% block content %}
-<section class="page-heading"><div><h1>Workflow.</h1><p class="lede">Choose the primary model and its fallbacks.</p></div><span class="quiet" id="workflow-version">Loading configuration…</span></section>
+<section class="page-heading"><div><h1>Workflow.</h1><p class="lede">One review, from pull request to published findings.</p></div><span class="quiet" id="workflow-version">Loading configuration…</span></section>
 <form id="workflow-form">{% csrf_token %}<div class="workflow-toolbar"><p id="workflow-status" role="status" aria-live="polite">Loading workflow…</p><button id="workflow-save" type="submit" disabled>Save changes</button></div></form>
-<div id="workflow-editor" hidden><div class="workflow-layout">
-<section class="workflow-canvas" aria-label="Review sequence">
-  <h2>Model order</h2>
-  <ol id="workflow-chain" aria-label="Models in execution order"></ol>
-  <p class="workflow-team">Code · Security · Tests <span>→ Adjudication → GitHub</span></p>
-  <details class="workflow-library disclosure" data-model-library><summary>Add or enable a model</summary>
-    <div id="model-library"></div><button id="model-new" type="button" class="text-button">+ New model</button>
-    <p class="note">Existing models stay in the library when removed from the order. New API connections require a credential in Administration.</p>
-  </details>
-</section>
-<aside class="panel workflow-settings" id="model-config-panel" hidden>
-  <div class="section-heading"><h2>Edit model</h2><button id="model-close" type="button" class="text-button">Close editor</button></div>
-  <p id="model-empty" hidden>Select a model to edit its settings.</p><form id="model-settings" hidden>
-    <label for="model-name">Display name</label><input id="model-name" maxlength="100" required>
-    <label for="model-kind">Connection</label><select id="model-kind"><option value="codex_cli">OpenAI · Codex CLI</option><option value="claude_cli">Anthropic · Claude Code CLI</option><option value="openai">OpenAI · API</option><option value="anthropic">Anthropic · API</option></select>
-    <label for="model-id">Exact model ID</label><input id="model-id" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]*" required spellcheck="false" autocomplete="off">
-    <label for="model-effort">Reasoning effort · Codex CLI</label><select id="model-effort"><option value="">Runner default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select>
-    <button type="submit" class="text-button">Update node preview</button><button id="model-test" type="button" class="text-button">Test saved connection</button>
-    <p class="note">Testing may use quota, runs only while the worker is idle, and never posts to GitHub. Save before testing.</p><p id="model-probe" role="status" class="note"></p>
-  </form>
-</aside>
-</div></div>
-<details class="disclosure"><summary>How reviews run</summary><p class="note">Evidence and required CI are checked first. Each selected model synthesizes grounded intent, then runs independent Code, Security and Test reviews followed by evidence-backed adjudication. API specialists can overlap; subscription sessions run sequentially.</p><p class="note">Known exhausted accounts are skipped. Recoverable failures advance to the next model. GitHub delivery requires a valid result; CI and publication guards remain in force. Saved model changes apply only to new jobs, not queued or running jobs.</p></details>
+<div id="workflow-editor" class="workflow-workspace" hidden>
+  <aside class="workflow-shelf" aria-label="Workflow library">
+    <div class="workflow-shelf-heading"><h2>Library</h2><span class="quiet">CONFIGURE</span></div>
+    <div class="workflow-tabs" role="tablist" aria-label="Library type"><button id="models-tab" type="button" role="tab" aria-selected="true" aria-controls="models-library">Models</button><button id="reviewers-tab" type="button" role="tab" aria-selected="false" aria-controls="reviewers-library" tabindex="-1">Reviewers</button></div>
+    <section id="models-library" role="tabpanel" aria-labelledby="models-tab"><p class="workflow-hint">Drag into model order, or choose Add.</p><div id="model-library"></div><button id="model-new" type="button" class="text-button workflow-add">+ New CLI model</button><details class="workflow-help"><summary>API connections</summary><p>Configure credentials in <a href="/admin/core/provider/">Administration</a>. No credentials are stored here.</p></details></section>
+    <section id="reviewers-library" role="tabpanel" aria-labelledby="reviewers-tab" hidden><p class="workflow-hint">Enabled reviewers share the same grounded intent.</p><div id="reviewer-library"></div><button id="reviewer-new" type="button" class="text-button workflow-add">+ Custom reviewer</button><p class="workflow-hint">1–8 enabled · up to 12 total</p></section>
+    <section id="model-config-panel" class="workflow-inspector" aria-labelledby="inspector-heading" hidden>
+      <div class="section-heading"><h2 id="inspector-heading">Edit model</h2><button id="model-close" type="button" class="text-button">Done</button></div>
+      <p class="workflow-hint">Edits stay in your draft. Save changes to apply.</p>
+      <form id="model-settings" hidden>
+        <label for="model-name">Display name</label><input id="model-name" maxlength="100" required>
+        <label for="model-kind">Connection</label><select id="model-kind"><option value="codex_cli">OpenAI · Codex CLI</option><option value="claude_cli">Anthropic · Claude Code CLI</option><option value="openai">OpenAI · API</option><option value="anthropic">Anthropic · API</option></select>
+        <label for="model-id">Exact model ID</label><input id="model-id" maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]*" required spellcheck="false" autocomplete="off">
+        <label for="model-effort">Reasoning effort</label><select id="model-effort"><option value="">Runner default</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="xhigh">Extra high</option></select>
+        <button id="model-test" type="button" class="text-button">Test saved connection</button><p id="model-probe" role="status" class="workflow-hint"></p><details class="workflow-help"><summary>About connection tests</summary><p>Save before testing. Uses quota, waits for an idle worker, and never posts to GitHub.</p></details>
+        <button id="model-discard" type="button" class="text-button" hidden>Discard new model</button>
+      </form>
+      <form id="reviewer-settings" hidden>
+        <label for="reviewer-name">Reviewer name</label><input id="reviewer-name" maxlength="80" required>
+        <label for="reviewer-instructions">Review instructions</label><textarea id="reviewer-instructions" maxlength="8000" rows="7" required></textarea>
+        <p class="workflow-hint" id="reviewer-builtin-note" hidden>Built-in reviewer. Its review scope stays fixed.</p>
+        <button id="reviewer-remove" type="button" class="text-button" hidden>Remove from library</button>
+      </form>
+    </section>
+  </aside>
+  <section class="workflow-pipeline" aria-label="Review pipeline">
+    <div class="workflow-pipeline-heading"><h2>Execution</h2><span class="quiet">NEW JOBS ONLY</span></div>
+    <ol class="workflow-stages">
+      <li class="workflow-stage"><span class="workflow-step" aria-hidden="true">01</span><div class="workflow-stage-body"><h3>Pull request</h3><p>Review requested on GitHub.</p></div></li>
+      <li class="workflow-stage"><span class="workflow-step" aria-hidden="true">02</span><div class="workflow-stage-body"><details class="workflow-stage-details"><summary><span>Evidence</span><span class="workflow-stage-caption">Read before reasoning</span></summary><ul class="workflow-evidence"><li>Changed files &amp; discussion</li><li>Repository docs &amp; dependency graph</li><li>Advisory CI signals</li><li>Isolated tests, when configured</li></ul></details></div></li>
+      <li class="workflow-stage"><span class="workflow-step" aria-hidden="true">03</span><div class="workflow-stage-body"><div class="section-heading"><h3>Model order</h3><span class="workflow-stage-caption">PRIMARY → FALLBACKS</span></div><ol id="workflow-chain" aria-label="Models in execution order"></ol><p class="workflow-hint">Recoverable failures move to the next model.</p></div></li>
+      <li class="workflow-stage"><span class="workflow-step" aria-hidden="true">04</span><div class="workflow-stage-body"><h3>Grounded intent</h3><p>Establish what should change, backed by evidence.</p></div></li>
+      <li class="workflow-stage"><span class="workflow-step" aria-hidden="true">05</span><div class="workflow-stage-body"><div class="section-heading"><h3>Specialist reviews</h3><span id="reviewer-count" class="workflow-stage-caption"></span></div><div id="workflow-reviewers" class="workflow-branches" aria-label="Enabled specialist reviewers"></div><p class="workflow-hint">Independent sessions; overlap when account capacity allows.</p></div></li>
+      <li class="workflow-stage"><span class="workflow-step" aria-hidden="true">06</span><div class="workflow-stage-body"><h3>Adjudication</h3><p>Resolve findings against evidence. Keep actionable issues.</p></div></li>
+      <li class="workflow-stage"><span class="workflow-step" aria-hidden="true">07</span><div class="workflow-stage-body"><h3>Publish to GitHub</h3><p>Validated review, with publication guards in force.</p></div></li>
+    </ol>
+  </section>
+</div>
 <noscript><p class="notice">Enable JavaScript to edit the workflow.</p></noscript>
 <script src="{% static 'core/workflow.js' %}" defer></script>
 {% endblock %}

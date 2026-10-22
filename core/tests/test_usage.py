@@ -50,3 +50,28 @@ class UsageTests(TestCase):
         )
         self.assertIsNone(result["totals"]["input_tokens"])
         self.assertIsNone(result["totals"]["output_tokens"])
+
+    def test_custom_specialist_sessions_are_counted_with_bounded_public_names(self):
+        phases = ["intent", *[f"agent_{index:012x}" for index in range(8)], "synthesis"]
+        result = public_usage(
+            {
+                "phase_usage": [
+                    {
+                        "phase": phase,
+                        "passes": [{"input_tokens": 2, "output_tokens": 1, "secret": "private"}]
+                        * 2,
+                    }
+                    for phase in phases
+                ]
+            }
+        )
+        self.assertEqual(result["session_count"], 20)
+        self.assertEqual(result["totals"]["input_tokens"], 40)
+        self.assertEqual(result["passes"][-1]["phase"], "synthesis")
+        self.assertNotIn("private", str(result))
+        malformed = public_usage(
+            {"phase_usage": [{"phase": "private prompt", "passes": [{"input_tokens": 7}]}]}
+        )
+        self.assertEqual(malformed["session_count"], 0)
+        invalid = public_usage({"phase_usage": [{"phase": [], "passes": []}]})
+        self.assertEqual(invalid["session_count"], 0)

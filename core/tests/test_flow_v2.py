@@ -242,7 +242,7 @@ class WorkflowV2Tests(TestCase):
                 self.assertIsNone(value["phase"])
 
     def test_new_jobs_snapshot_explicit_v2_steps(self):
-        self.assertEqual(self.job.workflow_revision, "v3")
+        self.assertEqual(self.job.workflow_revision, "v3.1")
         self.assertEqual(
             list(self.stages()),
             [

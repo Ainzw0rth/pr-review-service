@@ -60,6 +60,8 @@ class GitHub:
             or any(ord(c) < 32 for c in decoded)
         ):
             raise IntegrationError("GitHub destination rejected.")
+        if path == "/":
+            return API + self.prefix
         if parsed.path.startswith("/repos/"):
             if not parsed.path.startswith(self.prefix + "/"):
                 raise IntegrationError("Cross-repository destination rejected.")

@@ -47,7 +47,7 @@ class WorkerTeamTests(TestCase):
 
     def test_new_jobs_run_three_specialists_then_publish_one_review(self):
         job, gh, model = self.run_v2(self.complete)
-        self.assertEqual(job.workflow_revision, "v3")
+        self.assertEqual(job.workflow_revision, "v3.1")
         self.assertEqual(job.status, "completed", job.reason)
         tasks = [call.kwargs["task"] for call in model.call_args_list]
         self.assertEqual(tasks[0], "intent")
@@ -99,6 +99,108 @@ class WorkerTeamTests(TestCase):
         self.assertEqual(
             list(job.model_attempts.values_list("status", flat=True)), ["unavailable", "success"]
         )
+
+    @override_settings(CLI_ACCOUNT_CONCURRENCY=1)
+    def test_fallback_reuses_validated_intent_and_completed_specialist(self):
+        self.first.kind = "codex_cli"
+        self.first.save()
+
+        def call(provider, evidence, cancelled, **kwargs):
+            if provider.pk == self.first.pk and kwargs["task"] == "review_security":
+                raise ProviderError("unavailable")
+            return self.complete(provider, evidence, cancelled, **kwargs)
+
+        job, gh, model = self.run_v2(call)
+        self.assertEqual(job.status, "completed", job.reason)
+        fallback = [
+            c.kwargs["task"] for c in model.call_args_list if c.args[0].pk == self.second.pk
+        ]
+        self.assertCountEqual(fallback, ["review_security", "review_tests", "review_synthesis"])
+        self.assertEqual(job.phase_checkpoints.count(), 4)
+        for row in job.phase_checkpoints.all():
+            self.assertNotIn("Checked affected behavior", row.encrypted_payload)
+        audit = json.loads(decrypt(job.review_checkpoint.encrypted_payload))["review_team"]
+        self.assertEqual(audit["phase_sources"]["code"]["model"], self.first.model)
+        self.assertEqual(audit["phase_sources"]["security"]["model"], self.second.model)
+
+    def test_synthesis_failure_only_retries_synthesis(self):
+        def call(provider, evidence, cancelled, **kwargs):
+            if provider.pk == self.first.pk and kwargs["task"] == "review_synthesis":
+                raise ProviderError("unavailable")
+            return self.complete(provider, evidence, cancelled, **kwargs)
+
+        job, _, model = self.run_v2(call)
+        self.assertEqual(job.status, "completed", job.reason)
+        self.assertEqual(
+            [c.kwargs["task"] for c in model.call_args_list if c.args[0].pk == self.second.pk],
+            ["review_synthesis"],
+        )
+        usage = public_usage(job.model_attempts.last().diagnostics)
+        self.assertEqual(usage["session_count"], 1)
+        self.assertEqual(usage["totals"]["input_tokens"], 20)
+
+    def test_parallel_failure_retains_successful_peers(self):
+        barrier = threading.Barrier(3)
+
+        def call(provider, evidence, cancelled, **kwargs):
+            task = kwargs["task"]
+            if provider.pk == self.first.pk and task.startswith("review_"):
+                barrier.wait(timeout=3)
+                if task == "review_security":
+                    raise ProviderError("unavailable")
+                time.sleep(0.05)
+            return self.complete(provider, evidence, cancelled, **kwargs)
+
+        job, _, model = self.run_v2(call)
+        self.assertEqual(job.status, "completed", job.reason)
+        self.assertCountEqual(
+            [c.kwargs["task"] for c in model.call_args_list if c.args[0].pk == self.second.pk],
+            ["review_security", "review_synthesis"],
+        )
+
+    def test_new_explicit_retry_resumes_saved_analysis_without_republishing(self):
+        from core.claims import claim
+        from core.retries import retry_job
+        from core.worker import run_job
+
+        def fail_synthesis(provider, evidence, cancelled, **kwargs):
+            if kwargs["task"] == "review_synthesis":
+                raise ProviderError("unavailable")
+            return self.complete(provider, evidence, cancelled, **kwargs)
+
+        old, gh, model = self.run_v2(fail_synthesis)
+        self.assertEqual(old.status, "attention", old.reason)
+        self.assertEqual(gh.writes, [])
+        self.assertFalse(hasattr(old, "review_checkpoint"))
+        evidence = copy.deepcopy(
+            next(c.args[1] for c in model.call_args_list if c.kwargs["task"] == "review_code")
+        )
+        evidence.pop("intent")
+        with (
+            patch("core.github.GitHub") as client,
+            patch(
+                "core.workflow.canonical_cycle",
+                return_value={"eligible": True, "key": old.pr.canonical_trigger},
+            ),
+        ):
+            client.return_value.pull.return_value = self.snapshot()
+            retry_job(old, "owner")
+        retry = claim()
+        self.assertIsNotNone(retry)
+        with (
+            patch("core.github.GitHub", return_value=gh),
+            patch("core.context.build_context", return_value=evidence),
+            patch("core.github.check_required", return_value={"passed": True, "summary": "Passed"}),
+            patch("core.sheets.sync_status"),
+            patch("core.providers.review", side_effect=self.complete) as reviewer,
+        ):
+            run_job(retry)
+        retry.refresh_from_db()
+        self.assertEqual(retry.status, "completed", retry.reason)
+        self.assertEqual([c.kwargs["task"] for c in reviewer.call_args_list], ["review_synthesis"])
+        self.assertEqual(old.phase_checkpoints.count(), 4)
+        self.assertFalse(retry.phase_checkpoints.exists())
+        self.assertTrue(retry.activity.filter(code="phase_reused").exists())
 
     def test_rejected_citation_persists_safe_reason_and_location_without_publication(self):
         self.first.kind = "codex_cli"

@@ -588,7 +588,12 @@ def response_diagnostics(status, headers, data):
 def review_contract(task="review"):
     if task == "review":
         return SCHEMA, SYSTEM, validate_result
-    if task in {"review_code", "review_security", "review_tests", "review_synthesis"}:
+    if task in {
+        "review_code",
+        "review_security",
+        "review_tests",
+        "review_synthesis",
+    } or task.startswith("review_agent_"):
         from .review_team import contract
 
         return contract(task)

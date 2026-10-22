@@ -25,7 +25,17 @@ def revision(repositories, capacity, cli_saved, cli_effective):
                 cli_saved,
                 cli_effective,
                 [
-                    (r.pk, r.auto_approve, r.auto_merge, r.merge_method, r.related_item_limit)
+                    (
+                        r.pk,
+                        r.auto_approve,
+                        r.auto_merge,
+                        r.merge_method,
+                        r.related_item_limit,
+                        r.enabled,
+                        r.graph_enabled,
+                        r.github_credential_id,
+                        r.webhook_id,
+                    )
                     for r in repositories
                 ],
             ]
@@ -71,6 +81,7 @@ def service_settings(request):
             if request.POST.get("version") != version:
                 error = "Settings changed in another tab. Reload before saving."
                 status = 409
+                version = request.POST.get("version", "")
             elif any(
                 request.POST.get(f"{field}_{repo.pk}", "") not in ("", "on")
                 for repo in repositories
@@ -129,7 +140,8 @@ def service_settings(request):
                         )
                     messages.success(
                         request,
-                        "Settings saved. Review capacity applies to new claims. CLI capacity applies shortly to new starts. Evidence limits apply when collection starts. Approval and merge policies apply as described below.",
+                        "Settings saved.",
+                        extra_tags="toast",
                     )
                     return redirect("service_settings")
     return render(

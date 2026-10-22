@@ -129,6 +129,11 @@ def _run_job(job):
             return
         result = None
         quota_waits = []
+        phase_checkpoints = None
+        if team:
+            from .phase_checkpoints import PhaseCheckpoints
+
+            phase_checkpoints = PhaseCheckpoints(job, context)
         for provider in providers:
             guard(github, job)
             exhausted_until = blocked_until(provider)
@@ -170,7 +175,13 @@ def _run_job(job):
                     "security",
                     "tests",
                     "synthesis",
-                } and event in {"started", "ready", "incomplete", "waiting", "resumed"}:
+                } | {row["key"] for row in job.review_agents if row["enabled"]} and event in {
+                    "started",
+                    "ready",
+                    "incomplete",
+                    "waiting",
+                    "resumed",
+                }:
                     now = timezone.now().isoformat()
                     row = phase_history.setdefault(name, {"started_at": None, "finished_at": None})
                     row["state"] = (
@@ -212,7 +223,7 @@ def _run_job(job):
                         "phase": "specialists"
                         if team
                         and (not provider.kind.endswith("_cli") or cli_limit() > 1)
-                        and phase in {"code", "security", "tests"}
+                        and phase in {row["key"] for row in job.review_agents if row["enabled"]}
                         else phase,
                         "phase_usage": [
                             {"phase": name, "passes": values}
@@ -232,7 +243,11 @@ def _run_job(job):
             def save_activity(code, text):
                 from .activity import record
 
-                source = f"{provider.name[:80]} / {phase}" if team else provider.name
+                source = (
+                    f"{provider.name[: min(80, 97 - len(phase))]} / {phase}"
+                    if team
+                    else provider.name
+                )
                 record(job, code, detail=text, source=source)
 
             def team_response(name, data):
@@ -253,18 +268,22 @@ def _run_job(job):
                     from .review_v2 import intent_context, validate_actions, validate_intent
 
                     team_progress("intent_started")
-                    save_diagnostics({})
-                    intent = review(
-                        provider,
-                        intent_context(context),
-                        progress.cancelled,
-                        on_response=save_diagnostics,
-                        on_activity=save_activity,
-                        task="intent",
-                        on_capacity=lambda waiting: team_progress(
-                            "intent_waiting" if waiting else "intent_resumed"
-                        ),
-                    )
+                    intent = phase_checkpoints.load("intent") if phase_checkpoints else None
+                    if intent is not None:
+                        progress("phase_reused")
+                    else:
+                        save_diagnostics({})
+                        intent = review(
+                            provider,
+                            intent_context(context),
+                            progress.cancelled,
+                            on_response=save_diagnostics,
+                            on_activity=save_activity,
+                            task="intent",
+                            on_capacity=lambda waiting: team_progress(
+                                "intent_waiting" if waiting else "intent_resumed"
+                            ),
+                        )
                     try:
                         validate_intent(intent, context)
                     except (ProviderError, ValueError, KeyError, TypeError) as exc:
@@ -273,6 +292,8 @@ def _run_job(job):
                             detail="output_invalid",
                             **validation_diagnostics(exc),
                         ) from None
+                    if phase_checkpoints and "intent" not in phase_checkpoints.sources:
+                        phase_checkpoints.save("intent", intent, provider)
                     team_progress("intent_ready")
                     guard(github, job)
                     if not team:
@@ -289,9 +310,11 @@ def _run_job(job):
                         review_context,
                         progress.cancelled,
                         call=review,
+                        agents=job.review_agents,
                         on_response=team_response,
                         on_activity=team_activity,
                         progress=team_progress,
+                        checkpoints=phase_checkpoints,
                     )
                 else:
                     result = review(

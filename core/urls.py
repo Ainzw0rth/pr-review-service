@@ -1,8 +1,24 @@
 from django.urls import path
 
-from . import leaderboard, settings_views, views, workflow_views
+from . import leaderboard, repository_views, settings_views, views, workflow_views
 
 urlpatterns = [
+    path("settings/repositories/add/", repository_views.repository_edit, name="repository_add"),
+    path(
+        "settings/repositories/<int:repository_id>/",
+        repository_views.repository_edit,
+        name="repository_edit",
+    ),
+    path(
+        "settings/repositories/<int:repository_id>/connect/",
+        repository_views.repository_connect,
+        name="repository_connect",
+    ),
+    path(
+        "settings/repositories/<int:repository_id>/toggle/",
+        repository_views.repository_toggle,
+        name="repository_toggle",
+    ),
     path("leaderboard/", leaderboard.leaderboard, name="leaderboard"),
     path("settings/", settings_views.service_settings, name="service_settings"),
     path("workflow/", workflow_views.workflow_page, name="workflow"),

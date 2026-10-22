@@ -1,5 +1,7 @@
 """Provider-reported counters only; never infer quota percentages or dollar charges."""
 
+import re
+
 FIELDS = ("input_tokens", "cached_input_tokens", "cache_creation_input_tokens", "output_tokens")
 
 
@@ -24,15 +26,20 @@ def public_usage(diagnostics):
     phases = diagnostics.get("phase_usage")
     if isinstance(phases, list) and phases:
         passes = []
-        for phase in phases[:6]:
-            if not isinstance(phase, dict) or phase.get("phase") not in {
+        for phase in phases[:10]:
+            if not isinstance(phase, dict):
+                continue
+            name = phase.get("phase")
+            if not isinstance(name, str):
+                continue
+            if name not in {
                 "intent",
                 "review",
                 "code",
                 "security",
                 "tests",
                 "synthesis",
-            }:
+            } and not (isinstance(name, str) and re.fullmatch(r"agent_[0-9a-f]{12}", name)):
                 continue
             values = phase.get("passes")
             for index, value in enumerate(values[:2] if isinstance(values, list) else []):

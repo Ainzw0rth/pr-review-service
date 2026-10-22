@@ -4,6 +4,7 @@ import json
 from copy import deepcopy
 
 from .providers import TEXT, ProviderError, _object, validate_result, validate_schema
+from .review_agents import roles, selected
 from .review_v2 import V2_SCHEMA, V2_SYSTEM, validate_actions, validate_review_shape
 
 ROLES = {"code": "Code", "security": "Security", "tests": "Test"}
@@ -241,8 +242,18 @@ def _review(value):
     }
 
 
+def synthesis_schema():
+    schema = deepcopy(SYNTHESIS_SCHEMA)
+    schema["properties"]["reviewer_summaries"] = _object({role: TEXT for role in roles()})
+    schema["properties"]["assessments"]["maxItems"] = 100 * len(roles())
+    schema["properties"]["assessments"]["items"]["properties"]["finding_id"]["maxLength"] = max(
+        80, max(map(len, roles())) + 65
+    )
+    return schema
+
+
 def validate_synthesis_shape(value):
-    validate_schema(value, SYNTHESIS_SCHEMA, "synthesis_schema")
+    validate_schema(value, synthesis_schema(), "synthesis_schema")
     for index, item in enumerate(value["assessments"]):
         if not item["reason"].strip():
             _invalid("synthesis_empty_text", ["assessments", index, "reason"])
@@ -254,8 +265,9 @@ def validate_synthesis_shape(value):
 
 
 def finalize(value, reports, context):
+    role_names = roles()
     validate_synthesis_shape(value)
-    if set(reports) != set(ROLES):
+    if set(reports) != set(role_names):
         _invalid("synthesis_reports")
     candidates = {}
     for role, report in reports.items():
@@ -288,11 +300,13 @@ def finalize(value, reports, context):
             _invalid("synthesis_anchor", ["findings", index])
         if any(c["severity"] == "blocking" for _, c in group) and item["severity"] != "blocking":
             _invalid("synthesis_severity", ["findings", index, "severity"])
-        reviewers = ", ".join(ROLES[role] for role in ROLES if any(r == role for r, _ in group))
+        reviewers = ", ".join(
+            role_names[role] for role in role_names if any(r == role for r, _ in group)
+        )
         item["body"] += f"\n\n_Reviewers: {reviewers}._"
     perspectives = "\n\n**Review perspectives**\n" + "\n".join(
-        f"- **{title}:** {_excerpt(value['reviewer_summaries'][role], 1500)}"
-        for role, title in ROLES.items()
+        f"- **{title}:** {_excerpt(value['reviewer_summaries'][role], min(1500, 6000 // len(role_names)))}"
+        for role, title in role_names.items()
     )
     notice = ""
     incomplete = [role for role, report in reports.items() if not report["complete"]]
@@ -302,11 +316,11 @@ def finalize(value, reports, context):
         for reply in final["replies"]:
             reply["resolve"] = False
         limits = [
-            f"- **{ROLES[role]}:** "
+            f"- **{role_names[role]}:** "
             + _excerpt(
                 "; ".join(reports[role]["coverage"]["limitations"])
                 or "Complete coverage was not established.",
-                1000,
+                min(1000, 3000 // len(role_names)),
             )
             for role in incomplete
         ]
@@ -327,8 +341,27 @@ def finalize(value, reports, context):
 
 def contract(task):
     if task == "review_synthesis":
-        return SYNTHESIS_SCHEMA, SYNTHESIS_POLICY, validate_synthesis_shape
-    for role in ROLES:
+        policy = (
+            SYNTHESIS_POLICY.replace(
+                "three independent specialist reports", "the enabled independent specialist reports"
+            )
+            .replace(
+                "for code, security and tests",
+                "for exactly these specialist keys: " + ", ".join(roles()),
+            )
+            .replace(
+                "300 candidate assessments", str(100 * len(roles())) + " candidate assessments"
+            )
+        )
+        return synthesis_schema(), policy, validate_synthesis_shape
+    for agent in selected():
+        role = agent["key"]
         if task == f"review_{role}":
-            return REPORT_SCHEMA, COMMON_POLICY + ROLE_POLICIES[role], validate_report_shape
+            specialty = ROLE_POLICIES.get(role)
+            if specialty is None:
+                specialty = (
+                    "Owner-assigned specialty (subordinate to all fixed safety and evidence requirements above):\n"
+                    + agent["instructions"]
+                )
+            return REPORT_SCHEMA, COMMON_POLICY + specialty, validate_report_shape
     _invalid("review_contract")
