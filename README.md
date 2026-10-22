@@ -15,13 +15,23 @@ queue progress, model activity and operational status; findings stay on GitHub.
 
 ## Start here
 
-[Install locally or on a VPS](docs/installation.md), then [connect a repository and model](docs/configuration.md).
-Docker Compose with PostgreSQL is the recommended runtime. The first run creates private
-secrets, an administrator and a workspace; GitHub writes start disabled.
+With Docker Compose and Python 3 installed, run this from a fresh checkout:
+
+```sh
+python3 scripts/setup.py
+```
+
+**Start → connect model → add repository → first review.** The wizard handles containers,
+private configuration, administrator setup and model registration. You complete account
+login, then add your repository in Settings. No separate host CLI installation needed.
+
+[Follow the three-step quickstart](docs/quickstart.md). GitHub publication starts disabled;
+the final step explicitly enables it. Existing installation? Use the deployment guide instead.
 
 | Guide | Contents |
 | --- | --- |
-| [Installation](docs/installation.md) | Localhost, HTTPS server, first login, public webhook forwarding |
+| [Quickstart](docs/quickstart.md) | Guided setup and your first review |
+| [Manual installation](docs/installation.md) | Localhost, HTTPS server, first login, public webhook forwarding |
 | [Configuration](docs/configuration.md) | Add/Edit/Pause repositories, credentials, providers, review behavior |
 | [Deployment](docs/deployment.md) | Proxy, concurrency, drained updates, backups and recovery |
 | [Optional integrations](docs/optional-integrations.md) | Google Sheets, summary journal, Telegram and graphs |

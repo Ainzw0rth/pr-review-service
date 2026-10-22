@@ -1,6 +1,6 @@
 # Configuration and first review
 
-Complete [installation](installation.md) first. Commands assume its `COMPOSE_FILE` export.
+Complete the [guided quickstart](quickstart.md) or [manual installation](installation.md) first. Commands assume its `COMPOSE_FILE` export.
 
 ## Repository setup in Settings
 
@@ -41,7 +41,10 @@ administrator privileges.
 
 ## Model provider: choose API or CLI
 
-Provider creation and credentials live in `/admin/`. **Workflow** controls the owner's model
+The setup wizard creates your first provider automatically. **Wizard users can skip the manual
+provider creation below.** It is for manual installs and later provider changes.
+
+Manual provider creation and credentials live in `/admin/`. **Workflow** controls the owner's model
 routing; **Settings** does not create provider accounts or store subscription login sessions.
 Use exact model IDs available to your account, not marketing display names.
 

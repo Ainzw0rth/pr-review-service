@@ -1,3 +1,5 @@
+import json
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
@@ -14,6 +16,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--username", default="admin")
+        parser.add_argument(
+            "--json",
+            action="store_true",
+            help="Return setup URL and owner ID as JSON (requires --setup-link).",
+        )
         parser.add_argument("--email", default="")
         parser.add_argument(
             "--organization", default="Workspace", help="Workspace name for the administrator"
@@ -25,6 +32,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        if options["json"] and not options["setup_link"]:
+            raise CommandError("--json requires --setup-link")
         name = options["organization"].strip()
         slug = slugify(name)
         if not name or len(name) > 100 or not slug or len(slug) > 50:
@@ -71,7 +80,9 @@ class Command(BaseCommand):
             self.attach_workspace(user, name, slug)
             url = issue_access_link(user=user, hours=1)
         self.owner_instruction(user)
-        self.stdout.write(url)
+        self.stdout.write(
+            json.dumps({"owner_id": user.pk, "setup_url": url}) if options["json"] else url
+        )
 
     def attach_workspace(self, user, name, slug):
         with transaction.atomic():

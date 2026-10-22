@@ -1,4 +1,8 @@
-# Installation
+# Manual installation
+
+**New installation?** Use the [guided quickstart](quickstart.md) first. The steps below are
+for manual setup, troubleshooting, or deployments needing custom configuration. Do not repeat
+bootstrap/provider creation after the wizard has already completed them.
 
 ## Requirements
 

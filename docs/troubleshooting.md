@@ -11,6 +11,22 @@ docker compose exec -T web python manage.py worker_control status --json
 
 Share sanitized errors, not `.env`, tokens, setup links, raw model streams or database contents.
 
+## Guided setup stopped
+
+Run `python3 scripts/setup.py --resume` after correcting the failed step. It resumes only
+its own unfinished installation with an unchanged `.env`; it will not overwrite a production
+environment. Do not delete `.env` or regenerate secrets to bypass that check.
+
+- **Docker unavailable:** start Docker Engine and verify `docker info` and `docker compose version`.
+- **Existing Docker installation detected:** use its original checkout and deployment guide.
+  The wizard deliberately refuses another `auto-reviewer` stack/data volume.
+- **Login failed:** resume repeats the provider login step. Complete the official browser/device flow.
+- **Model test failed:** check subscription/API access, quota, exact model ID and network. Resume
+  retries the test. You can skip it to finish setup, but access remains unverified; repair the provider
+  in Workflow/admin before enabling publication. With exactly one enabled provider, retry with
+  `docker compose exec -T worker python manage.py probe_provider`.
+- **Lost password link:** use the explicit password recovery command below. Links expire after an hour.
+
 ## Application will not start
 
 - **PostgreSQL missing:** use the overlay for every command; confirm `DB_ENGINE=postgresql` and
