@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Watch Auto Reviewer's 44-second product walkthrough with fictional demo data.">
+  <title>Auto Reviewer — Product demo</title>
+  <style>
+    :root { color-scheme: light; font-family: ui-monospace, monospace; color: #222220; background: #f6f4ee; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: clamp(16px, 4vw, 56px); }
+    main { max-width: 1120px; margin: auto; }
+    h1 { font-size: clamp(24px, 4vw, 38px); letter-spacing: -.04em; }
+    p, nav { font-size: 14px; line-height: 1.8; }
+    video { display: block; width: 100%; aspect-ratio: 36 / 25; background: #222220; border: 1px solid #d2cec3; border-radius: 12px; }
+    a { color: inherit; text-underline-offset: 4px; transition: color 150ms ease; }
+    a:hover { color: #68665e; }
+    :focus-visible { outline: 3px solid #222220; outline-offset: 5px; }
+    nav { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 20px; }
+    .note { color: #68665e; }
+    @media (prefers-reduced-motion: reduce) { a { transition: none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Auto Reviewer, in action.</h1>
+    <p>Queue → specialist review → repository settings.</p>
+    <video controls playsinline preload="metadata" poster="media/review-progress.png" aria-label="Auto Reviewer product walkthrough" aria-describedby="video-note">
+      <source src="media/demo.mp4" type="video/mp4">
+      Your browser cannot play this video. <a href="media/demo.mp4">Download the walkthrough</a>.
+    </video>
+    <p class="note" id="video-note">44 seconds. Silent, with on-screen captions. Real interface; fictional data.</p>
+    <nav aria-label="Demo resources">
+      <a href="https://github.com/Ainzw0rth/pr-review-service/blob/main/docs/demo.md">Screenshots and text walkthrough</a>
+      <a href="https://github.com/Ainzw0rth/pr-review-service">View project</a>
+      <a href="media/demo.mp4" download>Download MP4</a>
+    </nav>
+  </main>
+</body>
+</html>
