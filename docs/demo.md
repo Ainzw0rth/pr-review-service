@@ -1,6 +1,7 @@
 # Product demo
 
-[Play the 44-second captioned walkthrough](https://ainzw0rth.github.io/pr-review-service/) ·
+https://github.com/user-attachments/assets/f5076541-22b4-4033-9634-7cf2e4782a4a
+
 [Animated preview](media/demo-preview.gif) · [Quickstart](quickstart.md)
 
 Real application screens, **fictional data**. Repository names, people, model IDs,
@@ -50,13 +51,16 @@ These credentials exist only in this disposable local demo.
 Do not expose this demonstration server publicly. It is intentionally a local development tool,
 not another supported production deployment method. No demo account is added to the real app.
 
-## Browser player
+## GitHub video player
 
-The public demo uses native browser video controls (play/pause, seeking and fullscreen),
-not GitHub’s repository file viewer. It does not autoplay. The player source is
-[`demo.html`](demo.html); GitHub Pages publishes it as `index.html` on the `gh-pages` branch,
-with `media/demo.mp4`, `media/review-progress.png` and `.nojekyll`. Update those assets together
-when replacing the recording. The main application is not deployed by this branch.
+The README and this page embed a GitHub-hosted video attachment, playable directly on GitHub
+with native playback controls. The attachment URL must occupy its own paragraph to render as
+a player. Keep the local MP4 as the source; after replacing it, upload the new recording to
+GitHub and update the attachment URL in both Markdown files.
+
+The [standalone player](https://ainzw0rth.github.io/pr-review-service/) remains an optional fallback.
+Its source is [`demo.html`](demo.html), published as `index.html` on the `gh-pages` branch with
+`media/demo.mp4`, `media/review-progress.png` and `.nojekyll`. This branch does not deploy the app.
 
 ## Regenerate the media
 

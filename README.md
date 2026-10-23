@@ -5,9 +5,9 @@ queue progress, model activity and operational status; findings stay on GitHub.
 
 ## See it in action
 
-[![Auto Reviewer: real specialist-review dashboard with fictional demo data](docs/media/review-progress.png)](https://ainzw0rth.github.io/pr-review-service/)
+https://github.com/user-attachments/assets/f5076541-22b4-4033-9634-7cf2e4782a4a
 
-**[Watch the 44-second walkthrough →](https://ainzw0rth.github.io/pr-review-service/)** · [Screenshots & local demo](docs/demo.md)
+[Screenshots & local demo](docs/demo.md)
 
 Queue → specialist progress → repository settings. Real UI, fictional data; no customer
 information or real review results. Silent video with on-screen captions.
