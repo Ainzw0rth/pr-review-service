@@ -5,12 +5,16 @@ import {fileURLToPath} from 'node:url';
 
 // Execute the real wrapper/output module. Replace only the CLI process and its
 // filesystem boundary; no /auth access, /tmp writes, Docker, or model calls.
-async function wrapper(scenario) {
+async function wrapper(scenario, options={}) {
   const fakeFs=`
     const files=new Map();let reads=0;
     export async function mkdir(){}
+    export async function readdir(){return ${JSON.stringify(options.session?.id && options.exists ? [{name:"rollout-test-"+options.session.id+".jsonl",parentPath:"/synthetic"}] : [])}.map(e=>({...e,isFile:()=>true}));}
+    export async function symlink(){}
+    export async function stat(){if(${!!options.exists})return {size:10};throw Object.assign(Error(),{code:"ENOENT"});}
     export async function writeFile(path,data){files.set(path,data);}
     export async function readFile(path){
+      if(path==='/auth/.credentials.json')return JSON.stringify({claudeAiOauth:{synthetic:true}});
       if(path==='/auth/auth.json')return JSON.stringify({auth_mode:'chatgpt',tokens:{synthetic:true}});
       if(path.endsWith('coverage.json') && ++reads>1) {
         const ctx=JSON.parse(files.get('/tmp/review/context.json'));
@@ -22,9 +26,11 @@ async function wrapper(scenario) {
   const fakeProcess=`
     import {EventEmitter} from 'node:events';
     import {PassThrough} from 'node:stream';
-    export function spawn(){
+    export function spawn(command,args){
       const child=new EventEmitter();
       child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();
+      let prompt='';child.stdin.on('data',b=>prompt+=b);
+      child.stdin.on('end',()=>child.stdout.write(JSON.stringify({type:'test_command',command,args,prompt})+'\\n'));
       let ended=false;
       function finish(code,signal=null){if(ended)return;ended=true;child.stdout.end();child.stderr.end();setImmediate(()=>child.emit('close',code,signal));}
       child.kill=signal=>{finish(null,signal);return true;};
@@ -49,7 +55,7 @@ async function wrapper(scenario) {
   const child=spawn(process.execPath,['--import','data:text/javascript,'+encodeURIComponent(hook),fileURLToPath(new URL('./entry.mjs',import.meta.url))],{stdio:['pipe','pipe','pipe']});
   let stdout='',stderr='';
   child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);
-  child.stdin.end(JSON.stringify({kind:'codex_cli',model:'synthetic-model',context:{files:[{content:'x'.repeat(1500)}]},schema:{},system:'You have no tools or credentials.'}));
+  child.stdin.end(JSON.stringify({kind:options.kind??'codex_cli',session:options.session,model:'synthetic-model',context:{files:[{content:'x'.repeat(1500)}]},schema:{},system:'You have no tools or credentials.'}));
   const code=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',resolve);});
   return {code,stderr,events:stdout.trim().split('\n').filter(Boolean).map(JSON.parse)};
 }
@@ -71,5 +77,30 @@ test('real wrapper reports truncated CLI output, spawn failure, and nonzero exit
     assert.equal(events.at(-2).code,error);
     assert.equal(events.at(-1).type,'runner_exit');
     assert.equal(events.at(-1).code,exit);
+  }
+});
+
+
+test('wrapper resumes explicit IDs only and preserves restricted CLI flags',async()=>{
+  const session={key:'11111111-1111-4111-8111-111111111111',id:'22222222-2222-4222-8222-222222222222'};
+  for(const kind of ['codex_cli','claude_cli'])for(const exists of [true,false]) {
+    const {code,events,stderr}=await wrapper('nonzero',{kind,session,exists});
+    assert.equal(code,2,stderr);
+    const command=events.find(e=>e.type==='test_command');
+    assert.ok(command,stderr);
+    assert.equal(command.args.includes(session.id),exists);
+    assert.equal(command.args.includes('--ephemeral'),false);
+    assert.equal(command.args.includes('--no-session-persistence'),false);
+    assert.equal(events.find(e=>e.type==='runner_session').resumed,exists);
+    assert.equal(command.prompt.includes('Prior conversation is historical'),exists);
+    if(kind==='codex_cli') {
+      assert.ok(command.args.includes('approval_policy="never"'));
+      assert.ok(command.args.includes('--sandbox'));
+      assert.ok(command.args.includes('--output-schema'));
+    } else {
+      assert.ok(command.args.includes('--restricted'));
+      assert.ok(command.args.includes('--strict-mcp-config'));
+      assert.ok(command.args.includes('--json-schema'));
+    }
   }
 });

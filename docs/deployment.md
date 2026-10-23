@@ -38,6 +38,31 @@ runner's authentication-coordination capability; build the supplied runner rathe
 CLI image. SQLite worker startup is refused unless explicitly opted into single-thread development
 with `--allow-sqlite`.
 
+## Persistent CLI review sessions
+
+Codex and Claude reviews keep a separate native session per PR, configured provider and review
+role (including intent and synthesis). The database stores the session ID and a random storage
+key. Native conversation files live under `review-sessions/<key>/` in that backend's existing
+private authentication volume; credentials and runtime configuration are not copied into those
+history directories. Probes stay ephemeral.
+
+Later human-requested reviews resume the matching session with the current commit-pinned evidence.
+Full evidence coverage and publication checks still apply. Missing history starts a new session;
+changing the model, effort or review contract resets its storage key. Incomplete-evidence recovery
+also starts fresh. Same-PR execution claims prevent concurrent writers, while different roles
+have separate histories. Session continuation does not guarantee fewer billed input tokens.
+
+This requires migration `0026_cli_sessions` and a rebuilt CLI runner with the
+`auto-reviewer.sessions=v1` capability label. An older runner is rejected rather than silently
+discarding history. Build/pin the runner using the installation instructions before deploying
+the application update.
+
+Native histories contain source code and review conversations in the CLI's own on-disk format,
+not application-level encryption. Protect and back up the private volumes as sensitive data.
+Session history is not included in the 90-day job cleanup; it persists until the operator removes
+it. To reset history, drain workers first, then remove only the relevant `review-sessions/<key>/`
+directory (never the authentication files). Its next review will obtain a fresh session ID.
+
 ## Updates
 
 Review the intended revision and migration plan first. Keep a private backup of `.env`, preserve

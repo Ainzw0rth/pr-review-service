@@ -182,6 +182,16 @@ def _run_job(job):
             )
 
             cli_state = {}
+            from .cli_sessions import prepare_sessions, save_session
+
+            tasks = (
+                ["intent", "review_code", "review_security", "review_tests", "review_synthesis"]
+                if team
+                else ["intent", "review_v2"]
+                if grounded
+                else ["review"]
+            )
+            provider.cli_sessions = prepare_sessions(job, provider, tasks)
             phase = "intent" if grounded else "review"
             phase_reports = {}
             phase_history = {}
@@ -228,6 +238,10 @@ def _run_job(job):
                 from .activity import cli_progress
                 from .usage import usage_counters
 
+                data = dict(data)
+                session = data.pop("cli_session", None)
+                if session:
+                    save_session(job, provider.cli_sessions, session)
                 cli_progress(progress, data, cli_state)
                 if grounded:
                     passes = data.get("usage_passes")

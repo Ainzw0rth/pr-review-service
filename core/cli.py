@@ -35,6 +35,7 @@ class CLIStream:
         self.error = None
         self.coverage = False
         self.missing_evidence = []
+        self.session_id = None
         self.evidence_ids = {
             identifier
             for section, value in (context or {}).items()
@@ -142,7 +143,17 @@ class CLIStream:
         self.transcript.feed(event)
         self.diagnostics["events_received"] += 1
         kind = event.get("type")
-        if kind == "runner_exit":
+        if (self.kind == "codex_cli" and kind == "thread.started") or (
+            self.kind == "claude_cli" and kind == "system" and event.get("subtype") == "init"
+        ):
+            identifier = event.get("thread_id" if self.kind == "codex_cli" else "session_id")
+            if isinstance(identifier, str) and re.fullmatch(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", identifier
+            ):
+                self.session_id = identifier
+        elif kind == "runner_session" and type(event.get("resumed")) is bool:
+            self.diagnostics["cli_session_resumed"] = event["resumed"]
+        elif kind == "runner_exit":
             code, signal = event.get("code"), event.get("signal")
             if type(code) is int and 0 <= code <= 255:
                 self.diagnostics["cli_exit_code"] = code
@@ -345,13 +356,16 @@ def review_cli(
                 )
 
 
-def require_auth_coordination():
+def require_auth_coordination(*, sessions=False):
     """Fail closed before any concurrent session can use an old runner image."""
     from .runner import RunnerError, _docker
 
     try:
         info = json.loads(_docker(["image", "inspect", settings.CLI_RUNNER_IMAGE]))
-        if info[0]["Config"].get("Labels", {}).get("auto-reviewer.auth-coordination") != "v1":
+        labels = info[0]["Config"].get("Labels", {})
+        if labels.get("auto-reviewer.auth-coordination") != "v1":
+            raise ValueError
+        if sessions and labels.get("auto-reviewer.sessions") != "v1":
             raise ValueError
     except (RunnerError, ValueError, KeyError, IndexError, TypeError, AttributeError):
         raise ProviderError("invalid", detail="cli_setup") from None
@@ -366,7 +380,9 @@ def _review_cli_once(provider, context, cancelled, *, on_capacity=None, budget=N
     volume, scope = cli_scope(provider.kind)
     priority = 0 if kwargs.get("task") == "review_synthesis" else 1
     with admit_cli(scope, cancelled, on_wait=on_capacity, priority=priority) as slot:
-        if slot.admission_limit is None or slot.admission_limit > 1:
+        if getattr(provider, "cli_sessions", None):
+            require_auth_coordination(sessions=True)
+        elif slot.admission_limit is None or slot.admission_limit > 1:
             require_auth_coordination()
         container = Container(slot, _docker, volume=volume)
         container.cleanup()  # Admission housekeeping is not model active time.
@@ -412,6 +428,9 @@ def _review_cli_active(
     args = container_arguments(provider.kind, name, image, volume)
     schema, system, _ = review_contract(task)
     parser = CLIStream(provider.kind, context, on_activity, task=task)
+    session = getattr(provider, "cli_sessions", {}).get(task)
+    if session and recovery is not None:
+        session = {**session, "id": None}
     process = None
     try:
         try:
@@ -428,6 +447,7 @@ def _review_cli_active(
                 "schema": _wire_schema(schema),
                 "system": system,
                 "recovery": recovery,
+                "session": session,
             }
         )
         with tempfile.TemporaryFile() as request:
@@ -489,6 +509,14 @@ def _review_cli_active(
                 error = ProviderError("invalid", detail="cli_coverage")
                 error.missing_evidence = parser.missing_evidence
                 raise error
+            if session:
+                if parser.session_id is None:
+                    raise ProviderError("invalid", detail="cli_protocol")
+                parser.diagnostics["cli_session"] = {
+                    "key": session["key"],
+                    "id": parser.session_id,
+                    "task": task,
+                }
             return result
     except RunnerError:
         raise ProviderError("unavailable", detail="cli_setup") from None

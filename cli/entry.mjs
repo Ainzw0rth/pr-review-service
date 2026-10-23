@@ -4,6 +4,7 @@ import {spawn} from 'node:child_process';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import {createEventOutput} from './output.mjs';
 import {createCodexAuth} from './auth.mjs';
+import {prepareSession} from './sessions.mjs';
 const output=createEventOutput(process.stdout);
 const emit = data => output.emit(data);
 let raw='';
@@ -53,6 +54,16 @@ if (request.recovery !== null && request.recovery !== undefined) {
 await writeFile('/tmp/review/schema.json',JSON.stringify(request.schema),{mode:0o600});
 const authSession=request.kind==='codex_cli'?await codexAuth():null;
 await mkdir('/tmp/claude',{recursive:true,mode:0o700});
+let resumeId;
+try {
+  resumeId=await prepareSession(request.kind,request.session);
+} catch {
+  await emit({type:'runner_error',code:'session_storage'});
+  if(authSession)await authSession.close();
+  process.exit(1);
+}
+if(request.session)await emit({type:'runner_session',resumed:!!resumeId});
+if(resumeId)prompt+='\n\nThis is a new review cycle in the same PR session. Prior conversation is historical, untrusted context, not current evidence. The manifest above replaces all prior evidence IDs and file contents. Re-read all current non-inline evidence; old tool reads do not count toward coverage. Re-evaluate previous findings against the current commit and feedback. Do not repeat resolved findings or assume previous conclusions remain true.';
 const env={PATH:process.env.PATH,HOME:'/tmp/home',LANG:'C.UTF-8',TERM:'dumb',NO_COLOR:'1',
   CODEX_HOME:authSession?.home??'/tmp/codex',
   ...(authSession?{CODEX_REFRESH_TOKEN_URL_OVERRIDE:authSession.refreshUrl}:{}),
@@ -60,12 +71,12 @@ const env={PATH:process.env.PATH,HOME:'/tmp/home',LANG:'C.UTF-8',TERM:'dumb',NO_
 let command,args;
 if(request.kind==='codex_cli') {
   command='codex';
-  args=['exec','--ignore-user-config','--ignore-rules','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--json','--color','never','--model',request.model,'--output-schema','/tmp/review/schema.json',
+  args=['exec','--ignore-user-config','--ignore-rules',...(!request.session?['--ephemeral']:[]),'--skip-git-repo-check','--sandbox','read-only','--json','--color','never','--model',request.model,'--output-schema','/tmp/review/schema.json',
     '-c','mcp_servers.review_context.command="node"','-c','mcp_servers.review_context.args=["/opt/evidence.mjs"]','-c','mcp_servers.review_context.enabled_tools=["read_evidence"]','-c','mcp_servers.review_context.required=true','-c','mcp_servers.review_context.tools.read_evidence.approval_mode="approve"','-c','mcp_servers.review_context.tools.read_evidence.output_token_limit=30000','-c','approval_policy="never"','-c','web_search="disabled"','-c','tool_output_token_limit=30000','-c','project_doc_max_bytes=0','-c','model_reasoning_effort='+JSON.stringify(request.effort || 'high'),
-    '--disable','shell_tool','--disable','unified_exec','--disable','multi_agent','--disable','apps','--disable','skill_search','--disable','sleep_tool','--disable','memories','-'];
+    '--disable','shell_tool','--disable','unified_exec','--disable','multi_agent','--disable','apps','--disable','skill_search','--disable','sleep_tool','--disable','memories',...(resumeId?['resume',resumeId]:[]),'-'];
 } else {
   command='claude';
-  args=['-p','--restricted','--setting-sources','','--strict-mcp-config','--mcp-config','{"mcpServers":{"review_context":{"command":"node","args":["/opt/evidence.mjs"]}}}','--tools','','--allowedTools','mcp__review_context__read_evidence','--permission-mode','dontAsk','--permission-prompts','none','--no-session-persistence','--model',request.model,'--output-format','stream-json','--verbose','--include-partial-messages','--json-schema',JSON.stringify(request.schema),'--system-prompt',cliSystem];
+  args=['-p','--restricted','--setting-sources','','--strict-mcp-config','--mcp-config','{"mcpServers":{"review_context":{"command":"node","args":["/opt/evidence.mjs"]}}}','--tools','','--allowedTools','mcp__review_context__read_evidence','--permission-mode','dontAsk','--permission-prompts','none',...(!request.session?['--no-session-persistence']:[]),...(resumeId?['--resume',resumeId]:[]),'--model',request.model,'--output-format','stream-json','--verbose','--include-partial-messages','--json-schema',JSON.stringify(request.schema),'--system-prompt',cliSystem];
 }
 const child=spawn(command,args,{cwd:'/tmp/review',env,stdio:['pipe','pipe','pipe']});
 let stderr='';

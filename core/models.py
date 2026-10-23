@@ -168,6 +168,21 @@ class PullRequest(models.Model):
         return f"https://github.com/{self.repository.full_name}/pull/{self.number}"
 
 
+class CLISession(models.Model):
+    pr = models.ForeignKey(PullRequest, on_delete=models.CASCADE)
+    provider = models.ForeignKey(Provider, on_delete=models.CASCADE)
+    task = models.CharField(max_length=32)
+    storage_key = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    session_id = models.UUIDField(null=True, blank=True)
+    contract = models.CharField(max_length=64)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["pr", "provider", "task"], name="unique_cli_session")
+        ]
+
+
 class PRAssignee(models.Model):
     pr = models.ForeignKey(PullRequest, on_delete=models.CASCADE, related_name="assignees")
     github_id = models.PositiveBigIntegerField()

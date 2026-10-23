@@ -59,6 +59,35 @@ class WorkerTests(WorkflowTests):
         self.assertIsNotNone(job.finished_at)
         self.assertNotEqual(job.duration_display, "Unavailable")
 
+    def test_cli_session_handle_is_saved_privately_by_the_worker_callback(self):
+        import uuid
+
+        from core.models import CLISession
+        from core.tests.test_providers import RESULT
+
+        self.first.kind = "codex_cli"
+        self.first.save()
+        session_id = str(uuid.uuid4())
+
+        def review(provider, context, cancelled, **kwargs):
+            session = provider.cli_sessions["review"]
+            self.assertIsNone(session["id"])
+            kwargs["on_response"](
+                {
+                    "cli_session": {**session, "id": session_id, "task": "review"},
+                    "cli_session_resumed": False,
+                }
+            )
+            return RESULT
+
+        job, _, _ = self.run_case(review)
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(
+            str(CLISession.objects.get(pr=job.pr, task="review").session_id), session_id
+        )
+        self.assertNotIn("cli_session", job.provider_diagnostics)
+        self.assertFalse(job.provider_diagnostics["cli_session_resumed"])
+
     def test_workflow_edit_after_claim_cannot_change_model(self):
         from core.tests.test_providers import RESULT
 
