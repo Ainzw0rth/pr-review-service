@@ -1,6 +1,6 @@
 # Distributed workers — approved design
 
-Approved in conversation on 2026-10-26. Implementation and live rollout have not begun.
+Approved in conversation on 2026-10-26. Implemented and deployed; see distributed-workers-rollout.md for evidence and operational limits.
 
 ## Goal and boundaries
 

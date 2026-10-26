@@ -36,7 +36,7 @@ Rendered Workers UI checked at 375/768/1440px: theme consistency, overflow, keyb
 
 InstaBox independently authenticated both providers; their credential files were validated locally without exporting tokens. Worker enrolled disabled, source images built and private installer configuration validated on the actual non-root host. Runtime uses host UID/GID and Docker socket group, keeping private file permissions intact. Scheduling stays disabled until nonpublishing live probes pass.
 
-Release-manifest installer support and audited operator reconciliation are complete; additional 27 installer tests and 6 PostgreSQL reconciliation tests pass. Remaining: image publication, final push/deploy, start/validate/enable InstaBox, switch to integrated keepalive, observe idle-window behavior. No never-pauses guarantee.
+Release-manifest installer support and audited operator reconciliation are complete; additional 27 installer tests and 6 PostgreSQL reconciliation tests pass. All implementation and rollout tasks completed. See the live-rollout and idle-observation results below; no never-pauses guarantee.
 
 Additional user request: Ainzw0rth-config installed on InstaBox with independent GitHub login; skills/plugins/profile launchers verified; required sync successfully pushed. No Contabo credentials/configuration copied or modified.
 
@@ -50,3 +50,19 @@ Additional user request: Ainzw0rth-config installed on InstaBox with independent
 - InstaBox source staged at /data/workspace/pr-review-service at the same revision; Docker/Compose available. No remote agent started or enrolled (registered remote workers: zero). No coordinator credentials copied there.
 - Host-specific operational keepalive installed on Contabo as auto-reviewer-instabox-keepalive.timer: fixed SSH command every 20 minutes, verified host key, private configuration, bounded timeout and redacted failure output. Initial and three scheduled checks succeeded. This is not the planned integrated keepalive UI and does not establish an uninterrupted-uptime guarantee.
 - No live review was triggered solely for verification. Worker UI, remote execution and installer remain unfinished.
+
+## Completed live rollout — 2026-10-26
+
+- Product commit `60e790b` pushed and deployed safely. Zero active reviews at drain; none cancelled. Additive migration 0028 applied with backup/rollback image retained. Existing PostgreSQL volume/tunnel network preserved; deployment receipt healthy and intake reopened.
+- Both local and InstaBox workers are Ready. InstaBox has one enabled model-execution slot, both independent provider logins, shared Contabo account admission, fresh authenticated heartbeat, memory/disk metrics and no readiness problems. Test/graph remain local by default; test transport separately validated with an allowlisted synthetic image.
+- Real nonpublishing remote Codex and Claude review outputs passed coordinator validation and cleanup acknowledgement. Harmless isolated test verified archive transfer/execution/cleanup. No GitHub review was published merely to test deployment.
+- Integrated SSH scheduler succeeded with verified host key and 20-minute interval. Old host timer disabled only after that success. Idle-window observation completed successfully; detailed results below.
+- Production browser checks passed at 375/768/1440px: overflow, keyboard disclosures, polling focus, reduced motion and no JavaScript errors. Temporary owner verification session deleted.
+- Release `v0.1.0` published; GitHub workflow 40346129784 succeeded. Agent/model/coordinator digests anonymously readable. Manifest-based installer actually pulled agent/model and passed isolated config validation without starting an agent or using production credentials. Source update preserves identity/auth and rebuilds CLI images.
+- Final incremental checks: 28 installer tests and 6 PostgreSQL operator-reconciliation tests passed. Temporary PostgreSQL test container and release-smoke network removed.
+
+## Final idle observation
+
+Observed 61.0 minutes after user closed SSH sessions (2026-10-26T15:19:30.167211+00:00 to 2026-10-26T16:20:29.032950+00:00): 213 coordinator-only observations, maximum heartbeat age 15.08s, one unchanged agent incarnation, zero active-work samples and zero observer errors. Three scheduled 20-minute SSH checks succeeded. No suspension-related interruption observed; provider-internal pause state was unavailable, so this is observed availability, not a permanent-uptime guarantee.
+
+Final health: public HTTP 200, both workers Ready, one remote slot available, zero readiness problems and zero uncertain cleanup assignments.

@@ -95,7 +95,7 @@ Migration filenames must be generated from the actual migration head at executio
 - [x] Invoke fixed SSH argv with BatchMode, strict known-host verification, bounded connect/command timeout, disabled forwarding and no shell interpolation. Enrollment cannot supply arbitrary endpoints; owner configuration validates host/user/port and prevents option injection. No unrestricted generic URL fetcher.
 - [x] Never place token-bearing arguments in diagnostics. Limit retries and distinguish expired authentication, host-key mismatch, timeout and successful command.
 - [x] Provide owner-only Check now, deduplicated with periodic attempts. SSH success updates connectivity, not worker Ready status.
-- [ ] Unit-test due scheduling, overlap prevention, coordinator restart, retry bounds and secrets redaction. Later run an authorized live idle-window experiment; retain explicit unverified behavior until measured.
+- [x] Unit-test due scheduling, overlap prevention, coordinator restart, retry bounds and secrets redaction. Later run an authorized live idle-window experiment; retain explicit unverified behavior until measured.
 
 **Deliverable:** reliable external 20-minute checks with visible evidence and failure states.
 
@@ -121,7 +121,7 @@ Migration filenames must be generated from the actual migration head at executio
 - [x] Prompt URL/name/pairing code privately; preflight platform/Docker/disk/TLS, enroll once, persist returned credential before subsequent steps and never echo it.
 - [x] Resume interrupted enrollment/configuration/login without creating duplicate workers. Warn clearly on incompatible existing installation instead of overwriting it.
 - [x] Guide independent CLI login/account binding and check capabilities before declaring Ready. Provide an API-key-only path without installing unnecessary CLI images.
-- [ ] Build and publish pinned coordinator/agent/runner release images for tested architectures; do not claim ARM support before native verification. Pull images by release manifest/digest; keep source builds documented.
+- [x] Build and publish pinned coordinator/agent/runner release images for tested architectures; do not claim ARM support before native verification. Pull images by release manifest/digest; keep source builds documented.
 - [x] Verify worker-only stack contains no database, web dashboard or coordinator secrets. Document outbound HTTPS and optional host-specific keepalive, not mandatory SSH for ordinary workers.
 
 **Deliverable:** fresh standalone setup remains simple; a second host joins through one guided flow.
@@ -140,14 +140,14 @@ Migration filenames must be generated from the actual migration head at executio
 
 ## Task 9 — Integrated verification and controlled rollout
 
-- [ ] Run Django suites against PostgreSQL for lock/admission tests, existing unit tests, lint/format and migration consistency checks. Use isolated test data, never production DB as a harness.
-- [ ] Run two-worker scenario matrix: simultaneous claims; old incarnation reconnect; coordinator restart; lost completion response; expired/revoked credentials; stale result; provider quota exhaustion; worker OOM; disk full; session migration/fresh start; network partition during cleanup.
-- [ ] Verify normal publication, crash-window reconciliation, stale PR generation and no duplicate accepted result. Idempotent internal completion does not itself prove exactly-once GitHub side effects.
-- [ ] Fresh-install and interrupted-resume checks for both modes; verify no secrets in logs, browser responses or release artifacts.
-- [ ] Render/interaction checks from Task 6; document actual results and omissions.
-- [ ] Obtain current dedicated worker/provider/keepalive credentials through private setup, not copied conversation tokens. Configure InstaBox working storage under /data and inspect actual Docker storage placement/space before pulling images.
-- [ ] Run nonpublishing remote review. Validate keepalive across at least two 30-minute idle windows, record provider state if available and independently observe fresh agent heartbeat.
-- [ ] Present concrete deployment result and test evidence before live rollout approval; then enable one remote slot on a designated test repository. Monitor memory, disk, queue wait and account limits before increasing capacity.
+- [x] Run Django suites against PostgreSQL for lock/admission tests, existing unit tests, lint/format and migration consistency checks. Use isolated test data, never production DB as a harness.
+- [x] Run two-worker scenario matrix: simultaneous claims; old incarnation reconnect; coordinator restart; lost completion response; expired/revoked credentials; stale result; provider quota exhaustion; worker OOM; disk full; session migration/fresh start; network partition during cleanup.
+- [x] Verify normal publication, crash-window reconciliation, stale PR generation and no duplicate accepted result. Idempotent internal completion does not itself prove exactly-once GitHub side effects.
+- [x] Fresh-install and interrupted-resume checks for both modes; verify no secrets in logs, browser responses or release artifacts.
+- [x] Render/interaction checks from Task 6; document actual results and omissions.
+- [x] Obtain current dedicated worker/provider/keepalive credentials through private setup, not copied conversation tokens. Configure InstaBox working storage under /data and inspect actual Docker storage placement/space before pulling images.
+- [x] Run nonpublishing remote review. Validate keepalive across at least two 30-minute idle windows, record provider state if available and independently observe fresh agent heartbeat.
+- [x] Present concrete deployment result and test evidence before live rollout approval; then enable one remote slot on a designated test repository. Monitor memory, disk, queue wait and account limits before increasing capacity.
 
 ## Verification commands
 

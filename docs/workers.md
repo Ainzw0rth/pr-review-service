@@ -29,9 +29,10 @@ execution containers do not receive the socket or worker credential.
 
 ## Install from the same verified source revision
 
-There are currently no published worker release images. Source build is the supported
-installation path. The installer builds pinned-base runtime/CLI images and records
-immutable local image IDs; it does not pretend that a mutable tag is a release digest.
+Source builds remain the default installation path. Verified Linux amd64 images are
+published with [releases](https://github.com/Ainzw0rth/pr-review-service/releases),
+including a `worker-release.json` digest manifest. The installer records immutable
+image IDs; mutable tags are never accepted as execution pins.
 
 ```bash
 python3 scripts/setup.py --mode worker --state-dir /data/review-worker
