@@ -65,6 +65,7 @@ class ProviderError(Exception):
 
 
 ERROR_REASONS = {
+    "execution_contract": "Execution request or result is invalid.",
     "cli_coverage": "CLI did not inspect all required review evidence. Nothing was published.",
     "cli_auth": "CLI subscription login is missing or expired. Reconnect this CLI account.",
     "cli_quota": "Subscription usage limit reached. This account cannot review until quota is available; no API billing fallback.",
@@ -640,6 +641,50 @@ def resolve_capacity_scope(provider):
 
 
 def review(
+    provider,
+    context,
+    cancelled,
+    *,
+    on_response=None,
+    on_activity=None,
+    task="review",
+    on_capacity=None,
+    budget=None,
+):
+    """Keep coordinator credentials/callbacks outside the execution envelope."""
+    import uuid
+
+    from execution.local import ExecutionCancelled, LocalExecutor
+    from execution.protocol import ExecutionRequest, ProtocolError
+
+    if cancelled():
+        raise ReviewCancelled()
+    review_contract(task)
+    # Retain existing provider-specific size/error semantics before transport.
+    _encode_context(provider, context)
+    request = ExecutionRequest(str(uuid.uuid4()), "model", {"task": task, "context": context})
+
+    def execute(payload, stop):
+        return _review_local(
+            provider,
+            payload["context"],
+            stop,
+            task=payload["task"],
+            on_response=on_response,
+            on_activity=on_activity,
+            on_capacity=on_capacity,
+            budget=budget,
+        )
+
+    try:
+        return LocalExecutor({"model": execute}).execute(request, cancelled=cancelled)
+    except ExecutionCancelled:
+        raise ReviewCancelled() from None
+    except ProtocolError:
+        raise ProviderError("invalid", detail="execution_contract") from None
+
+
+def _review_local(
     provider,
     context,
     cancelled,

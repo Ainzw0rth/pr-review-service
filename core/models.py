@@ -490,3 +490,28 @@ class GitHubCooldown(models.Model):
     scope = models.CharField(max_length=64, primary_key=True)
     retry_at = models.DateTimeField()
     kind = models.CharField(max_length=16)
+
+
+class ExecutionWorker(models.Model):
+    """Fleet identity, distinct from a same-host supervisor lifetime."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=80)
+    credential_digest = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    incarnation = models.CharField(max_length=32, blank=True)
+    protocol_version = models.PositiveIntegerField(default=0)
+    slots = models.PositiveSmallIntegerField(default=1)
+    active = models.PositiveSmallIntegerField(default=0)
+    capabilities = models.JSONField(default=list)
+    authenticated = models.BooleanField(default=False)
+    draining = models.BooleanField(default=False)
+    metrics = models.JSONField(default=dict)
+
+
+class WorkerEnrollment(models.Model):
+    digest = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)

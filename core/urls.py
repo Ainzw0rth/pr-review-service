@@ -1,8 +1,16 @@
 from django.urls import path
 
 from . import leaderboard, repository_views, settings_views, views, workflow_views
+from .worker_api import worker_endpoint
 
 urlpatterns = [
+    path("api/workers/v1/enroll/", worker_endpoint, {"action": "enroll"}, name="worker_enroll"),
+    path(
+        "api/workers/v1/heartbeat/",
+        worker_endpoint,
+        {"action": "heartbeat"},
+        name="worker_heartbeat",
+    ),
     path("settings/repositories/add/", repository_views.repository_edit, name="repository_add"),
     path(
         "settings/repositories/<int:repository_id>/",
