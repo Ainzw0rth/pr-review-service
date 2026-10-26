@@ -5,7 +5,7 @@
 Branch: feat/distributed-workers
 Path: /root/projects/pr-review-service/.worktrees/distributed-workers
 Base: d82bf614dca75a881bee11f172b281fd175e30d8
-Production checkout and running containers have not been changed. Managed worktree creation failed because session cwd is /root; used ignored project-local Git worktree fallback.
+Foundation commit 22c1b89 was pushed and deployed from this worktree on 2026-10-26; the original main checkout remains unchanged. Managed worktree creation failed because session cwd is /root; used ignored project-local Git worktree fallback.
 
 ## Implemented so far
 
@@ -28,8 +28,19 @@ Production checkout and running containers have not been changed. Managed worktr
 
 ## Not complete
 
-Task 1 still needs complete operation-specific envelopes, test/graph integration and remote-independent runner extraction. Task 2 has registry plus enrollment/heartbeat endpoints and PostgreSQL enrollment-race coverage; local supervisor registration, owner pairing UI and complete capability/account binding remain. No remote scheduling, HTTP agent, UI, external keepalive, worker installer or distributed deployment changes exist yet. Nothing is deployed; do not enable remote work from these foundations.
+Task 1 still needs complete operation-specific envelopes, test/graph integration and remote-independent runner extraction. Task 2 has registry plus enrollment/heartbeat endpoints and PostgreSQL enrollment-race coverage; local supervisor registration, owner pairing UI and complete capability/account binding remain. No remote scheduling, HTTP agent, UI, external keepalive, worker installer or distributed deployment changes exist yet. Foundation is deployed on Contabo, but remote review execution must remain disabled until the remaining tasks are implemented.
 
 ## Next
 
 Complete operation-specific execution extraction, then durable remote assignment/account permits with PostgreSQL race tests. Preserve existing global account admission until replacement is fully tested.
+
+## Live rollout — 2026-10-26
+
+- User authorized push/deployment and explicitly requested preserving the running review. Deployment waited for its normal completion/cleanup; no cancellation or forced container termination was performed.
+- Pushed feat/distributed-workers; application revision 22c1b8966af1aa94915399a8acf0ae37cc4a7be7 deployed using scripts/deploy.py from this worktree.
+- Production configuration is linked from the original checkout; deployment lock is shared. Use this worktree and COMPOSE_FILE=compose.yaml:compose.postgres.yaml:compose.override.yaml for this deployment, not the older main checkout.
+- Existing PostgreSQL volume and tunnel network preserved. Additive migration 0027 applied. Script made a private database backup and retained a rollback image; details remain in var/deployment.json.
+- Deployment receipt phase healthy; intake reopened, zero active jobs at verification, new local supervisor acknowledged readiness. Health HTTP 200 locally, publicly and from InstaBox. Worker heartbeat without credentials returns 401; malformed enrollment returns 400. Running provider/API file hashes match revision 22c1b89. No startup tracebacks/CRITICAL log markers in four application services.
+- InstaBox source staged at /data/workspace/pr-review-service at the same revision; Docker/Compose available. No remote agent started or enrolled (registered remote workers: zero). No coordinator credentials copied there.
+- Host-specific operational keepalive installed on Contabo as auto-reviewer-instabox-keepalive.timer: fixed SSH command every 20 minutes, verified host key, private configuration, bounded timeout and redacted failure output. Initial and three scheduled checks succeeded. This is not the planned integrated keepalive UI and does not establish an uninterrupted-uptime guarantee.
+- No live review was triggered solely for verification. Worker UI, remote execution and installer remain unfinished.
