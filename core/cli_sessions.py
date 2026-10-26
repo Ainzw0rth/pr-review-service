@@ -38,14 +38,24 @@ def save_session(job, sessions, data):
         return
     task = data.get("task")
     expected = sessions.get(task) if isinstance(task, str) else None
-    if not expected or data.get("key") != expected["key"]:
+    if not expected:
+        return
+    previous = data.get("previous_key", data.get("key"))
+    if previous != expected["key"]:
+        return
+    if "previous_key" in data and (not expected.get("id") or data.get("key") == previous):
         return
     try:
         session_id = uuid.UUID(data["id"])
+        storage_key = uuid.UUID(data["key"])
+        if str(session_id) != data["id"] or str(storage_key) != data["key"]:
+            return
     except (ValueError, TypeError, AttributeError, KeyError):
         return
     from django.utils import timezone
 
-    CLISession.objects.filter(pr_id=job.pr_id, storage_key=expected["key"], task=task).update(
-        session_id=session_id, updated_at=timezone.now()
-    )
+    updated = CLISession.objects.filter(
+        pr_id=job.pr_id, storage_key=expected["key"], task=task
+    ).update(storage_key=storage_key, session_id=session_id, updated_at=timezone.now())
+    if updated:
+        expected.update(key=str(storage_key), id=str(session_id))

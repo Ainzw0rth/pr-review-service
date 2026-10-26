@@ -80,6 +80,9 @@ class Command(BaseCommand):
                     if not connection.in_atomic_block:
                         close_old_connections()
                     WorkerOwner.objects.filter(pk=owner.pk).update(heartbeat_at=timezone.now())
+                    from core.execution_dispatch import reconcile
+
+                    reconcile()
                     try:
                         recover_dead_owners(cleanup=recover_resources)
                         recover_owners(cleanup=recover_resources)

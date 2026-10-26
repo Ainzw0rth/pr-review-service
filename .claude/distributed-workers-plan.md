@@ -34,10 +34,10 @@ Migration filenames must be generated from the actual migration head at executio
 **Files:** core/worker.py, core/providers.py, core/cli.py, core/runner.py, core/review_orchestration.py; new execution/__init__.py, execution/protocol.py, execution/local.py, core/tests/test_execution_contract.py.
 
 - [x] Capture baseline worker/provider/test/session checks; record any pre-existing failures before editing.
-- [ ] Define schema-version-1 envelopes: request_id, operation (model/test/graph), immutable input/artifact hashes, provider capability, account group, model configuration, session handle and execution limits. Results contain request_id, validated output, usage, session metadata and cleanup state; no ORM objects or raw secrets.
-- [ ] Add contract tests for malformed types, unknown operations, unsupported versions, oversized payloads and secret-free serialization. Test local cancellation and error translation.
-- [ ] Implement local adapter behind the existing call sites. Keep context gathering, checkpoints, progress persistence, final validation and GitHub writes on coordinator.
-- [ ] Verify existing worker_v2, worker_team, CLI, runner and session suites still pass. Do not rewrite the review engine as part of extraction.
+- [x] Define schema-version-1 envelopes: request_id, operation (model/test/graph), immutable input/artifact hashes, provider capability, account group, model configuration, session handle and execution limits. Results contain request_id, validated output, usage, session metadata and cleanup state; no ORM objects or raw secrets.
+- [x] Add contract tests for malformed types, unknown operations, unsupported versions, oversized payloads and secret-free serialization. Test local cancellation and error translation.
+- [x] Implement local adapter behind the existing call sites. Keep context gathering, checkpoints, progress persistence, final validation and GitHub writes on coordinator.
+- [x] Verify existing worker_v2, worker_team, CLI, runner and session suites still pass. Do not rewrite the review engine as part of extraction.
 
 **Deliverable:** unchanged standalone behavior through a serializable execution boundary.
 
@@ -47,11 +47,11 @@ Migration filenames must be generated from the actual migration head at executio
 
 **Records:** ExecutionWorker (UUID, incarnation, display name, local/remote, version, capabilities, heartbeat, drain/revoke state, capacity and bounded metrics); WorkerEnrollment (hashed code, expiry, consumed timestamp); hashed revocable worker credentials. Keep local WorkerOwner semantics distinct.
 
-- [ ] Test expired/replayed enrollment, concurrent code redemption, revoked credentials, wrong worker identity, unauthorized routes and oversized reports.
+- [x] Test expired/replayed enrollment, concurrent code redemption, revoked credentials, wrong worker identity, unauthorized routes and oversized reports.
 - [x] Add owner-issued enrollment with a 10-minute expiry; store only hashes for verification credentials. Mask operational secrets in output.
 - [x] Implement /api/workers/v1/enroll/ and /api/workers/v1/heartbeat/ with explicit body validation, rate limiting and non-cookie authentication. Owner browser mutations retain CSRF protection.
 - [x] Define heartbeat as a report for the authenticated worker/incarnation only; coordinator derives readiness and server-side timestamps. Bound capabilities and metrics to prevent arbitrary metadata growth.
-- [ ] Register local executor in the same fleet inventory without public enrollment or network dependence.
+- [x] Register local executor in the same fleet inventory without public enrollment or network dependence.
 
 **Deliverable:** secure registry, local/remote identity and honest health state, but no remote production assignment yet.
 
@@ -61,13 +61,13 @@ Migration filenames must be generated from the actual migration head at executio
 
 **Records:** ExecutionAssignment (PR job, execution request, worker/incarnation, unique token, generation, state, lease, result digest, cleanup status); durable account permits and worker session placement. Use PostgreSQL transactions/constraints for admission, not file locks across hosts.
 
-- [ ] Write PostgreSQL transaction tests for two claimers/one assignment, shared-account limits including probes, per-worker capacity and local/remote contention.
-- [ ] Implement claim, assignment heartbeat/progress, completion and failure endpoints under /api/workers/v1/. Grant work only to ready, compatible, authorized capability/account bindings.
-- [ ] Fence every accepted progress/result mutation by assignment token, worker incarnation and current PR generation. Same completion digest returns original acknowledgement; different digest conflicts.
-- [ ] Keep global PR claim on coordinator. Remote assignments are phase work; reserve review placement so one-slot workers cannot accidentally host many PRs through phase interleaving.
-- [ ] Centralize account permits for all execution entrants, including local/probe paths. Explicit account-group mapping is required to identify shared subscriptions across hosts.
-- [ ] Require cleanup acknowledgement before releasing uncertain capacity; restart reconciliation quarantines unknown running work. Lease expiry alone is insufficient. Add bounded deadlines and worker-side fail-closed cancellation on lost renewal.
-- [ ] Preserve session affinity; on unavailable history deliberately create a new session key rather than silently reuse a nonexistent session. No shared auth filesystem.
+- [x] Write PostgreSQL transaction tests for two claimers/one assignment, shared-account limits including probes, per-worker capacity and local/remote contention.
+- [x] Implement claim, assignment heartbeat/progress, completion and failure endpoints under /api/workers/v1/. Grant work only to ready, compatible, authorized capability/account bindings.
+- [x] Fence every accepted progress/result mutation by assignment token, worker incarnation and current PR generation. Same completion digest returns original acknowledgement; different digest conflicts.
+- [x] Keep global PR claim on coordinator. Remote assignments are phase work; reserve review placement so one-slot workers cannot accidentally host many PRs through phase interleaving.
+- [x] Centralize account permits for all execution entrants, including local/probe paths. Explicit account-group mapping is required to identify shared subscriptions across hosts.
+- [x] Require cleanup acknowledgement before releasing uncertain capacity; restart reconciliation quarantines unknown running work. Lease expiry alone is insufficient. Add bounded deadlines and worker-side fail-closed cancellation on lost renewal.
+- [x] Preserve session affinity; on unavailable history deliberately create a new session key rather than silently reuse a nonexistent session. No shared auth filesystem.
 
 **Deliverable:** safe scheduling and result acceptance independent of worker transport failures.
 
@@ -75,13 +75,13 @@ Migration filenames must be generated from the actual migration head at executio
 
 **Files:** execution/agent.py, execution/storage.py, execution/protocol.py, execution/local.py, execution/Dockerfile, compose.worker.yaml; core/worker_api.py; tests test_execution_agent.py and test_worker_artifacts.py.
 
-- [ ] Test agent reconnect, process restart, persisted pending completion, cancellation and lost acknowledgement without re-execution.
-- [ ] Implement outbound HTTPS polling with backoff, separate 15-second heartbeat and bounded request timeouts. Validate coordinator TLS; keep worker state mode 0600.
-- [ ] Authorize artifact download per assignment; check length/hash before use and preserve existing archive traversal/symlink/decompression defenses. Do not accept arbitrary remote Docker flags, mounts or shell commands from worker enrollment.
-- [ ] Run disposable containers with current security restrictions; agent alone has local Docker access. Pin execution images and advertise validated capability labels.
-- [ ] Persist session/config state; cap caches/logs and clean only agent-owned finished work. Stop admissions on low storage or insufficient resources. Report unavailable metrics as unknown.
-- [ ] Keep provider logins local. For existing centrally stored API providers, retain local execution initially unless an explicit worker-local account binding has been configured; never silently distribute stored secrets.
-- [ ] Test model, test and graph operations through the remote adapter; disable unimplemented capabilities rather than advertise partial support.
+- [x] Test agent reconnect, process restart, persisted pending completion, cancellation and lost acknowledgement without re-execution.
+- [x] Implement outbound HTTPS polling with backoff, separate 15-second heartbeat and bounded request timeouts. Validate coordinator TLS; keep worker state mode 0600.
+- [x] Authorize artifact download per assignment; check length/hash before use and preserve existing archive traversal/symlink/decompression defenses. Do not accept arbitrary remote Docker flags, mounts or shell commands from worker enrollment.
+- [x] Run disposable containers with current security restrictions; agent alone has local Docker access. Pin execution images and advertise validated capability labels.
+- [x] Persist session/config state; cap caches/logs and clean only agent-owned finished work. Stop admissions on low storage or insufficient resources. Report unavailable metrics as unknown.
+- [x] Keep provider logins local. For existing centrally stored API providers, retain local execution initially unless an explicit worker-local account binding has been configured; never silently distribute stored secrets.
+- [x] Test model, test and graph operations through the remote adapter; disable unimplemented capabilities rather than advertise partial support.
 
 **Deliverable:** one worker can execute a nonpublishing request and safely return its result.
 
@@ -89,12 +89,12 @@ Migration filenames must be generated from the actual migration head at executio
 
 **Files:** core/worker_keepalive.py, core/models.py, generated migration, core/management/commands/worker_keepalive.py, compose.yaml, core/worker_api.py; tests test_worker_keepalive.py.
 
-- [ ] Add encrypted private connection configuration, verified host-key reference, enabled flag, interval, next_due_at, last attempt/success and sanitized outcome.
-- [ ] Run a dedicated coordinator management-command service so SSH delays cannot block existing maintenance or heartbeat handling.
-- [ ] Claim due checks atomically with expiring scheduler ownership; persist next due time and recover overdue checks after restart. Default enabled InstaBox interval is 1200 seconds; other workers opt in.
-- [ ] Invoke fixed SSH argv with BatchMode, strict known-host verification, bounded connect/command timeout, disabled forwarding and no shell interpolation. Enrollment cannot supply arbitrary endpoints; owner configuration validates host/user/port and prevents option injection. No unrestricted generic URL fetcher.
-- [ ] Never place token-bearing arguments in diagnostics. Limit retries and distinguish expired authentication, host-key mismatch, timeout and successful command.
-- [ ] Provide owner-only Check now, deduplicated with periodic attempts. SSH success updates connectivity, not worker Ready status.
+- [x] Add encrypted private connection configuration, verified host-key reference, enabled flag, interval, next_due_at, last attempt/success and sanitized outcome.
+- [x] Run a dedicated coordinator management-command service so SSH delays cannot block existing maintenance or heartbeat handling.
+- [x] Claim due checks atomically with expiring scheduler ownership; persist next due time and recover overdue checks after restart. Default enabled InstaBox interval is 1200 seconds; other workers opt in.
+- [x] Invoke fixed SSH argv with BatchMode, strict known-host verification, bounded connect/command timeout, disabled forwarding and no shell interpolation. Enrollment cannot supply arbitrary endpoints; owner configuration validates host/user/port and prevents option injection. No unrestricted generic URL fetcher.
+- [x] Never place token-bearing arguments in diagnostics. Limit retries and distinguish expired authentication, host-key mismatch, timeout and successful command.
+- [x] Provide owner-only Check now, deduplicated with periodic attempts. SSH success updates connectivity, not worker Ready status.
 - [ ] Unit-test due scheduling, overlap prevention, coordinator restart, retry bounds and secrets redaction. Later run an authorized live idle-window experiment; retain explicit unverified behavior until measured.
 
 **Deliverable:** reliable external 20-minute checks with visible evidence and failure states.
@@ -103,13 +103,13 @@ Migration filenames must be generated from the actual migration head at executio
 
 **Files:** core/worker_views.py, core/urls.py, templates/core/base.html, templates/core/workers.html, templates/core/worker_detail.html, static/core/workers.css, static/core/workers.js; tests test_workers_ui.py and test_worker_permissions.py.
 
-- [ ] Reuse current owner authorization pattern; test anonymous/member denial for fleet data and every mutation. Do not expose repo activity or credentials to unauthorized viewers.
-- [ ] Build summary, responsive table/cards and detail disclosures using existing tokens. Show local worker from first install; provide useful no-remote-worker onboarding.
-- [ ] Implement pairing, drain, resume scheduling, check now, keepalive configuration and revocation controls. Explain that drain/revoke are not remote machine shutdown.
-- [ ] Render availability separately from readiness reasons; show active PR/phase, slot use, RAM, working-disk free space, capabilities/version, heartbeat age and keepalive schedule/result.
-- [ ] Poll every 10 seconds only while visible; abort or finish prior request before another, back off on failure, preserve focused controls/expanded details and mark stale snapshots visibly.
-- [ ] Reuse motion tokens for disclosures and status changes; disable under reduced motion. Announce actionable transitions politely, not every timer tick.
-- [ ] Verify empty/loading/error/success/disabled states and keyboard access. Capture 375/768/1440px renders, check overflow and interaction/motion with reduced motion on/off. Store evidence under .claude/verification/.
+- [x] Reuse current owner authorization pattern; test anonymous/member denial for fleet data and every mutation. Do not expose repo activity or credentials to unauthorized viewers.
+- [x] Build summary, responsive table/cards and detail disclosures using existing tokens. Show local worker from first install; provide useful no-remote-worker onboarding.
+- [x] Implement pairing, drain, resume scheduling, check now, keepalive configuration and revocation controls. Explain that drain/revoke are not remote machine shutdown.
+- [x] Render availability separately from readiness reasons; show active PR/phase, slot use, RAM, working-disk free space, capabilities/version, heartbeat age and keepalive schedule/result.
+- [x] Poll every 10 seconds only while visible; abort or finish prior request before another, back off on failure, preserve focused controls/expanded details and mark stale snapshots visibly.
+- [x] Reuse motion tokens for disclosures and status changes; disable under reduced motion. Announce actionable transitions politely, not every timer tick.
+- [x] Verify empty/loading/error/success/disabled states and keyboard access. Capture 375/768/1440px renders, check overflow and interaction/motion with reduced motion on/off. Store evidence under .claude/verification/.
 
 **Deliverable:** owner can understand and operate fleet without reading logs for routine states.
 
@@ -117,12 +117,12 @@ Migration filenames must be generated from the actual migration head at executio
 
 **Files:** scripts/setup.py, new scripts/setup_worker.py, scripts/cli_login.sh, compose.worker.yaml, execution/Dockerfile, release build workflow under .github/workflows/, README.md, docs/quickstart.md, docs/installation.md, new docs/workers.md; tests test_worker_setup.py and existing test_guided_setup.py.
 
-- [ ] Preserve standalone default and --resume behavior. Offer worker mode without rerunning database/admin bootstrap.
-- [ ] Prompt URL/name/pairing code privately; preflight platform/Docker/disk/TLS, enroll once, persist returned credential before subsequent steps and never echo it.
-- [ ] Resume interrupted enrollment/configuration/login without creating duplicate workers. Warn clearly on incompatible existing installation instead of overwriting it.
-- [ ] Guide independent CLI login/account binding and check capabilities before declaring Ready. Provide an API-key-only path without installing unnecessary CLI images.
+- [x] Preserve standalone default and --resume behavior. Offer worker mode without rerunning database/admin bootstrap.
+- [x] Prompt URL/name/pairing code privately; preflight platform/Docker/disk/TLS, enroll once, persist returned credential before subsequent steps and never echo it.
+- [x] Resume interrupted enrollment/configuration/login without creating duplicate workers. Warn clearly on incompatible existing installation instead of overwriting it.
+- [x] Guide independent CLI login/account binding and check capabilities before declaring Ready. Provide an API-key-only path without installing unnecessary CLI images.
 - [ ] Build and publish pinned coordinator/agent/runner release images for tested architectures; do not claim ARM support before native verification. Pull images by release manifest/digest; keep source builds documented.
-- [ ] Verify worker-only stack contains no database, web dashboard or coordinator secrets. Document outbound HTTPS and optional host-specific keepalive, not mandatory SSH for ordinary workers.
+- [x] Verify worker-only stack contains no database, web dashboard or coordinator secrets. Document outbound HTTPS and optional host-specific keepalive, not mandatory SSH for ordinary workers.
 
 **Deliverable:** fresh standalone setup remains simple; a second host joins through one guided flow.
 
@@ -130,11 +130,11 @@ Migration filenames must be generated from the actual migration head at executio
 
 **Files:** scripts/deploy.py, core/management/commands/worker_control.py, core/deployment.py, core/execution_dispatch.py, docs/deployment.md, docs/troubleshooting.md; tests test_distributed_deployment.py.
 
-- [ ] Test fleet drain with running remote work, offline worker with uncertain assignments and mixed protocol versions.
-- [ ] Stop new remote/local admissions during incompatible upgrades; require all active execution/cleanup accounted for before migration. Do not treat an empty local Docker list as fleet quiescence.
-- [ ] Retain deployment gate until new coordinator and eligible agents acknowledge supported versions. Use additive migrations first and explicit compatibility checks.
-- [ ] Document rollback: disable remote assignment, fence outstanding tokens, quarantine uncertain execution, restore only schema-compatible application versions, then verify local readiness. Never automatically restore DB over accepted work.
-- [ ] Preserve local processing when remote capacity is absent, except account groups with unconfirmed cleanup. Expose actionable recovery state and audited operator reconciliation.
+- [x] Test fleet drain with running remote work, offline worker with uncertain assignments and mixed protocol versions.
+- [x] Stop new remote/local admissions during incompatible upgrades; require all active execution/cleanup accounted for before migration. Do not treat an empty local Docker list as fleet quiescence.
+- [x] Retain deployment gate until new coordinator and eligible agents acknowledge supported versions. Use additive migrations first and explicit compatibility checks.
+- [x] Document rollback: disable remote assignment, fence outstanding tokens, quarantine uncertain execution, restore only schema-compatible application versions, then verify local readiness. Never automatically restore DB over accepted work.
+- [x] Preserve local processing when remote capacity is absent, except account groups with unconfirmed cleanup. Expose actionable recovery state and audited operator reconciliation.
 
 **Deliverable:** deployment/recovery tools understand remote execution and do not strand or duplicate work silently.
 

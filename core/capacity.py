@@ -122,6 +122,11 @@ def _permit(scope, indices, cancelled, on_wait=None, wait=True):
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     if os.fstat(fd).st_ino != path.stat().st_ino:
                         raise CapacityError()
+                    from .execution_dispatch import slot_blocked
+
+                    if slot_blocked(scope, index):
+                        os.close(fd)
+                        continue
                     held = fd
                     break
                 except BlockingIOError:
@@ -281,8 +286,17 @@ def recover_resources(owner):
     """Caller proved execution quiescence; still acquire each exact resource slot."""
     import json
 
+    from .models import ExecutionAssignment
     from .runner import _docker
 
+    pending = ExecutionAssignment.objects.filter(cleanup_confirmed=False)
+    pending = (
+        pending.filter(job_id=owner.job_id)
+        if hasattr(owner, "token")
+        else pending.filter(job__execution_claim__owner=owner)
+    )
+    if pending.exists():
+        raise CapacityError()
     label = "claim" if hasattr(owner, "token") else "owner"
     token = str(owner.token if label == "claim" else owner.pk)
     try:

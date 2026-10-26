@@ -1,9 +1,12 @@
 from django.urls import path
 
-from . import leaderboard, repository_views, settings_views, views, workflow_views
+from . import leaderboard, repository_views, settings_views, views, worker_views, workflow_views
 from .worker_api import worker_endpoint
 
 urlpatterns = [
+    path("workers/", worker_views.workers, name="workers"),
+    path("workers/state/", worker_views.workers_state, name="workers_state"),
+    path("workers/actions/", worker_views.worker_action, name="worker_action"),
     path("api/workers/v1/enroll/", worker_endpoint, {"action": "enroll"}, name="worker_enroll"),
     path(
         "api/workers/v1/heartbeat/",
@@ -43,3 +46,13 @@ urlpatterns = [
     path("jobs/<uuid:job_id>/retry/", views.job_retry, name="job_retry"),
     path("jobs/<uuid:job_id>/activity/", views.job_activity, name="job_activity"),
 ]
+
+for action in ("claim", "input", "event", "renew", "complete"):
+    urlpatterns.append(
+        path(
+            f"api/workers/v1/{action}/",
+            worker_endpoint,
+            {"action": action},
+            name=f"worker_{action}",
+        )
+    )

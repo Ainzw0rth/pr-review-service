@@ -69,16 +69,21 @@ def authenticate(token):
     return worker
 
 
+@transaction.atomic
 def revoke(worker_id):
-    # Assignment fencing must also consult this state once dispatch is enabled.
+    from .claims import pool
+
+    pool()  # Serialize revocation with acceptance and incarnation transitions.
+    ExecutionWorker.objects.select_for_update().filter(pk=worker_id).first()
     ExecutionWorker.objects.filter(pk=worker_id).update(
         revoked_at=timezone.now(), draining=True, authenticated=False
     )
 
 
+@transaction.atomic
 def heartbeat(worker, report):
     required = {"version", "incarnation", "slots", "active", "capabilities", "authenticated"}
-    if not isinstance(report, dict) or set(report) - {"metrics"} != required:
+    if not isinstance(report, dict) or set(report) - {"metrics", "software_version"} != required:
         raise ValueError("Invalid heartbeat")
     if type(report["version"]) is not int or not 1 <= report["version"] <= 1000:
         raise ValueError("Invalid protocol version")
@@ -104,8 +109,32 @@ def heartbeat(worker, report):
         raise ValueError("Invalid metrics")
     if any(type(v) is not int or not 0 <= v <= 2**63 - 1 for v in metrics.values()):
         raise ValueError("Invalid metrics")
+    version = report.get("software_version", "")
+    if not isinstance(version, str) or len(version) > 64:
+        raise ValueError("Invalid software version")
+    # Same admission mutex/order as dispatch: pool, worker, then assignments.
+    # Retiring an incarnation fences its execution permanently, even if a delayed
+    # old heartbeat subsequently changes the advertised incarnation again.
+    from .claims import pool
+    from .models import ExecutionAssignment
+
+    pool()
+    current = ExecutionWorker.objects.select_for_update().get(pk=worker.pk)
+    if current.revoked_at:
+        raise WorkerAuthError("Invalid worker credential")
+    if current.incarnation != report["incarnation"]:
+        previous = ExecutionAssignment.objects.filter(
+            worker=current, cleanup_confirmed=False
+        ).exclude(incarnation=report["incarnation"])
+        previous.filter(state="queued").update(
+            state="failed", cleanup_confirmed=True, encrypted_input="", updated_at=timezone.now()
+        )
+        previous.filter(state__in=["running", "cancelling", "quarantined"]).update(
+            state="quarantined", updated_at=timezone.now()
+        )
     updated = ExecutionWorker.objects.filter(pk=worker.pk, revoked_at__isnull=True).update(
         heartbeat_at=timezone.now(),
+        software_version=version,
         incarnation=report["incarnation"],
         protocol_version=report["version"],
         slots=report["slots"],

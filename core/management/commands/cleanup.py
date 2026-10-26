@@ -2,10 +2,12 @@ from datetime import timedelta
 
 from django.contrib.sessions.models import Session
 from django.core.management.base import BaseCommand
+from django.db import transaction
 from django.utils import timezone
 
 from core.models import (
     AccessLink,
+    ExecutionAssignment,
     ExpectedLabel,
     Job,
     JournalEntry,
@@ -14,6 +16,7 @@ from core.models import (
     PhaseCheckpoint,
     ReviewCheckpoint,
     Webhook,
+    WorkerEnrollment,
 )
 
 
@@ -22,14 +25,27 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         cutoff = timezone.now() - timedelta(days=90)
-        jobs, _ = (
-            Job.objects.filter(
+        # Retain uncertain remote execution even when its job is terminal/old.
+        # Serialize with dispatch so an assignment cannot appear during retention.
+        from core.claims import pool
+
+        with transaction.atomic():
+            pool()
+            expired = Job.objects.filter(
                 finished_at__lt=cutoff,
                 status__in=["completed", "failed", "cancelled", "superseded"],
+                execution_claim__isnull=True,
+            ).exclude(
+                pk__in=ExecutionAssignment.objects.filter(cleanup_confirmed=False)
+                .exclude(job_id=None)
+                .values("job_id")
             )
-            .filter(execution_claim__isnull=True)
-            .delete()
-        )
+            ExecutionAssignment.objects.filter(job__in=expired, cleanup_confirmed=True).delete()
+            jobs, _ = expired.delete()
+            ExecutionAssignment.objects.filter(
+                job=None, cleanup_confirmed=True, created_at__lt=cutoff
+            ).delete()
+        WorkerEnrollment.objects.filter(expires_at__lt=cutoff).delete()
         ModelProbe.objects.filter(created_at__lt=cutoff).delete()
         PhaseCheckpoint.objects.filter(
             created_at__lt=cutoff, job__execution_claim__isnull=True

@@ -26,6 +26,9 @@ services:
   events:
     depends_on:
       postgres: {condition: service_healthy}
+  keepalive:
+    depends_on:
+      postgres: {condition: service_healthy}
   maintenance:
     depends_on:
       postgres: {condition: service_healthy}

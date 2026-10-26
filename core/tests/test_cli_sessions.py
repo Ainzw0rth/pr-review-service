@@ -94,3 +94,131 @@ class CLISessionTests(TestCase):
             bad = {**event, "thread_id": "../private", "session_id": "../private"}
             parser.feed(bad)
             self.assertIsNone(parser.session_id)
+
+    def test_missing_history_relocation_rotates_key_and_updates_caller_by_compare_and_swap(self):
+        from core.cli_sessions import prepare_sessions, save_session
+
+        job = self.job(1)
+        job.status = "running"
+        job.save()
+        provider = Provider.objects.create(name="Codex", kind="codex_cli", model="model")
+        sessions = prepare_sessions(job, provider, ["review_code"])
+        save_session(
+            job,
+            sessions,
+            {**sessions["review_code"], "id": str(uuid.uuid4()), "task": "review_code"},
+        )
+        previous = dict(sessions["review_code"])
+        replacement = {"key": str(uuid.uuid4()), "id": str(uuid.uuid4())}
+        save_session(
+            job, sessions, {**replacement, "previous_key": previous["key"], "task": "review_code"}
+        )
+        self.assertEqual(sessions["review_code"], replacement)
+        self.assertEqual(
+            prepare_sessions(job, provider, ["review_code"])["review_code"], replacement
+        )
+        # A delayed callback with the old storage key cannot overwrite or mutate its caller map.
+        stale = {"review_code": dict(previous)}
+        save_session(
+            job,
+            stale,
+            {
+                "key": str(uuid.uuid4()),
+                "id": str(uuid.uuid4()),
+                "previous_key": previous["key"],
+                "task": "review_code",
+            },
+        )
+        self.assertEqual(stale["review_code"], previous)
+        self.assertEqual(
+            prepare_sessions(job, provider, ["review_code"])["review_code"], replacement
+        )
+
+    def test_relocation_rejects_mismatched_previous_key_and_first_use(self):
+        from core.cli_sessions import prepare_sessions, save_session
+
+        job = self.job(1)
+        job.status = "running"
+        job.save()
+        provider = Provider.objects.create(name="Codex", kind="codex_cli", model="model")
+        sessions = prepare_sessions(job, provider, ["review_code"])
+        original = dict(sessions["review_code"])
+        for previous_key in (original["key"], str(uuid.uuid4())):
+            save_session(
+                job,
+                sessions,
+                {
+                    "key": str(uuid.uuid4()),
+                    "id": str(uuid.uuid4()),
+                    "previous_key": previous_key,
+                    "task": "review_code",
+                },
+            )
+        self.assertEqual(prepare_sessions(job, provider, ["review_code"])["review_code"], original)
+        save_session(job, sessions, {**original, "id": str(uuid.uuid4()), "task": "review_code"})
+        original = dict(sessions["review_code"])
+        save_session(
+            job,
+            sessions,
+            {
+                "key": str(uuid.uuid4()),
+                "id": str(uuid.uuid4()),
+                "previous_key": str(uuid.uuid4()),
+                "task": "review_code",
+            },
+        )
+        self.assertEqual(prepare_sessions(job, provider, ["review_code"])["review_code"], original)
+
+    def test_runner_relocation_metadata_validated_and_forwarded_only_for_requested_session(self):
+        import json
+
+        from core.cli import CLIStream, _cli_result
+        from core.providers import ProviderError
+        from core.tests.test_providers import RESULT
+
+        session = {"key": str(uuid.uuid4()), "id": str(uuid.uuid4())}
+        replacement = str(uuid.uuid4())
+
+        def parser():
+            stream = CLIStream("codex_cli")
+            stream.feed({"type": "thread.started", "thread_id": str(uuid.uuid4())})
+            stream.feed({"type": "runner_coverage", "read": 0, "total": 0})
+            stream.feed(
+                {
+                    "type": "item.completed",
+                    "item": {"type": "agent_message", "text": json.dumps(RESULT)},
+                }
+            )
+            stream.feed({"type": "turn.completed"})
+            return stream
+
+        stream = parser()
+        stream.feed(
+            {
+                "type": "runner_session",
+                "resumed": False,
+                "previous_key": session["key"],
+                "key": replacement,
+            }
+        )
+        self.assertEqual(_cli_result(stream, session, "review", 0), RESULT)
+        self.assertEqual(stream.diagnostics["cli_session"]["key"], replacement)
+        self.assertEqual(stream.diagnostics["cli_session"]["previous_key"], session["key"])
+        with self.assertRaises(ProviderError):
+            _cli_result(stream, {**session, "key": str(uuid.uuid4())}, "review", 0)
+        for changes in ({"key": "../other"}, {"previous_key": "invalid"}, {"resumed": True}):
+            with self.subTest(changes=changes), self.assertRaises(ProviderError):
+                parser().feed(
+                    {
+                        "type": "runner_session",
+                        "resumed": False,
+                        "previous_key": session["key"],
+                        "key": replacement,
+                        **changes,
+                    }
+                )
+        legacy = parser()
+        legacy.feed({"type": "runner_session", "resumed": False})
+        _cli_result(legacy, session, "review", 0)
+        self.assertEqual(legacy.diagnostics["cli_session"]["key"], session["key"])
+        self.assertNotIn("previous_key", legacy.diagnostics["cli_session"])

@@ -3,9 +3,9 @@ import tempfile
 import threading
 from contextlib import ExitStack
 from pathlib import Path
-from unittest import TestCase
 from unittest.mock import patch
 
+from django.test import TransactionTestCase as TestCase
 from django.test import override_settings
 
 from core.capacity import CapacityBusy, CapacityError, digest, permit

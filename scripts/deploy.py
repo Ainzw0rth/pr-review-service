@@ -21,6 +21,7 @@ def command(*args):
 
 def deploy(*, run=command, sleep=time.sleep, journal=None):
     receipt = {}
+    legacy_schema_verified = False
 
     def phase(name, **values):
         receipt.update(phase=name, **values)
@@ -37,13 +38,46 @@ def deploy(*, run=command, sleep=time.sleep, journal=None):
         return run(*COMPOSE, "run", "--rm", "--no-deps", "web", "python", "manage.py", *args)
 
     def status():
+        nonlocal legacy_schema_verified
         value = json.loads(run(*CONTROL, "status", "--json"))
         if (
             not isinstance(value, dict)
             or any(type(value.get(k)) is not bool for k in ("draining", "idle"))
             or type(value.get("active_jobs")) is not int
+            or value.get("active_jobs", -1) < 0
+            or any(
+                type(value.get(k, 0)) is not int or value.get(k, 0) < 0
+                for k in ("remote_active", "remote_quarantined")
+            )
+            or value.get("remote_quarantined", 0) > value.get("remote_active", 0)
+            or (("remote_active" in value) != ("remote_quarantined" in value))
         ):
             raise RuntimeError("Worker does not provide a supported drain acknowledgment.")
+        # The first upgrade from standalone has no remote ledger or counters. Prove
+        # that schema using the OLD running application's connection, not an assumed
+        # version, before interpreting absent counters as zero. Never bypass an
+        # existing ledger just because a mixed/old worker_control omits its counts.
+        if "remote_active" not in value:
+            if not legacy_schema_verified:
+                marker = run(
+                    *COMPOSE,
+                    "exec",
+                    "-T",
+                    "web",
+                    "python",
+                    "manage.py",
+                    "shell",
+                    "--verbosity",
+                    "0",
+                    "-c",
+                    "from django.db import connection; "
+                    "print('legacy-no-remote-ledger' if 'core_executionassignment' not in "
+                    "connection.introspection.table_names() else 'remote-ledger-present')",
+                )
+                if marker.strip() != "legacy-no-remote-ledger":
+                    raise RuntimeError("Remote cleanup counters missing for an unverified schema.")
+                legacy_schema_verified = True
+            value.update(remote_active=0, remote_quarantined=0)
         return value
 
     if status()["draining"]:
@@ -96,23 +130,49 @@ def deploy(*, run=command, sleep=time.sleep, journal=None):
             state = status()
             if not state["draining"]:
                 raise RuntimeError("Drain was removed by another operator; stopping deployment.")
-            if state["idle"] and state["active_jobs"] == 0:
+            if state["idle"] and state["active_jobs"] == 0 and state["remote_active"] == 0:
                 previous_supervisors = set(state.get("supervisors", []))
                 previous_worker = state.get("worker_token")
                 if not previous_worker:
                     raise RuntimeError("Worker acknowledgment has no process identity.")
                 break
-            print("Waiting for active review and cleanup; new requests remain queued.", flush=True)
+            print(
+                "Waiting for active review and cleanup; new requests remain queued. "
+                f"Remote cleanup pending: {state['remote_active']} "
+                f"(quarantined: {state['remote_quarantined']}).",
+                flush=True,
+            )
             sleep(5)
         candidate("deployment_control", "pause")
         phase("maintenance")
         # Infinite graceful stop: never turn an elapsed timeout into SIGKILL.
         # Durable ingress gate remains closed throughout schema changes/readiness.
-        run(*COMPOSE, "stop", "--timeout", "-1", "web", "events", "maintenance", "worker")
+        run(
+            *COMPOSE,
+            "stop",
+            "--timeout",
+            "-1",
+            "web",
+            "events",
+            "maintenance",
+            "keepalive",
+            "worker",
+        )
         if run(
-            *COMPOSE, "ps", "--status", "running", "-q", "web", "events", "maintenance", "worker"
+            *COMPOSE,
+            "ps",
+            "--status",
+            "running",
+            "-q",
+            "web",
+            "events",
+            "maintenance",
+            "keepalive",
+            "worker",
         ):
             raise RuntimeError("Application writers still running; refusing backup/migration.")
+        # Local Docker inspection supplements the durable remote drain above; it
+        # cannot establish process death on another host or release remote permits.
         for label in ("auto-reviewer.cli", "auto-reviewer.test", "auto-reviewer.namespace"):
             if run("docker", "ps", "-q", "--filter", "label=" + label):
                 raise RuntimeError(
@@ -142,6 +202,7 @@ def deploy(*, run=command, sleep=time.sleep, journal=None):
             *COMPOSE, "run", "--rm", "--no-deps", "web", "python", "manage.py", "migrate", "--check"
         )
         phase("migrated", migrations=candidate("showmigrations", "--list"))
+        legacy_schema_verified = False  # New schema must prove its own drain contract.
         # Reassert durable DB drain before a new supervisor can claim anything.
         run(
             *COMPOSE,
@@ -188,6 +249,7 @@ def deploy(*, run=command, sleep=time.sleep, journal=None):
             if (
                 state["idle"]
                 and state["active_jobs"] == 0
+                and state["remote_active"] == 0
                 and not previous_supervisors.intersection(state.get("supervisors", []))
                 and state.get("worker_token")
                 and state["worker_token"] != previous_worker
@@ -198,7 +260,7 @@ def deploy(*, run=command, sleep=time.sleep, journal=None):
             raise RuntimeError(
                 "Replacement worker did not acknowledge readiness within 120 seconds."
             )
-        run(*COMPOSE, "up", "-d", "--no-deps", "--wait", "events", "maintenance")
+        run(*COMPOSE, "up", "-d", "--no-deps", "--wait", "events", "maintenance", "keepalive")
         run(*CONTROL, "resume")
         candidate("deployment_control", "open")
         phase("healthy")
@@ -218,7 +280,9 @@ def deploy(*, run=command, sleep=time.sleep, journal=None):
                 "Inspect service health before resuming. No active review was forcibly stopped.\n"
                 f"Previous image retained: {rollback}\n"
                 "Do NOT blindly roll back the image after migrations. Keep all writers stopped\n"
-                "until image/schema compatibility is established. Never restore a database\n"
+                "until image/schema compatibility is established. Remote assignment cleanup\n"
+                "must be confirmed; offline/revoked workers are not proof of termination.\n"
+                "Never delete uncertain assignment/account records. Never restore a database\n"
                 "without reconciling post-backup writes and external publication.\n",
                 file=sys.stderr,
             )

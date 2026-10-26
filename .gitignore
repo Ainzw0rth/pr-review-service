@@ -11,3 +11,5 @@ staticfiles/
 .claude/verification/
 compose.override.yaml
 .worktrees/
+
+.claude/distributed-workers-work/

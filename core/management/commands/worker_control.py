@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from core.claims import pool
-from core.models import JobClaim, WorkerOwner
+from core.models import ExecutionAssignment, JobClaim, WorkerOwner
 
 
 class Command(BaseCommand):
@@ -41,11 +41,17 @@ class Command(BaseCommand):
                     ).order_by("-heartbeat_at")[:1]
                 )
             active = JobClaim.objects.count()
+            # Independent of local claims and heartbeat freshness: an orphaned, expired,
+            # revoked or terminal assignment can still own remote processes/resources.
+            pending_remote = ExecutionAssignment.objects.filter(cleanup_confirmed=False)
+            remote_active = pending_remote.count()
+            remote_quarantined = pending_remote.filter(state="quarantined").count()
             # Unresponsive supervisors are not assumed dead; acknowledgment stays fail-closed.
             idle = (
                 config.draining
                 and bool(owners)
                 and not active
+                and not remote_active
                 and all(
                     not o.probe_active and o.drain_ack == config.drain_generation for o in owners
                 )
@@ -55,6 +61,8 @@ class Command(BaseCommand):
             result = dict(
                 draining=config.draining,
                 active_jobs=active,
+                remote_active=remote_active,
+                remote_quarantined=remote_quarantined,
                 idle=idle,
                 worker_token=token,
                 concurrent_pr_reviews=config.concurrent_pr_reviews,
@@ -64,7 +72,8 @@ class Command(BaseCommand):
             self.stdout.write(json.dumps(result))
         else:
             self.stdout.write(
-                f"Intake: {'draining' if config.draining else 'enabled'}. Active jobs: {active}."
+                f"Intake: {'draining' if config.draining else 'enabled'}. Active jobs: {active}. "
+                f"Remote cleanup pending: {remote_active} (quarantined: {remote_quarantined})."
             )
             if config.draining:
                 self.stdout.write(

@@ -74,7 +74,7 @@ python3 scripts/deploy.py
 ```
 
 It builds the candidate, checks migrations/deployment configuration, drains reviews, closes intake,
-stops writers, backs up and applies migrations before starting and verifying new processes.
+stops writers (including the dedicated keepalive scheduler), backs up and applies migrations before starting and verifying new processes.
 It saves a rollback image and a private `var/deployment.json` receipt. Do not run an uncoordinated
 `docker compose up --build` over active reviews. HTTPS production checks reject insecure server settings. Explicit validated loopback HTTP
 mode permits only its expected local HTTPS/cookie warnings; other deployment checks remain active.
@@ -95,6 +95,70 @@ docker compose exec -T web python manage.py worker_control drain
 Do not resume until all supervisors are healthy, active work/cleanup is accounted for and any
 application deployment gate is intentionally handled. `worker_control resume` controls workers;
 `deployment_control open` separately opens the application gate.
+
+## Distributed workers: drain, upgrades and rollback
+
+Remote mode is opt-in (`REMOTE_EXECUTION_ENABLED=1`); see [worker installation](workers.md).
+The `keepalive` Compose service runs `worker_keepalive` independently of review/event
+processing. It shares the private application data/configuration but has no Docker socket
+or inbound port. The coordinator image includes OpenSSH client support. Deployment stops
+and verifies this DB writer alongside web/events/maintenance/workers before migrations;
+it restarts only after replacement supervisor readiness. Never leave an older independent
+keepalive process writing the database during schema changes.
+A coordinator/global drain stops **new PR admissions**, not ongoing reviews. Existing
+remote placements must still fetch queued phases, renew execution and submit completion
+while those reviews finish. A per-worker drain prevents new placement on that worker;
+it does not cancel existing phases. Do not set the deployment maintenance gate early:
+maintenance rejects every route except `/healthz/`, including worker callbacks, with
+HTTP 503 before database access. The deployment script enables that gate only after
+confirmed global cleanup and keeps it closed during migrations.
+
+`worker_control status --json` includes:
+
+- `active_jobs`: retained coordinator PR claims, including terminal jobs awaiting cleanup.
+- `remote_active`: **all** remote assignments with unconfirmed cleanup, including queued,
+  cancelled/quarantined, terminal and orphaned records with no remaining PR claim.
+- `remote_quarantined`: the subset explicitly marked quarantined.
+- `idle`: true only after drain acknowledgement from every local supervisor, no active
+  claims/probes, and no unconfirmed remote cleanup.
+
+A disconnected or revoked worker, expired lease, empty local Docker process list or
+completed job status is not proof of remote termination. Deployment waits without
+forcibly killing reviews when any remote cleanup remains uncertain. Empty workers do
+not need to be online to permit a coordinator upgrade. Never clear pending assignment,
+PR-claim or account-permit records just to make the deployment gate pass.
+
+The worker runtime has no ORM/database migrations. Protocol-compatible version-1
+agents do not require a simultaneous restart for coordinator schema-only updates.
+The scheduler rejects unsupported protocol versions; after deployment, verify fresh
+heartbeats and eligibility before expecting remote work. An incompatible agent may
+stay unavailable without blocking unrelated local reviews, except when its uncertain
+execution still holds a shared account permit. Drain and explicitly verify compatibility
+before changing runner images, account mappings or the execution protocol itself.
+
+For failed rollout/recovery:
+
+1. Leave global intake drained and maintenance closed when schema compatibility is
+   uncertain. Do not blindly start an old application image against new migrations.
+2. Disable new remote scheduling in the coordinator configuration. Drain or revoke
+   affected workers as appropriate: revocation fences results, not processes. Preserve
+   existing assignment tokens/history and quarantined account ownership.
+3. Establish termination on the actual worker host and obtain the supported cleanup
+   acknowledgement. A local coordinator `docker ps` check cannot prove this. Keep
+   unconfirmed capacity quarantined; do not treat a timeout as reconciliation.
+4. Select a schema-compatible application revision, complete reviewed migrations and
+   start replacement supervisors. Never restore a database over accepted events/results
+   without reconciling those writes and external GitHub publication.
+5. Verify local readiness and zero unresolved cleanup, then intentionally open intake.
+   Re-enable remote scheduling only after supported agent protocol, authentication,
+   account binding and fresh heartbeat/readiness checks succeed.
+
+The deploy script accepts legacy standalone status responses without remote counters
+only after read-only schema inspection proves the remote assignment table does not exist.
+This permits the first upgrade from standalone; a present or uninspectable ledger fails
+closed. The proof is discarded after migration. Upgraded coordinators
+report both counters; malformed values fail closed, and pending remote counts block
+rollout even if an inconsistent status claims to be idle.
 
 ## Backup and retention
 
@@ -121,3 +185,48 @@ docker compose exec -T web python manage.py cleanup
 
 For an existing SQLite installation, follow the separate [supervised cutover](postgres-cutover.md).
 Changing `DB_ENGINE` alone does not transfer data.
+
+## Revoked-worker termination reconciliation
+
+A revoked worker cannot authenticate its cleanup acknowledgement. Keep its assignment
+and account capacity quarantined until the configured dashboard owner has verified
+termination **on the actual worker host**. The following command records that owner's
+attestation; it does not contact the worker, stop containers, infer death from a timeout,
+accept model output, retry a review, or publish to GitHub.
+
+Before using it:
+
+1. Revoke the affected worker through the owner Workers page. Record the worker UUID,
+   assignment UUID, incarnation, and affected host. Stop the agent on that host and
+   disable automatic restart so it cannot start additional work during inspection.
+2. On that same host, inspect Docker containers using the exact label
+   `auto-reviewer.worker=<WORKER_UUID>`. Verify each candidate's full immutable container
+   ID and ownership labels. Terminate/remove only the verified owned IDs, then confirm
+   their absence and that no worker-owned container remains. Retain a timestamped
+   record identifying the host, IDs checked, and the completed absence verification.
+   Also account for any operator-renamed containers by immutable ID/ownership label.
+3. If host access, container ownership, or actual termination is uncertain, **stop here**:
+   leave capacity quarantined. Revocation, expired leases, missing heartbeats, an empty
+   coordinator Docker list, or an SSH connection alone are not termination evidence.
+4. On the coordinator, the owner may record the verified termination:
+
+   ```sh
+   docker compose exec -T web python manage.py reconcile_worker_assignment \
+     <ASSIGNMENT_UUID> --operator <OWNER_USERNAME> \
+     --evidence 'Host node-7; UTC verification time; agent stopped/restart disabled; exact owned container IDs removed and absence verified; incident reference.' \
+     --confirm-terminated
+   ```
+
+`--operator` must identify the configured active dashboard owner; it is audit attribution,
+not a replacement for administrator access to the coordinator shell. Evidence must be
+nonblank and at most 4096 characters. Include concrete verification facts or a retained
+incident-record reference, **not credentials, tokens, model output, or repository content**.
+
+The transaction locks the admission pool, worker, and assignment. It requires revocation,
+marks unresolved work failed with confirmed cleanup, purges encrypted input/output, and
+retains the operator identity, UTC timestamp, evidence, and digest in the assignment's
+result audit. Only this explicitly reconciled assignment stops blocking its resource slot;
+other unresolved work remains quarantined. Repeating the command for an already-cleaned
+assignment changes nothing and cannot replace its original audit. Review the remaining
+cleanup/drain status before reopening intake; re-enrollment and scheduling are separate,
+explicit operations.

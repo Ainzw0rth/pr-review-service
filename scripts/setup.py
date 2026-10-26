@@ -119,14 +119,23 @@ def manage(*args, capture=False, payload=None):
     )
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=["standalone", "worker"], default="standalone")
     parser.add_argument(
         "--resume",
         action="store_true",
         help="Continue this wizard after an interruption; never overwrite a changed .env.",
     )
-    args = parser.parse_args()
+    args, extra = parser.parse_known_args(argv)
+    if args.mode == "worker":
+        if __package__:
+            from scripts import setup_worker
+        else:
+            import setup_worker
+        return setup_worker.main((["--resume"] if args.resume else []) + extra)
+    if extra:
+        parser.error("unrecognized arguments: " + " ".join(extra))
     if not sys.stdin.isatty():
         parser.exit(1, "Run setup in an interactive terminal. Manual setup: docs/installation.md\n")
     if not args.resume and (ROOT / ".env").exists():
@@ -289,6 +298,7 @@ def main():
                 "events",
                 "worker",
                 "maintenance",
+                "keepalive",
             ]
         )
         state["step"] = "verify"
@@ -322,7 +332,7 @@ if __name__ == "__main__":
             os.open(ROOT / "var/setup.lock", os.O_CREAT | os.O_RDWR, 0o600), "w"
         ) as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            main()
+            raise SystemExit(main())
     except (subprocess.CalledProcessError, OSError) as exc:
         # Child output may contain tokens or setup links; do not dump captured stderr.
         print(

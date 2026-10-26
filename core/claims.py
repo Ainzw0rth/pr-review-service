@@ -171,6 +171,11 @@ def release(job):
     token = getattr(job, "claim_token", None)
     if token is None:
         return False
+    from .capacity import CapacityError
+    from .execution_dispatch import pending_for_job
+
+    if pending_for_job(job.pk):
+        raise CapacityError()
     with transaction.atomic():
         PullRequest.objects.select_for_update().get(pk=job.pr_id)
         row = Job.objects.select_for_update().get(pk=job.pk)
@@ -190,6 +195,9 @@ def release(job):
                 status="interrupted", finished_at=timezone.now()
             )
         deleted, _ = retained.delete()
+        from .models import ExecutionPlacement
+
+        ExecutionPlacement.objects.filter(job_id=job.pk).delete()
     handle = getattr(job, "execution_lock", None)
     if handle:
         handle.close()
@@ -226,6 +234,9 @@ def recover_dead_owners(cleanup=None):
                     status="interrupted", finished_at=timezone.now()
                 )
                 retained.delete()
+                from .models import ExecutionPlacement
+
+                ExecutionPlacement.objects.filter(job_id=row.pk).delete()
                 recovered += 1
         finally:
             handle.close()

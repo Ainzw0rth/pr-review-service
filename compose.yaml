@@ -46,6 +46,13 @@ services:
     restart: unless-stopped
     depends_on:
       migrate: {condition: service_completed_successfully}
+  keepalive:
+    <<: *app
+    # Dedicated DB-writing scheduler: no Docker socket, no inbound ports.
+    command: ["python", "manage.py", "worker_keepalive"]
+    restart: unless-stopped
+    depends_on:
+      migrate: {condition: service_completed_successfully}
   maintenance:
     <<: *app
     command: ["python", "manage.py", "maintenance"]

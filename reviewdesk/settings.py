@@ -217,3 +217,6 @@ except (ValueError, TypeError):
     raise RuntimeError(
         "API_ACCOUNT_GROUPS must map positive credential IDs to nonempty account aliases"
     ) from None
+
+# Opt-in: remote fleet uses coordinator admission and durable cleanup fencing.
+REMOTE_EXECUTION_ENABLED = os.environ.get("REMOTE_EXECUTION_ENABLED", "0") == "1"

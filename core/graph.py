@@ -49,6 +49,25 @@ def execute(request, cancelled=lambda: False, *, on_capacity=None):
 
 
 def _execute(request, cancelled, *, container):
+    from .execution_dispatch import try_run
+
+    output = bytearray()
+
+    def receive(chunk):
+        if len(output) + len(chunk) > 32 * 1024 * 1024:
+            raise IntegrationError(FAILURE)
+        output.extend(chunk)
+
+    terminal = try_run("graph", request, container.slot, cancelled, receive)
+    if terminal is not None:
+        if cancelled():
+            raise ReviewCancelled()
+        if terminal.get("error") or terminal["exit_code"] or terminal["oom"]:
+            raise IntegrationError(FAILURE)
+        try:
+            return json.loads(output)
+        except (ValueError, UnicodeError, RecursionError):
+            raise IntegrationError(FAILURE) from None
 
     image = settings.GRAPH_RUNNER_IMAGE
     volume = settings.GRAPH_CACHE_VOLUME

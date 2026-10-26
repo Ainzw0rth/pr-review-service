@@ -495,6 +495,13 @@ class GitHubCooldown(models.Model):
 class ExecutionWorker(models.Model):
     """Fleet identity, distinct from a same-host supervisor lifetime."""
 
+    enabled = models.BooleanField(default=False)
+    is_local = models.BooleanField(default=False)
+    allowed_capabilities = models.JSONField(default=list)
+    account_kinds = models.JSONField(default=list)
+    max_slots = models.PositiveSmallIntegerField(default=1)
+    software_version = models.CharField(max_length=64, blank=True)
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=80)
     credential_digest = models.CharField(max_length=64, unique=True)
@@ -515,3 +522,54 @@ class WorkerEnrollment(models.Model):
     digest = models.CharField(max_length=64, unique=True)
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)
+
+
+class ExecutionPlacement(models.Model):
+    job = models.OneToOneField(Job, on_delete=models.CASCADE, related_name="execution_placement")
+    worker = models.ForeignKey(ExecutionWorker, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(default=timezone.now)
+
+
+class ExecutionAssignment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    worker = models.ForeignKey(
+        ExecutionWorker, on_delete=models.PROTECT, related_name="assignments"
+    )
+    job = models.ForeignKey(Job, on_delete=models.PROTECT, null=True)
+    claim_token = models.CharField(max_length=36, blank=True)
+    generation = models.PositiveIntegerField(default=0)
+    token = models.UUIDField(default=uuid.uuid4, editable=False)
+    incarnation = models.CharField(max_length=32)
+    operation = models.CharField(max_length=16)
+    state = models.CharField(max_length=16, default="queued", db_index=True)
+    scope = models.CharField(max_length=64)
+    slot_index = models.PositiveSmallIntegerField()
+    input_hash = models.CharField(max_length=64)
+    encrypted_input = models.TextField()
+    result = models.JSONField(default=dict)
+    result_digest = models.CharField(max_length=64, blank=True)
+    output_bytes = models.PositiveIntegerField(default=0)
+    next_sequence = models.PositiveIntegerField(default=0)
+    cleanup_confirmed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField()
+
+
+class ExecutionOutput(models.Model):
+    assignment = models.ForeignKey(
+        ExecutionAssignment, on_delete=models.CASCADE, related_name="output"
+    )
+    sequence = models.PositiveIntegerField()
+    digest = models.CharField(max_length=64)
+    encrypted_data = models.TextField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["assignment", "sequence"], name="execution_output_sequence"
+            )
+        ]
+
+
+from .worker_keepalive_models import WorkerKeepalive  # noqa: E402,F401

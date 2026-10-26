@@ -17,7 +17,7 @@ MAX_BODY = 65536
 
 
 def _response(value, status=200):
-    response = JsonResponse(value, status=status)
+    response = JsonResponse(value, status=status, json_dumps_params={"separators": (",", ":")})
     response["Cache-Control"] = "no-store"
     return response
 
@@ -32,7 +32,7 @@ def _budget(request, action, identity=None):
         row = LoginAttempt.objects.select_for_update().get(pk=row.pk)
         if row.window_at <= now - timedelta(minutes=15):
             row.window_at, row.count = now, 0
-        if row.count >= (10 if action.endswith("enroll") else 1200):
+        if row.count >= (10 if action.endswith("enroll") else 12000 if action == "event" else 1200):
             return False
         row.count += 1
         row.save(update_fields=["count", "window_at"])
@@ -108,6 +108,25 @@ def worker_endpoint(request, action):
                 return _limited()
             worker, token = registry.enroll(data["code"], data["name"])
             return _response({"version": 1, "worker_id": str(worker.pk), "token": token}, 201)
+        if action != "heartbeat":
+            from . import execution_dispatch as dispatch
+
+            try:
+                if action == "claim":
+                    if set(data) != {"incarnation"}:
+                        raise ValueError()
+                    return _response({"assignment": dispatch.take(worker, data["incarnation"])})
+                handlers = {
+                    "input": dispatch.input_payload,
+                    "event": dispatch.append_output,
+                    "renew": dispatch.renew,
+                    "complete": dispatch.complete,
+                }
+                if action not in handlers:
+                    raise ValueError()
+                return _response(handlers[action](worker, data))
+            except dispatch.AssignmentConflict:
+                return _response({"error": "stale_assignment"}, 409)
         registry.heartbeat(worker, data)
         worker.refresh_from_db()
         return _response(

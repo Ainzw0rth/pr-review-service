@@ -9,3 +9,5 @@ var
 
 .worktrees
 worktrees
+
+.claude/distributed-workers-work

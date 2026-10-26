@@ -1,5 +1,6 @@
 """Disposable Docker tests. Docker CLI/daemon remain on the trusted worker side."""
 
+import base64
 import gzip
 import io
 import json
@@ -10,6 +11,8 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path, PurePosixPath
+
+from django.conf import settings
 
 from core.providers import ReviewCancelled
 
@@ -156,7 +159,45 @@ def run_tests(repository, archive, cancelled, *, on_capacity=None):
 def _run_tests(repository, archive, cancelled, *, container):
     if cancelled():
         raise ReviewCancelled()
+    from .execution_dispatch import try_run
+
     image, command = repository.test_image, repository.test_command
+    if not isinstance(archive, bytes) or len(archive) > MAX_ARCHIVE_BYTES:
+        raise RunnerError("Repository archive exceeds allowed size.")
+    output = bytearray()
+
+    def receive(chunk):
+        if len(output) + len(chunk) > 65536:
+            raise RunnerError("Invalid isolated test result.")
+        output.extend(chunk)
+
+    terminal = None
+    if settings.REMOTE_EXECUTION_ENABLED:
+        terminal = try_run(
+            "test",
+            {"image": image, "command": command, "archive": base64.b64encode(archive).decode()},
+            container.slot,
+            cancelled,
+            receive,
+        )
+    if terminal is not None:
+        if cancelled():
+            raise ReviewCancelled()
+        if terminal.get("error") or terminal["exit_code"] or terminal["oom"]:
+            raise RunnerError()
+        try:
+            result = json.loads(output)
+            if (
+                not isinstance(result, dict)
+                or set(result) != {"passed", "summary"}
+                or type(result["passed"]) is not bool
+                or not isinstance(result["summary"], str)
+                or len(result["summary"]) > 4096
+            ):
+                raise ValueError()
+            return result
+        except (ValueError, UnicodeError, RecursionError):
+            raise RunnerError("Invalid isolated test result.") from None
     name = container.slot.name
     # stdin transfers through the daemon API: no shared worker/host filesystem paths.
     with tempfile.TemporaryDirectory(prefix="pr-review-") as directory:

@@ -1,0 +1,118 @@
+name: Worker images
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish tested amd64 images to GHCR and attach digests to an existing release
+        type: boolean
+        default: false
+      version:
+        description: Existing release tag at this revision (vMAJOR.MINOR.PATCH); required for publishing
+        type: string
+        default: ''
+  release:
+    types: [published]
+  pull_request:
+    paths: ['execution/**', 'cli/**', 'Dockerfile', 'requirements.lock', 'compose.worker.yaml', 'scripts/setup*.py', 'core/tests/test_worker_setup.py', '.github/workflows/worker-release.yml']
+permissions:
+  contents: read
+concurrency:
+  group: worker-images-${{ github.event.release.tag_name || inputs.version || github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release source
+        if: github.event_name == 'release' || inputs.publish
+        run: |
+          [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected vMAJOR.MINOR.PATCH'; exit 1; }
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_VERSION^{commit}")"
+      - name: Installer unit tests (standard library only)
+        run: python3 -m unittest core.tests.test_worker_setup
+      - name: Build source images for verified target
+        run: |
+          docker build --platform linux/amd64 --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" -f execution/Dockerfile -t worker-agent:ci .
+          docker build --platform linux/amd64 --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" -f cli/Dockerfile -t worker-cli:ci .
+          docker build --platform linux/amd64 --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" -f Dockerfile -t worker-coordinator:ci .
+      - name: Smoke-test built images
+        run: |
+          docker run --rm --network none --entrypoint python worker-agent:ci -m execution.agent --help
+          docker run --rm --network none --entrypoint docker worker-agent:ci --version
+          docker run --rm --network none --entrypoint node worker-cli:ci --version
+          docker run --rm --network none --entrypoint ssh worker-coordinator:ci -V
+          docker run --rm --network none --entrypoint python worker-coordinator:ci -c 'import django; import core.deployment'
+      - name: Save the exact tested images for publication
+        if: github.event_name == 'release' || inputs.publish
+        run: |
+          docker save worker-agent:ci worker-cli:ci worker-coordinator:ci | gzip > worker-images.tar.gz
+          git rev-parse HEAD > source-revision.txt
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'release' || inputs.publish
+        with:
+          name: tested-worker-images
+          path: |
+            worker-images.tar.gz
+            source-revision.txt
+          compression-level: 0
+          retention-days: 1
+  publish:
+    needs: verify
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-24.04
+    # Registry publication and release-asset upload only; verification job is read-only.
+    permissions:
+      contents: write
+      packages: write
+    env:
+      RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-worker-images
+      - name: Validate release and authenticate registry
+        run: |
+          [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker load --input worker-images.tar.gz
+      - name: Publish exact tested images and record immutable digests
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          prefix = 'ghcr.io/' + os.environ['GITHUB_REPOSITORY'].lower()
+          version = os.environ['RELEASE_VERSION']
+          roles = {'agent': 'agent', 'model': 'cli', 'coordinator': 'coordinator'}
+          for component in roles.values():
+              ref = f'{prefix}/{component}:{version}'
+              existing = subprocess.run(['docker', 'manifest', 'inspect', ref], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              if existing.returncode == 0:
+                  raise SystemExit('Release image already exists; use a new version, never overwrite it.')
+          images = {}
+          for role, component in roles.items():
+              repository = f'{prefix}/{component}'
+              ref = f'{repository}:{version}'
+              subprocess.run(['docker', 'tag', f'worker-{component}:ci', ref], check=True)
+              subprocess.run(['docker', 'push', ref], check=True)
+              detail = json.loads(subprocess.check_output(['docker', 'image', 'inspect', ref]))[0]
+              pinned = [value for value in detail['RepoDigests'] if value.startswith(repository + '@')]
+              if len(pinned) != 1 or not re.fullmatch(re.escape(repository) + r'@sha256:[0-9a-f]{64}', pinned[0]):
+                  raise SystemExit('Registry digest unavailable; release is incomplete.')
+              images[role] = pinned[0]
+          manifest = {'version': version, 'protocol': 1, 'platform': 'linux/amd64',
+                      'revision': Path('source-revision.txt').read_text().strip(), 'images': images}
+          Path('worker-release.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          PY
+      - name: Attach digest manifest to the release
+        run: gh release upload "$RELEASE_VERSION" worker-release.json --repo "$GITHUB_REPOSITORY"
+      - name: Clear registry credentials
+        if: always()
+        run: docker logout ghcr.io

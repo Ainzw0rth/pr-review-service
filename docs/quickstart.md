@@ -105,3 +105,27 @@ login volumes. Use [deployment](deployment.md) for updates and
 [configuration](configuration.md#model-provider-choose-api-or-cli) for provider changes.
 
 </details>
+
+## Optional: add an execution host
+
+Keep the coordinator/database installation above. On a second Linux amd64 Docker host,
+check out the same verified revision and run:
+
+```sh
+python3 scripts/setup.py --mode worker --state-dir /data/review-worker
+```
+
+Provide the coordinator's HTTPS origin and an owner-generated pairing code from
+**Workers**. Authenticate each selected provider locally using the intended shared
+account; never copy rotating login files between hosts. The owner must bind shared
+account groups and verify readiness before enabling remote scheduling.
+
+Interrupted worker setup resumes with the same mode and directory:
+
+```sh
+python3 scripts/setup.py --mode worker --state-dir /data/review-worker --resume
+```
+
+This starts only an execution agent, not another database/admin/dashboard. See
+[worker installation and recovery](workers.md) for prerequisites, private configuration,
+source builds, release digests and nonpublishing verification.

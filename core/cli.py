@@ -36,6 +36,7 @@ class CLIStream:
         self.coverage = False
         self.missing_evidence = []
         self.session_id = None
+        self.session_relocation = None
         self.evidence_ids = {
             identifier
             for section, value in (context or {}).items()
@@ -152,6 +153,22 @@ class CLIStream:
             ):
                 self.session_id = identifier
         elif kind == "runner_session" and type(event.get("resumed")) is bool:
+            if "key" in event or "previous_key" in event:
+                relocation = {key: event.get(key) for key in ("previous_key", "key")}
+                if (
+                    event["resumed"]
+                    or relocation["key"] == relocation["previous_key"]
+                    or any(
+                        not isinstance(value, str)
+                        or not re.fullmatch(
+                            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", value
+                        )
+                        for value in relocation.values()
+                    )
+                    or self.session_relocation not in (None, relocation)
+                ):
+                    raise ProviderError("invalid", detail="cli_protocol")
+                self.session_relocation = relocation
             self.diagnostics["cli_session_resumed"] = event["resumed"]
         elif kind == "runner_exit":
             code, signal = event.get("code"), event.get("signal")
@@ -371,6 +388,114 @@ def require_auth_coordination(*, sessions=False):
         raise ProviderError("invalid", detail="cli_setup") from None
 
 
+def _require_local_cli(provider, slot):
+    if getattr(provider, "cli_sessions", None):
+        require_auth_coordination(sessions=True)
+    elif slot.admission_limit is None or slot.admission_limit > 1:
+        require_auth_coordination()
+
+
+def _cli_payload(provider, context, recovery, task):
+    from .providers import _wire_schema
+
+    schema, system, _ = review_contract(task)
+    session = getattr(provider, "cli_sessions", {}).get(task)
+    if session and recovery is not None:
+        session = {**session, "id": None}
+    return {
+        "kind": provider.kind,
+        "model": provider.model,
+        "effort": getattr(provider, "effort", ""),
+        "context": context,
+        "schema": _wire_schema(schema),
+        "system": system,
+        "recovery": recovery,
+        "session": session,
+    }
+
+
+def _cli_result(parser, session, task, exit_code, oom=False):
+    if oom:
+        raise ProviderError("invalid", detail="cli_memory")
+    result = parser.result(exit_code)
+    if not parser.coverage:
+        error = ProviderError("invalid", detail="cli_coverage")
+        error.missing_evidence = parser.missing_evidence
+        raise error
+    if parser.session_relocation and (
+        not session
+        or not session.get("id")
+        or parser.session_relocation["previous_key"] != session["key"]
+    ):
+        raise ProviderError("invalid", detail="cli_protocol")
+    if session:
+        if parser.session_id is None:
+            raise ProviderError("invalid", detail="cli_protocol")
+        parser.diagnostics["cli_session"] = {
+            "key": session["key"],
+            "id": parser.session_id,
+            "task": task,
+            **(parser.session_relocation or {}),
+        }
+    return result
+
+
+def _review_cli_remote(
+    provider,
+    context,
+    cancelled,
+    slot,
+    *,
+    on_response=None,
+    on_activity=None,
+    recovery=None,
+    task="review",
+):
+    from .execution_dispatch import try_run
+
+    payload = _cli_payload(provider, context, recovery, task)
+    parser = CLIStream(provider.kind, context, on_activity, task=task)
+    pending = bytearray()
+    last_report = 0
+    last_diagnostics = None
+    dispatched = False
+
+    def chunk_received(chunk):
+        nonlocal pending, last_report, last_diagnostics, dispatched
+        dispatched = True
+        pending.extend(chunk)
+        while b"\n" in pending:
+            line, _, rest = pending.partition(b"\n")
+            pending = bytearray(rest)
+            if line.strip():
+                parser.line(line)
+                if parser.error and parser.error.kind == "attention":
+                    raise parser.error
+        if len(pending) > MAX_RESPONSE_BYTES:
+            raise ProviderError("invalid", detail="response_too_large")
+        now = time.monotonic()
+        if on_response and now - last_report >= 1 and parser.diagnostics != last_diagnostics:
+            last_diagnostics = dict(parser.diagnostics)
+            on_response(last_diagnostics)
+            last_report = now
+
+    try:
+        terminal = try_run("model", payload, slot, cancelled, chunk_received)
+        if terminal is None:
+            return None
+        dispatched = True
+        if cancelled():
+            raise ReviewCancelled()
+        if pending.strip():
+            parser.line(pending)
+        if terminal.get("error"):
+            raise ProviderError("unavailable", detail="cli_setup")
+        return _cli_result(parser, payload["session"], task, terminal["exit_code"], terminal["oom"])
+    finally:
+        if dispatched and on_response:
+            on_response(dict(parser.diagnostics))
+
+
 def _review_cli_once(provider, context, cancelled, *, on_capacity=None, budget=None, **kwargs):
     from contextlib import nullcontext
 
@@ -380,10 +505,8 @@ def _review_cli_once(provider, context, cancelled, *, on_capacity=None, budget=N
     volume, scope = cli_scope(provider.kind)
     priority = 0 if kwargs.get("task") == "review_synthesis" else 1
     with admit_cli(scope, cancelled, on_wait=on_capacity, priority=priority) as slot:
-        if getattr(provider, "cli_sessions", None):
-            require_auth_coordination(sessions=True)
-        elif slot.admission_limit is None or slot.admission_limit > 1:
-            require_auth_coordination()
+        if not settings.REMOTE_EXECUTION_ENABLED:
+            _require_local_cli(provider, slot)
         container = Container(slot, _docker, volume=volume)
         container.cleanup()  # Admission housekeeping is not model active time.
         with budget.active() if budget else nullcontext():
@@ -394,6 +517,11 @@ def _review_cli_once(provider, context, cancelled, *, on_capacity=None, budget=N
                 return cancelled()
 
             try:
+                if settings.REMOTE_EXECUTION_ENABLED:
+                    remote = _review_cli_remote(provider, context, active_cancelled, slot, **kwargs)
+                    if remote is not None:
+                        return remote
+                    _require_local_cli(provider, slot)
                 return _review_cli_active(
                     provider,
                     context,
@@ -418,7 +546,6 @@ def _review_cli_active(
     container,
     volume,
 ):
-    from .providers import _wire_schema
     from .runner import RunnerError, _docker
 
     if cancelled():
@@ -426,11 +553,9 @@ def _review_cli_active(
     image = settings.CLI_RUNNER_IMAGE
     name = container.slot.name
     args = container_arguments(provider.kind, name, image, volume)
-    schema, system, _ = review_contract(task)
+    payload = _cli_payload(provider, context, recovery, task)
     parser = CLIStream(provider.kind, context, on_activity, task=task)
-    session = getattr(provider, "cli_sessions", {}).get(task)
-    if session and recovery is not None:
-        session = {**session, "id": None}
+    session = payload["session"]
     process = None
     try:
         try:
@@ -438,18 +563,7 @@ def _review_cli_active(
         except RunnerError:
             raise ProviderError("auth", detail="cli_auth") from None
         name = container.create(args)
-        payload = json.dumps(
-            {
-                "kind": provider.kind,
-                "model": provider.model,
-                "effort": getattr(provider, "effort", ""),
-                "context": context,
-                "schema": _wire_schema(schema),
-                "system": system,
-                "recovery": recovery,
-                "session": session,
-            }
-        )
+        payload = json.dumps(payload)
         with tempfile.TemporaryFile() as request:
             request.write(payload.encode())
             request.seek(0)
@@ -502,22 +616,13 @@ def _review_cli_active(
             if cancelled():
                 raise ReviewCancelled()
             state = json.loads(_docker(["inspect", "--format={{json .State}}", name]))
-            if state.get("OOMKilled"):
-                raise ProviderError("invalid", detail="cli_memory")
-            result = parser.result(state.get("ExitCode", 1) or process.returncode)
-            if not parser.coverage:
-                error = ProviderError("invalid", detail="cli_coverage")
-                error.missing_evidence = parser.missing_evidence
-                raise error
-            if session:
-                if parser.session_id is None:
-                    raise ProviderError("invalid", detail="cli_protocol")
-                parser.diagnostics["cli_session"] = {
-                    "key": session["key"],
-                    "id": parser.session_id,
-                    "task": task,
-                }
-            return result
+            return _cli_result(
+                parser,
+                session,
+                task,
+                state.get("ExitCode", 1) or process.returncode,
+                state.get("OOMKilled", False),
+            )
     except RunnerError:
         raise ProviderError("unavailable", detail="cli_setup") from None
     finally:

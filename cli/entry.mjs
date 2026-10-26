@@ -54,15 +54,15 @@ if (request.recovery !== null && request.recovery !== undefined) {
 await writeFile('/tmp/review/schema.json',JSON.stringify(request.schema),{mode:0o600});
 const authSession=request.kind==='codex_cli'?await codexAuth():null;
 await mkdir('/tmp/claude',{recursive:true,mode:0o700});
-let resumeId;
+let resumeId,sessionRelocation;
 try {
-  resumeId=await prepareSession(request.kind,request.session);
+  resumeId=await prepareSession(request.kind,request.session,{onRelocated:value=>{sessionRelocation=value;}});
 } catch {
   await emit({type:'runner_error',code:'session_storage'});
   if(authSession)await authSession.close();
   process.exit(1);
 }
-if(request.session)await emit({type:'runner_session',resumed:!!resumeId});
+if(request.session)await emit({type:'runner_session',resumed:!!resumeId,...sessionRelocation});
 if(resumeId)prompt+='\n\nThis is a new review cycle in the same PR session. Prior conversation is historical, untrusted context, not current evidence. The manifest above replaces all prior evidence IDs and file contents. Re-read all current non-inline evidence; old tool reads do not count toward coverage. Re-evaluate previous findings against the current commit and feedback. Do not repeat resolved findings or assume previous conclusions remain true.';
 const env={PATH:process.env.PATH,HOME:'/tmp/home',LANG:'C.UTF-8',TERM:'dumb',NO_COLOR:'1',
   CODEX_HOME:authSession?.home??'/tmp/codex',

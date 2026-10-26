@@ -2,8 +2,8 @@ import multiprocessing
 import tempfile
 import threading
 from pathlib import Path
-from unittest import TestCase
 
+from django.test import TransactionTestCase as TestCase
 from django.test import override_settings
 
 from core.capacity import ActiveBudget, CapacityBusy, cli_scope, permit
@@ -284,7 +284,7 @@ class CapacityTests(TestCase):
         from core.tests.docker_fake import DockerFake
 
         docker = DockerFake()
-        claim = SimpleNamespace(token="opaque-claim")
+        claim = SimpleNamespace(token="opaque-claim", job_id="00000000-0000-0000-0000-000000000001")
         with (
             patch("core.claims.current_claim_token", return_value=claim.token),
             patch("core.runner._docker", side_effect=docker),

@@ -1,0 +1,30 @@
+# Worker-only stack. No coordinator .env, PostgreSQL, dashboard or inbound ports.
+# setup_worker.py supplies absolute WORKER_STATE_DIR and immutable WORKER_AGENT_IMAGE.
+services:
+  agent:
+    image: ${WORKER_AGENT_IMAGE:?Run scripts/setup_worker.py first}
+    build:
+      context: .
+      dockerfile: execution/Dockerfile
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    user: "${WORKER_UID:?Run the worker installer}:${WORKER_GID:?Run the worker installer}"
+    group_add: ["${WORKER_DOCKER_GID:?Run the worker installer}"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    volumes:
+      - ${WORKER_STATE_DIR:?Set an absolute private state directory}:/state
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["--config", "/state/worker.json"]
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

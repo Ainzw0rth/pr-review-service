@@ -1,9 +1,9 @@
 from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase, override_settings
+from django.test import TransactionTestCase, override_settings
 
 
-class GraphTests(SimpleTestCase):
+class GraphTests(TransactionTestCase):
     def test_disabled_does_not_download_or_start_container(self):
         from core.graph import collect
 

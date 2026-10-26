@@ -51,10 +51,20 @@ the final step explicitly enables it. Existing installation? Use the deployment 
 | [Quickstart](docs/quickstart.md) | Guided setup and your first review |
 | [Manual installation](docs/installation.md) | Localhost, HTTPS server, first login, public webhook forwarding |
 | [Configuration](docs/configuration.md) | Add/Edit/Pause repositories, credentials, providers, review behavior |
+| [Remote workers](docs/workers.md) | Add an outbound-only execution host; independent local provider login |
 | [Deployment](docs/deployment.md) | Proxy, concurrency, drained updates, backups and recovery |
 | [Optional integrations](docs/optional-integrations.md) | Google Sheets, summary journal, Telegram and graphs |
 | [Troubleshooting](docs/troubleshooting.md) | Startup, login, webhook, provider and queue diagnostics |
 | [Existing SQLite migration](docs/postgres-cutover.md) | Supervised transfer of an existing installation |
+
+For an additional execution host (not another coordinator):
+
+```sh
+python3 scripts/setup.py --mode worker --state-dir /data/review-worker
+```
+
+Standalone remains the default. Worker setup requires a coordinator HTTPS origin and
+owner-issued pairing code; it does not create a database or dashboard. [Worker guide](docs/workers.md).
 
 ## Architecture
 

@@ -3,7 +3,7 @@ FROM python:3.12-slim@sha256:ddb0207ae1f0356c2b724d740769b0c5f5f51cc54a0525178f7
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.lock .
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client-17 openssh-client && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.lock && useradd --uid 10001 --create-home app
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY . .

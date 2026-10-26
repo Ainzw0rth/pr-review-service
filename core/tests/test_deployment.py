@@ -73,10 +73,25 @@ class DeployScriptTests(TestCase):
             if args[-2:] == ("status", "--json"):
                 # Initial preflight, then worker cleanup still running, then acknowledged.
                 if len([x for x in calls if x[-2:] == ("status", "--json")]) == 1:
-                    return json.dumps({"draining": False, "idle": False, "active_jobs": 0})
+                    return json.dumps(
+                        {
+                            "draining": False,
+                            "idle": False,
+                            "active_jobs": 0,
+                            "remote_active": 0,
+                            "remote_quarantined": 0,
+                        }
+                    )
                 idle, token = next(polls)
                 return json.dumps(
-                    {"draining": True, "idle": idle, "active_jobs": 0, "worker_token": token}
+                    {
+                        "draining": True,
+                        "idle": idle,
+                        "active_jobs": 0,
+                        "worker_token": token,
+                        "remote_active": 0,
+                        "remote_quarantined": 0,
+                    }
                 )
             if args[-2:] == ("-q", "worker"):
                 return "worker-container"
@@ -122,7 +137,16 @@ class DeployScriptTests(TestCase):
     def test_preexisting_pause_and_old_protocol_stop_before_build(self):
         from scripts.deploy import deploy
 
-        for response in [{"draining": True, "idle": True, "active_jobs": 0}, {}]:
+        for response in [
+            {
+                "draining": True,
+                "idle": True,
+                "active_jobs": 0,
+                "remote_active": 0,
+                "remote_quarantined": 0,
+            },
+            {},
+        ]:
             with self.subTest(response=response):
                 run = Mock(return_value=json.dumps(response))
                 with self.assertRaises(RuntimeError):

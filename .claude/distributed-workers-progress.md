@@ -26,13 +26,19 @@ Foundation commit 22c1b89 was pushed and deployed from this worktree on 2026-10-
 - One earlier broad run was invalidated by editing imported code during execution. Frozen-tree run above supersedes it. A missing staticfiles directory warning is expected in this source-only worktree; no UI has been changed or visually checked.
 - Temporary PostgreSQL test container used an isolated tmpfs database; production database and containers were not used for tests.
 
-## Not complete
+## Current implementation — 2026-10-26
 
-Task 1 still needs complete operation-specific envelopes, test/graph integration and remote-independent runner extraction. Task 2 has registry plus enrollment/heartbeat endpoints and PostgreSQL enrollment-race coverage; local supervisor registration, owner pairing UI and complete capability/account binding remain. No remote scheduling, HTTP agent, UI, external keepalive, worker installer or distributed deployment changes exist yet. Foundation is deployed on Contabo, but remote review execution must remain disabled until the remaining tasks are implemented.
+Distributed phase dispatch, durable cleanup fencing, stdlib agent, all three execution seams, session relocation, owner Workers UI, dedicated SSH scheduler, source installer and distributed deployment safeguards are implemented. Local/remote/probe account limits remain coordinator-owned. Remote code cannot access the database or publishing secrets.
 
-## Next
+Final frozen-tree PostgreSQL run: **927 tests passed, zero skips**. Prior SQLite run: 923 passed, 10 skips (before final session/capacity refinements). Node suite: 28 passed, 3 native/opt-in skipped. Ruff and format checks pass for application sources; no migration drift. Independent reviews found and verified fixes for stale incarnation, rollback capacity fencing, active-budget queueing, output upload renewal, session relocation and safe installer update locking.
 
-Complete operation-specific execution extraction, then durable remote assignment/account permits with PostgreSQL race tests. Preserve existing global account admission until replacement is fully tested.
+Rendered Workers UI checked at 375/768/1440px: theme consistency, overflow, keyboard controls, polling focus preservation, reduced motion and denied-access handling. No browser JS errors in fixture checks. Production UI verification follows deployment.
+
+InstaBox independently authenticated both providers; their credential files were validated locally without exporting tokens. Worker enrolled disabled, source images built and private installer configuration validated on the actual non-root host. Runtime uses host UID/GID and Docker socket group, keeping private file permissions intact. Scheduling stays disabled until nonpublishing live probes pass.
+
+Release-manifest installer support and audited operator reconciliation are complete; additional 27 installer tests and 6 PostgreSQL reconciliation tests pass. Remaining: image publication, final push/deploy, start/validate/enable InstaBox, switch to integrated keepalive, observe idle-window behavior. No never-pauses guarantee.
+
+Additional user request: Ainzw0rth-config installed on InstaBox with independent GitHub login; skills/plugins/profile launchers verified; required sync successfully pushed. No Contabo credentials/configuration copied or modified.
 
 ## Live rollout — 2026-10-26
 
