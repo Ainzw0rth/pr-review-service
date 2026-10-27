@@ -1,9 +1,11 @@
 import base64
+from datetime import timedelta
 
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from core import worker_registry as registry
 from core.models import WorkerEnrollment, WorkerOwner
@@ -36,6 +38,30 @@ class WorkersUITests(TestCase):
         self.assertNotIn(self.token, str(state))
         self.assertNotIn(self.worker.credential_digest, str(state))
         self.assertIn("no-store", response.headers["Cache-Control"])
+
+    def test_liveness_is_separate_from_scheduling_and_expires(self):
+        self.worker.heartbeat_at = timezone.now()
+        self.worker.save(update_fields=["heartbeat_at"])
+
+        def remote():
+            return next(
+                w
+                for w in self.client.get(reverse("workers_state")).json()["workers"]
+                if w["id"] == str(self.worker.pk)
+            )
+
+        self.assertTrue(remote()["alive"])
+        self.assertEqual(remote()["connection"], "Online")
+        self.assertEqual(remote()["available"], 0)
+        self.worker.heartbeat_at = timezone.now() - timedelta(seconds=61)
+        self.worker.save(update_fields=["heartbeat_at"])
+        self.assertFalse(remote()["alive"])
+        self.assertEqual(remote()["connection"], "Offline")
+        self.worker.heartbeat_at = timezone.now()
+        self.worker.revoked_at = timezone.now()
+        self.worker.save(update_fields=["heartbeat_at", "revoked_at"])
+        self.assertFalse(remote()["alive"])
+        self.assertEqual(remote()["connection"], "Revoked")
 
     def test_pairing_only_post_and_shown_once(self):
         response = self.client.post(reverse("worker_action"), {"action": "pair"})

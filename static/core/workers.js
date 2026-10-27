@@ -24,6 +24,7 @@
       data.workers.forEach(worker => {
         const card = root.querySelector(`[data-worker="${CSS.escape(worker.id)}"]`);
         if (!card) { document.querySelector('#fleet-change').hidden = false; return; }
+        card.dataset.connected = String(worker.alive);
         card.querySelectorAll('[data-field]').forEach(node => {
           let value = worker[node.dataset.field];
           if (node.dataset.field === 'keepalive') value = worker.keepalive?.status || 'Not configured';
@@ -33,8 +34,10 @@
           node.textContent = value ?? 'Unknown';
         });
       });
+      root.dataset.stale = 'false';
       status.textContent = `Updated ${new Date(data.updated_at).toLocaleTimeString()}. Live updates every 10 seconds.`;
     } catch (error) {
+      root.dataset.stale = 'true';
       status.textContent = stopped ? error.message : 'Updates unavailable. Displayed data may be stale; retrying.';
     } finally { clearTimeout(timeout); busy = false; }
   }

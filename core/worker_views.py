@@ -50,6 +50,8 @@ def fleet_state():
             if fresh
             else "Offline",
             "connected": fresh,
+            "alive": fresh,
+            "connection": "Online" if fresh else "Offline",
             "available": None,
             "active": len(local_claims),
             "problems": [] if fresh else ["No fresh local supervisor heartbeat"],
@@ -81,6 +83,11 @@ def fleet_state():
         )
     for worker in ExecutionWorker.objects.order_by("created_at"):
         state = registry.availability(worker)
+        alive = bool(
+            worker.heartbeat_at
+            and worker.heartbeat_at > now - timedelta(seconds=registry.STALE_SECONDS)
+            and not worker.revoked_at
+        )
         connected = state in {"ready", "busy", "draining"}
         problems = []
         if not settings.REMOTE_EXECUTION_ENABLED:
@@ -112,6 +119,8 @@ def fleet_state():
                 "name": worker.name,
                 "availability": state.title(),
                 "connected": connected,
+                "alive": alive,
+                "connection": "Revoked" if worker.revoked_at else "Online" if alive else "Offline",
                 "available": max(0, min(worker.max_slots, worker.slots) - worker.active)
                 if connected and not problems and not worker.draining
                 else 0,
